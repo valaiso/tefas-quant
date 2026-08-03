@@ -178,7 +178,7 @@ def run_tefas_sync_and_scoring():
     labels = [
         "TEFAS API'den Piyasa Verileri Taranıyor (Hızlı Keşif)",
         "Yeni Fon Keşfi (Maks 100 Yeni Fon) & Mevcut Fon Eşlemesi",
-        "Eski ve Yeni Fiyat Geçmişleri Güncelleniyor (Derin Sync)",
+        "Eski ve Yeni Fiyat Geçmişleri Güncelleniyor (Hızlı Sync - 1.3 Yıl)",
         "100 Puanlık Kantitatif Skor ve Kalite Matrisi Hesaplanıyor"
     ]
     
@@ -209,7 +209,7 @@ def run_tefas_sync_and_scoring():
         today = datetime.date.today()
         recent_start = today - datetime.timedelta(days=35)
         
-        # AŞAMA 1: Sadece son 35 günlük hızlı veri çekerek tüm piyasayı tara
+        # AŞAMA 1: Son 35 günlük hızlı veri çekerek tüm piyasayı tara
         try:
             recent_df = tefas_crawler.fetch(start=recent_start.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'))
         except Exception as e:
@@ -224,7 +224,7 @@ def run_tefas_sync_and_scoring():
         recent_df = recent_df.drop_duplicates(subset=['code', 'date'])
         all_fetched_codes = set(recent_df['code'].unique()) if 'code' in recent_df.columns else set()
         
-        # Veritabanında OLMAYAN yepyeni fonları bul ve MAKSİMUM 100 tanesini seç
+        # Veritabanında OLMAYAN yepyeni fonları bul (Maks 100 fon)
         brand_new_codes = [c for c in sorted(list(all_fetched_codes)) if c not in existing_codes]
         selected_new_codes = brand_new_codes[:100]
         new_funds_detected = len(selected_new_codes)
@@ -232,11 +232,10 @@ def run_tefas_sync_and_scoring():
         update_ui(statuses, f"Eski Fonlar: {old_count} | Eklenen Yeni Fon: +{new_funds_detected}")
         progress_bar.progress(40)
         
-        # Bu senkronizasyonda işlenecek küme = Eski Fonlar + Maksimum 100 Yeni Fon
         allowed_codes = existing_codes.union(set(selected_new_codes))
         recent_df = recent_df[recent_df['code'].isin(allowed_codes)]
         
-        # 2. Fon tanımlarını veritabanında kaydet/güncelle
+        # 2. Fon tanımlarını kaydet/güncelle
         for code in allowed_codes:
             match = recent_df[recent_df['code'] == code]
             title, category = code, "Diğer"
@@ -252,42 +251,40 @@ def run_tefas_sync_and_scoring():
             
         conn.commit()
 
-        # ID Haritasını al
         funds_map = pd.read_sql("SELECT id, code FROM funds", con=conn).set_index('code')['id'].to_dict()
         recent_df['fund_id'] = recent_df['code'].map(funds_map)
         recent_df = recent_df.dropna(subset=['fund_id'])
         
-        # Son 35 günün verisini SQLite'a toplu hızlı yaz (executemany)
         price_records = [(int(row['fund_id']), str(row['date'])[:10], float(row['price'])) for _, row in recent_df.iterrows()]
         cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", price_records)
         conn.commit()
 
-        # AŞAMA 2: 5 Yıllık Derin Senkronizasyon (Sadece geçmiş verisi eksik/yeni fonlar için)
+        # AŞAMA 2: Ultra Hızlı Geçmiş Senkronizasyonu (500 Gün / 180'er Günlük Parçalar)
         statuses = [2, 2, 1, 0]
         progress_bar.progress(60)
         
-        # Veritabanında 60 günden az verisi olan (yeni eklenen) fonları tespit et
+        # Veritabanında 60 günden az verisi olan fonları bul
         counts_df = pd.read_sql("SELECT f.code, COUNT(p.date) as cnt FROM funds f LEFT JOIN fund_daily_prices p ON f.id = p.fund_id GROUP BY f.code", con=conn)
         needing_history_codes = set(counts_df[counts_df['cnt'] < 60]['code'].tolist())
         
         if needing_history_codes:
-            update_ui(statuses, f"{len(needing_history_codes)} adet yeni/eksik fon için 5 yıllık geçmiş indiriliyor...")
+            update_ui(statuses, f"{len(needing_history_codes)} yeni fon için 1.3 yıllık geçmiş indiriliyor...")
             
-            start_5y = today - datetime.timedelta(days=5 * 365)
-            end_5y = today - datetime.timedelta(days=30) # Son 30 günü zaten yukarıda çektik
+            # 5 yıl yerine 500 gün (1.3 yıl) çekiyoruz -> Skorlama için 365 gün yettiğinden %100 uyumlu
+            start_hist = today - datetime.timedelta(days=500)
+            end_hist = today - datetime.timedelta(days=30)
             
-            curr_start = start_5y
-            while curr_start < end_5y:
-                curr_end = min(curr_start + datetime.timedelta(days=90), end_5y)
+            curr_start = start_hist
+            while curr_start < end_hist:
+                curr_end = min(curr_start + datetime.timedelta(days=180), end_hist) # 90 gün yerine 180 gün
                 s_str = curr_start.strftime('%Y-%m-%d')
                 e_str = curr_end.strftime('%Y-%m-%d')
                 
-                update_ui(statuses, f"5 Yıllık Geçmiş Çekiliyor: {curr_start.strftime('%d.%m.%Y')} - {curr_end.strftime('%d.%m.%Y')}")
+                update_ui(statuses, f"Geçmiş Veri Çekiliyor: {curr_start.strftime('%d.%m.%Y')} - {curr_end.strftime('%d.%m.%Y')}")
                 
                 try:
                     chunk_df = tefas_crawler.fetch(start=s_str, end=e_str)
                     if chunk_df is not None and not chunk_df.empty:
-                        # ANINDA SADECE İHTİYACIMIZ OLAN FONLARA FİLTRELE (RAM kilitlenmesini engeller)
                         chunk_df = chunk_df[chunk_df['code'].isin(needing_history_codes)]
                         if not chunk_df.empty:
                             chunk_df['fund_id'] = chunk_df['code'].map(funds_map)
@@ -298,10 +295,10 @@ def run_tefas_sync_and_scoring():
                 except Exception as e:
                     print(f"⚠️ Parça çekme uyarısı ({s_str} - {e_str}): {e}")
                 
-                time.sleep(1.0)
+                time.sleep(0.2) # Bekleme süresi 0.2 saniyeye indirildi
                 curr_start = curr_end + datetime.timedelta(days=1)
         else:
-            update_ui(statuses, "Tüm fonların 5 yıllık geçmişi zaten tam, sadece güncel fiyatlar tazelendi.")
+            update_ui(statuses, "Tüm fonların geçmişi tam, sadece güncel fiyatlar güncellendi.")
 
         # AŞAMA 3: Skorlama Matrisi Hesaplama
         statuses = [2, 2, 2, 1]
@@ -321,7 +318,7 @@ def run_tefas_sync_and_scoring():
                 INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal, letter_grade) VALUES (?, ?, ?, ?, ?, ?)
             """, (f_id, end_date, float(score), float(confidence), signal, letter_grade))
             
-            if idx % 25 == 0 or idx == total_funds_to_score:
+            if idx % 50 == 0 or idx == total_funds_to_score:
                 update_ui(statuses, f"Skorlanan: ({idx}/{total_funds_to_score}) fon")
                 
         conn.commit()
@@ -337,9 +334,9 @@ def run_tefas_sync_and_scoring():
         progress_bar.progress(100)
         
         if new_funds_detected > 0:
-            msg = f"Başarılı! Toplam Fon: {total_after} (Eski: {old_count} | Eklenen Yeni Fon: +{new_funds_detected}). Tüm fonların güncel ve geçmiş verileri senkronize edildi."
+            msg = f"Başarılı! Toplam Fon: {total_after} (Eski: {old_count} | Eklenen Yeni Fon: +{new_funds_detected}). Tüm fonlar senkronize edildi."
         else:
-            msg = f"Başarılı! Veritabanında olmayan yeni fon bulunamadı. Mevcut {total_after} fonun en güncel verileri ve skorları yenilendi."
+            msg = f"Başarılı! Yeni fon bulunamadı. Mevcut {total_after} fonun en güncel verileri ve skorları yenilendi."
             
         return True, msg
     except Exception as e:

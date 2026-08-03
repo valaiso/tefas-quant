@@ -15,21 +15,36 @@ st.markdown("""
     <style>
     .main { background-color: #0e1117; color: #c9d1d9; }
     .stMetric { background-color: #161b22; padding: 15px; border-radius: 8px; border: 1px solid #30363d; }
-    .signal-buy { color: #3fb950; font-weight: bold; }
-    .signal-watch { color: #d29922; font-weight: bold; }
-    .signal-sell { color: #f85149; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. VERİTABANI BAĞLANTISI ---
-@st.cache_resource
-def get_db_connection():
-    # Güvenli dosya yolu (Streamlit sunucusu için)
-    db_path = os.path.join(os.getcwd(), "tefas.db")
+# --- 2. VERİTABANI VE TABLO OLUŞTURMA ---
+def init_db():
+    db_path = "tefas.db"
     conn = sqlite3.connect(db_path, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS funds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE,
+            name TEXT,
+            category TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fund_scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fund_id INTEGER,
+            date TEXT,
+            total_score REAL,
+            signal TEXT,
+            FOREIGN KEY (fund_id) REFERENCES funds(id)
+        )
+    """)
+    conn.commit()
     return conn
 
-conn = get_db_connection()
+conn = init_db()
 
 # --- 3. YAN MENÜ ---
 st.sidebar.markdown("## ⚡ TEFAS QUANT TERMINAL")
@@ -42,20 +57,17 @@ menu = st.sidebar.radio(
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
 
-# --- 4. KESİN ÇÖZÜM: HATA YAKALAMA (TRY-EXCEPT) ---
-@st.cache_data(ttl=60)
+# --- 4. HATA KORUMALI VERİ YÜKLEME ---
 def load_data():
     try:
         f_df = pd.read_sql("SELECT id, code, name, category FROM funds", con=conn)
         s_df = pd.read_sql("SELECT * FROM fund_scores", con=conn)
         return f_df, s_df
-    except:
-        # Eğer tablo yoksa UYGULAMAYI ÇÖKERTME, sadece boş veri döndür!
+    except Exception:
         return pd.DataFrame(), pd.DataFrame()
 
 funds_df, scores_df = load_data()
 
-# Veri varsa birleştir, yoksa boş DataFrame bırak
 if not scores_df.empty and not funds_df.empty:
     latest_date = scores_df['date'].max()
     latest_scores = scores_df[scores_df['date'] == latest_date].copy()
@@ -105,11 +117,8 @@ if menu == "🏠 Ana Dashboard":
                     st.session_state.favorites.append(row['code'])
                 st.rerun()
     else:
-        st.info("⚠️ Veritabanında henüz skor verisi bulunamadı. Veriler arka planda güncellendiğinde buraya yansıyacaktır.")
+        st.info("⚠️ Veritabanında henüz skor verisi bulunamadı. Veriler yüklendiğinde buraya yansıyacaktır.")
 
-# ==========================================
-# MODÜL 2: FON TARAMA & FİLTRELEME
-# ==========================================
 elif menu == "🔍 Fon Tarama & Filtreleme":
     st.title("🔍 Gelişmiş Fon Tarama Matrisi")
     st.markdown("---")
@@ -130,9 +139,6 @@ elif menu == "🔍 Fon Tarama & Filtreleme":
     else:
         st.warning("Görüntülenecek veri yok.")
 
-# ==========================================
-# DİĞER MODÜLLER (Boş Durum Korumalı)
-# ==========================================
 elif menu == "⭐ Favori Sepetim":
     st.title("⭐ Takip Ettiğim Favori Fonlar")
     st.markdown("---")

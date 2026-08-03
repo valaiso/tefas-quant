@@ -113,7 +113,7 @@ def init_db():
 
 conn = init_db()
 
-# --- 3. YAN MENÜ & NİTELİKLİ FON FİLTRELEME AYARI ---
+# --- 3. YAN MENÜ & SOL ALT KOMPAKT NİTELİKLİ FON FİLTRESİ ---
 st.sidebar.markdown("## ⚡ INSTITUTIONAL QUANT")
 
 current_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
@@ -130,10 +130,6 @@ except Exception:
 st.sidebar.markdown(f"🔄 **Son Güncelleme:** `{last_sync_str}`")
 st.sidebar.markdown("---")
 
-include_qualified = st.sidebar.checkbox("🔒 Nitelikli Yatırımcı Fonlarını Dahil Et", value=False, help="İşaretlenmezse; Serbest, Özel, Gayrimenkul ve Girişim Sermayesi gibi sadece nitelikli yatırımcıya açık fonlar sistemden otomatik olarak hariç tutulur.")
-
-st.sidebar.markdown("---")
-
 menu = st.sidebar.radio(
     "Navigasyon",
     ["⚡ Ana Dashboard", "🔄 Evren Senkronizasyonu", "🔍 Fon Evreni & Yaş Filtresi", "💼 Portföyüm", "⭐ Favori Sepetim", "📊 Fon Detay & AI Raporu", "⚖️ Fon Karşılaştırma", "🚀 Backtest Performansı"]
@@ -141,6 +137,33 @@ menu = st.sidebar.radio(
 
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
+
+# Sol altta en az yer kaplayan kompakt Nitelikli Yatırımcı filtresi
+st.sidebar.markdown(
+    """
+    <style>
+        .qualified-toggle-container {
+            position: fixed;
+            bottom: 15px;
+            left: 15px;
+            z-index: 99999;
+            background-color: rgba(22, 27, 34, 0.95);
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid #30363d;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            width: 220px;
+        }
+    </style>
+    <div class="qualified-toggle-container">
+    """,
+    unsafe_allow_html=True
+)
+
+include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False, help="Serbest, Özel, Gayrimenkul ve Girişim Sermayesi fonlarını dahil eder.")
+
+st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
 
 # --- 4. NİTELİKLİ YATIRIMCI TESPİT FONKSİYONU ---
 def detect_qualified_fund(title, category):

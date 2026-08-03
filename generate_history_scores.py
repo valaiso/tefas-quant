@@ -9,60 +9,84 @@ def run():
     
     if prices_df.empty:
         print("❌ Fiyat verisi bulunamadı!")
+        conn.close()
         return
 
-    print(f"-> {len(prices_df)} satır veri işleniyor. 100 Puanlık Matris hesaplanıyor...")
+    print(f"-> {len(prices_df)} satır veri işleniyor. Puanlama matrisi hesaplanıyor...")
 
     # Tarih formatını güvenceye al ve sırala
     prices_df['date'] = pd.to_datetime(prices_df['date'])
     prices_df = prices_df.sort_values('date')
 
-    # Matrisi Pivot Tabloya Çevir (Satırlar: Tarih, Sütunlar: Fon ID, Değerler: Fiyat)
+    # Matrisi Pivot Tabloya Çevir
     pivot_prices = prices_df.pivot(index='date', columns='fund_id', values='price')
-    pivot_prices = pivot_prices.ffill() # Eksik günleri önceki kapanışla doldur
+    pivot_prices = pivot_prices.ffill().bfill() # Eksik günleri doldur
 
-    # --- 100 PUANLIK MATRİS PARAMETRELERİ (Vektörel Hesaplama) ---
-    # 1. Momentum: 1 Aylık (21 İş Günü) ve 3 Aylık (63 İş Günü) Getiriler
-    ret_1m = pivot_prices.pct_change(21)
-    ret_3m = pivot_prices.pct_change(63)
+    n_days = len(pivot_prices)
+    print(f"-> Toplam işlem günü (tarih derinliği): {n_days}")
+
+    # Dinamik periyotlama (Veri azsa sistem çökmesin, mevcut güne göre uyarlansın)
+    p_1m = min(21, max(1, n_days - 1))
+    p_3m = min(63, max(1, n_days - 1))
+
+    # Momentum ve Risk Hesapları
+    ret_1m = pivot_prices.pct_change(p_1m)
+    ret_3m = pivot_prices.pct_change(p_3m)
     
-    # 2. Risk: 1 Aylık Volatilite (Standart Sapma)
     daily_ret = pivot_prices.pct_change()
-    vol_1m = daily_ret.rolling(21).std()
+    vol_1m = daily_ret.rolling(p_1m).std()
 
-    # Çapraz Kesit Sıralaması (Her gün fonları birbiriyle yarıştırıp %'lik dilime göre 100 üzerinden puanla)
-    score_1m = ret_1m.rank(axis=1, pct=True) * 100
-    score_3m = ret_3m.rank(axis=1, pct=True) * 100
-    # Volatilitede ters orantı: Düşük risk = Yüksek Puan (O yüzden 1'den çıkarıyoruz)
-    score_vol = (1.0 - vol_1m.rank(axis=1, pct=True)) * 100 
+    # Kategori İçi Yüzdelik Sıralama (NaN değerler ortalama %50 ile doldurulur)
+    score_1m = ret_1m.rank(axis=1, pct=True).fillna(0.5) * 100
+    score_3m = ret_3m.rank(axis=1, pct=True).fillna(0.5) * 100
+    score_vol = (1.0 - vol_1m.rank(axis=1, pct=True).fillna(0.5)) * 100 
 
-    # 3. Ağırlıklı Toplam Skor (%40 Kısa Vade Getiri, %40 Orta Vade Getiri, %20 Düşük Risk)
+    # Ağırlıklı Toplam Skor (%40 1A, %40 3A, %20 Düşük Risk)
     total_score = (score_1m * 0.4) + (score_3m * 0.4) + (score_vol * 0.2)
 
-    # Veritabanı formatına geri döndür (Melt işlemi)
+    # Veritabanı formatına dönüştür
     total_score_long = total_score.reset_index().melt(id_vars='date', var_name='fund_id', value_name='total_score')
-    total_score_long = total_score_long.dropna()
+    total_score_long = total_score_long.dropna(subset=['total_score'])
 
-    # --- SİNYAL ÜRETİMİ ---
-    # Skoru 80 ve üzeri olanlara 'BUY' sinyali ver
-    total_score_long['signal'] = np.where(total_score_long['total_score'] >= 80, 'BUY', 'HOLD')
-    
-    buy_signals = total_score_long[total_score_long['signal'] == 'BUY'].copy()
-    buy_signals['date'] = buy_signals['date'].dt.strftime('%Y-%m-%d')
-    
-    print(f"-> Toplam {len(buy_signals)} adet geçerli 'BUY' sinyali tespit edildi.")
-    print("-> Sinyaller veritabanına (fund_scores tablosuna) işleniyor...")
+    # --- NİHAİ SİNYAL MOTORU (Mutlak Puan Aralıkları) ---
+    def assign_rating_signal(score):
+        if score >= 90:
+            return 'Güçlü AL'
+        elif score >= 75:
+            return 'AL / İzle'
+        elif score >= 60:
+            return 'Bekle'
+        elif score >= 40:
+            return 'Zayıf'
+        else:
+            return 'Uzak Dur'
 
-    # Eski sahte skorları temizle
+    total_score_long['signal'] = total_score_long['total_score'].apply(assign_rating_signal)
+    total_score_long['date'] = pd.to_datetime(total_score_long['date']).dt.strftime('%Y-%m-%d')
+    
+    final_scores = total_score_long[['fund_id', 'date', 'total_score', 'signal']].copy()
+    
+    print(f"-> Toplam {len(final_scores)} adet skor ve sinyal hesaplandı.")
+    print("-> Sinyaller veritabanına işleniyor...")
+
+    # Tabloyu sıfırdan tertemiz oluştur
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM fund_scores")
+    cursor.execute("DROP TABLE IF EXISTS fund_scores")
+    cursor.execute("""
+        CREATE TABLE fund_scores (
+            fund_id TEXT,
+            date TEXT,
+            total_score REAL,
+            signal TEXT
+        )
+    """)
     conn.commit()
 
-    # Yeni, gerçek skorları kaydet
-    buy_signals.to_sql("fund_scores", con=conn, if_exists="append", index=False)
+    # Kaydet
+    final_scores.to_sql("fund_scores", con=conn, if_exists="append", index=False)
     conn.close()
     
-    print("🎉 İşlem Tamamlandı! Tüm fonlar analiz edildi ve güçlü olanlar seçildi.")
+    print("🎉 İşlem Tamamlandı! Tüm fonlar adil bir şekilde puanlandı ve kaydedildi.")
 
 if __name__ == "__main__":
     run()

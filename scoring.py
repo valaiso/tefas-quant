@@ -6,7 +6,8 @@ import streamlit as st
 
 try:
     from tefas import Crawler
-    tefas_crawler = Crawler(fund_limit=800)
+    # Tüm piyasayı tarayıp yeni fonları keşfetmek için geniş limit
+    tefas_crawler = Crawler(fund_limit=1000)
     TEFAS_LIB_READY = True
 except ImportError:
     TEFAS_LIB_READY = False
@@ -176,8 +177,8 @@ def run_tefas_sync_and_scoring():
     status_container = st.empty()
     
     labels = [
-        "TEFAS API'den 5 Yıllık Fon Verileri Çekiliyor (Maks 800 Fon)",
-        "Fon Listesi ve Nitelikli Fon Tespiti Yapılıyor",
+        "TEFAS API'den Piyasa Verileri Taranıyor",
+        "Yeni Fon Keşfi (Maks 100 Yeni Fon) & Mevcut Fon Eşlemesi",
         "Eski ve Yeni Fiyat Geçmişleri / Tarihler Güncelleniyor",
         "100 Puanlık Kantitatif Skor ve Kalite Matrisi Hesaplanıyor"
     ]
@@ -194,13 +195,14 @@ def run_tefas_sync_and_scoring():
         status_container.markdown("\n\n".join(lines))
 
     statuses = [1, 0, 0, 0]
-    update_ui(statuses, "5 yıllık genişletilmiş fon arşivi indiriliyor...")
+    update_ui(statuses, "Piyasa taranıyor...")
     progress_bar.progress(10)
     
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         
+        # 1. Veritabanındaki mevcut fon kodlarını al
         existing_codes_df = pd.read_sql("SELECT code FROM funds", con=conn)
         existing_codes = set(existing_codes_df['code'].tolist()) if not existing_codes_df.empty else set()
         old_count = len(existing_codes)
@@ -216,38 +218,42 @@ def run_tefas_sync_and_scoring():
         if prices_df is None or prices_df.empty:
             return False, "TEFAS API veri döndüremedi."
             
-        progress_bar.progress(40)
+        progress_bar.progress(30)
         
         statuses = [2, 1, 0, 0]
-        update_ui(statuses, "Fonlar taranıyor ve güncelleniyor...")
-        progress_bar.progress(60)
+        update_ui(statuses, "Yeni fonlar filtreleniyor (En fazla 100 yeni fon)...")
+        progress_bar.progress(50)
         
         prices_df = prices_df.drop_duplicates(subset=['code', 'date'])
-        active_codes = prices_df['code'].unique() if 'code' in prices_df.columns else []
+        all_fetched_codes = prices_df['code'].unique() if 'code' in prices_df.columns else []
         
-        new_funds_detected = 0
-        total_active_codes = len(active_codes)
+        # Veritabanında olmayan YENİ fonları tespit et ve bu sync'te MAKSİMUM 100 tanesini al
+        brand_new_codes = [c for c in all_fetched_codes if c not in existing_codes]
+        selected_new_codes = brand_new_codes[:100]
         
-        for idx, code in enumerate(active_codes, 1):
-            title, category = code, "Diğer"
+        # İşlenecek aktif küme = Tüm eski fonlar + Bu sync'te eklenen en fazla 100 yeni fon
+        allowed_codes = existing_codes.union(set(selected_new_codes))
+        
+        # Sadece izin verilen fonların fiyat verilerini filtrele
+        prices_df = prices_df[prices_df['code'].isin(allowed_codes)]
+        
+        new_funds_detected = len(selected_new_codes)
+        
+        # Fonları veritabanına kaydet / güncelle
+        for code in allowed_codes:
             match = prices_df[prices_df['code'] == code]
+            title, category = code, "Diğer"
             if not match.empty:
-                if 'title' in match.columns: title = match['title'].iloc[0]
-                if 'category' in match.columns: category = match['category'].iloc[0]
+                if 'title' in match.columns and pd.notna(match['title'].iloc[0]): title = match['title'].iloc[0]
+                if 'category' in match.columns and pd.notna(match['category'].iloc[0]): category = match['category'].iloc[0]
             
             is_qual = detect_qualified_fund(title, category)
-            
-            if code not in existing_codes:
-                new_funds_detected += 1
             
             cursor.execute("""
                 INSERT INTO funds (code, title, category, status, is_qualified) VALUES (?, ?, ?, 'ACTIVE', ?)
                 ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE', is_qualified=excluded.is_qualified
             """, (code, title, category, is_qual))
             
-            if idx % 50 == 0 or idx == total_active_codes:
-                update_ui(statuses, f"Fon Kaydı: ({idx}/{total_active_codes})")
-                
         conn.commit()
 
         funds_map = pd.read_sql("SELECT id, code FROM funds", con=conn).set_index('code')['id'].to_dict()
@@ -255,9 +261,10 @@ def run_tefas_sync_and_scoring():
         prices_df = prices_df.dropna(subset=['fund_id'])
         
         statuses = [2, 2, 1, 0]
-        update_ui(statuses, "Fiyat geçmişleri ve yeni tarihler işleniyor...")
-        progress_bar.progress(80)
+        update_ui(statuses, "Fiyat geçmişleri ve tarihler güncelleniyor...")
+        progress_bar.progress(75)
         
+        # Fiyatları ekle veya güncellemeleri işle
         for _, row in prices_df.iterrows():
             cursor.execute("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", 
                            (int(row['fund_id']), str(row['date'])[:10], float(row['price'])))
@@ -267,6 +274,7 @@ def run_tefas_sync_and_scoring():
         update_ui(statuses, "100 Puanlık matris hesaplanıyor...")
         progress_bar.progress(90)
 
+        # Aktif tüm fonların skorlarını güncelle
         all_funds = pd.read_sql("SELECT id, code FROM funds WHERE status = 'ACTIVE'", con=conn)
         total_funds_to_score = len(all_funds)
         end_date = today.strftime('%Y-%m-%d')
@@ -295,7 +303,12 @@ def run_tefas_sync_and_scoring():
         update_ui(statuses, "Tamamlandı!")
         progress_bar.progress(100)
         
-        return True, f"Başarılı! Toplam Fon: {total_after} (Eski: {old_count} | Eklenen Yeni Fon: {new_funds_detected}). Tarihler ve veriler güncellendi."
+        if new_funds_detected > 0:
+            msg = f"Başarılı! Toplam Fon: {total_after} (Eski: {old_count} | Eklenen Yeni Fon: +{new_funds_detected}). Mevcut ve yeni fonların verileri güncellendi."
+        else:
+            msg = f"Başarılı! Yeni eklenecek fon kalmadı. Toplam {total_after} mevcut fonun güncel tarihli verileri ve skorları güncellendi."
+            
+        return True, msg
     except Exception as e:
         return False, f"Hata: {str(e)}"
     finally:

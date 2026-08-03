@@ -89,13 +89,12 @@ if "favorites" not in st.session_state:
 # --- 4. HATA KORUMALI VERİ YÜKLEME (DÜZELTİLDİ) ---
 def load_data():
     try:
-        # 'title AS name' yerine veritabanındaki gerçek sütun adı olan 'name' kullanıldı.
+        funds_df = pd.read_sql("SELECT id, code, title AS name, category FROM funds", con=conn)
+    except Exception:
         funds_df = pd.read_sql("SELECT id, code, name, category FROM funds", con=conn)
-        scores_df = pd.read_sql("SELECT * FROM fund_scores", con=conn)
-        return funds_df, scores_df  # f_df yerine funds_df döndürülüyor!
-    except Exception as e:
-        st.error(f"Veri yüklenirken hata oluştu: {e}") # Hatayı gizlemek yerine ekrana yazdırıyoruz
-        return pd.DataFrame(), pd.DataFrame()
+    
+    scores_df = pd.read_sql("SELECT * FROM fund_scores", con=conn)
+    return funds_df, scores_df
 
 funds_df, scores_df = load_data()
 
@@ -110,8 +109,8 @@ else:
 # ==========================================
 # MODÜL 1: ANA DASHBOARD
 # ==========================================
-if menu == " Ana Dashboard":
-    st.title(" Piyasa & Quant Özeti")
+if menu == "🏠 Ana Dashboard":
+    st.title("🏠 Piyasa & Quant Özeti")
     st.markdown(f"**Son Güncelleme Tarihi:** `{latest_date}`")
     st.markdown("---")
 

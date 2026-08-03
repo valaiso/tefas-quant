@@ -38,7 +38,7 @@ st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navigasyon",
-    ["⚡ Ana Dashboard", "🔄 Evren Senkronizasyonu", "🔍 Fon Evreni & Yaş Filtresi", "💼 Portföyüm", "⭐ Favori Sepetim", "📊 Fon Detay & AI Raporu", "⚖️ Fon Karşılaştırma", "🚀 Backtest Performansı"]
+    ["⚡ Ana Dashboard", "🔄 Fon Senkronizasyonu", "🔍 Fon Havuzu & Yaş Filtresi", "💼 Portföyüm", "⭐ Favori Sepetim", "📊 Fon Detay & AI Raporu", "⚖️ Fon Karşılaştırma", "🚀 Backtest Performansı"]
 )
 
 if "favorites" not in st.session_state:
@@ -104,16 +104,16 @@ def load_universe_data():
 merged_df = load_universe_data()
 
 # ==========================================
-# MODÜL: EVREN SENKRONİZASYONU
+# MODÜL: FON SENKRONİZASYONU
 # ==========================================
-if menu == "🔄 Evren Senkronizasyonu":
-    st.title("🔄 Otomatik Fon Evreni Senkronizasyon Merkezi")
+if menu == "🔄 Fon Senkronizasyonu":
+    st.title("🔄 Otomatik Fon Senkronizasyon Merkezi")
     st.markdown("---")
     st.markdown("""
-    Tek tuşla `scoring.py` motoru üzerinden 5 yıllık TEFAS evresini senkronize edebilir, nitelikli fonları ayıklayabilir ve kademeli güven cezası uygulayabilirsin.
+    Tek tuşla `scoring.py` motoru üzerinden 5 yıllık fon geçmişini senkronize edebilir, nitelikli fonları ayıklayabilir ve kademeli güven cezası uygulayabilirsin.
     """)
     
-    if st.button("🚀 Motoru Çalıştır & Evreni Güncelle", type="primary"):
+    if st.button("🚀 Motoru Çalıştır & Fonları Güncelle", type="primary"):
         with st.spinner("Motor çalışıyor, veriler işleniyor..."):
             success, msg = run_tefas_sync_and_scoring()
             if success:
@@ -126,7 +126,7 @@ if menu == "🔄 Evren Senkronizasyonu":
 # MODÜL 1: ANA DASHBOARD
 # ==========================================
 elif menu == "⚡ Ana Dashboard":
-    st.title("⚡ Kurumsal Piyasa & Evren Özeti")
+    st.title("⚡ Kurumsal Piyasa & Fon Özeti")
     st.markdown("---")
 
     if not merged_df.empty:
@@ -138,7 +138,7 @@ elif menu == "⚡ Ana Dashboard":
         avg_conf = merged_df['confidence_score'].mean() if 'confidence_score' in merged_df.columns else 0
 
         col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Toplam Evren", f"{total_analyzed}")
+        col1.metric("Toplam Fon", f"{total_analyzed}")
         col2.metric("Güçlü AL", f"{guclu_al}")
         col3.metric("AL / İzle", f"{al_izle}")
         col4.metric("Bekle", f"{bekle}")
@@ -167,13 +167,13 @@ elif menu == "⚡ Ana Dashboard":
                 else: st.session_state.favorites.append(row['code'])
                 st.rerun()
     else:
-        st.info("⚠️ Veritabanı boş. Lütfen sol menüden **'🔄 Evren Senkronizasyonu'** sekmesine gidin.")
+        st.info("⚠️ Veritabanı boş. Lütfen sol menüden **'🔄 Fon Senkronizasyonu'** sekmesine gidin.")
 
 # ==========================================
 # DİĞER MODÜLLER
 # ==========================================
-elif menu == "🔍 Fon Evreni & Yaş Filtresi":
-    st.title("🔍 Kategori Bazlı Fon Evreni ve Güven Süzgeci")
+elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
+    st.title("🔍 Kategori Bazlı Fon Havuzu ve Güven Süzgeci")
     st.markdown("---")
     if not merged_df.empty:
         display_df = merged_df[['code', 'name', 'category', 'day_count', 'total_score', 'confidence_score', 'signal']].rename(

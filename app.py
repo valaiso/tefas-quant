@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import os
+import datetime
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
 st.set_page_config(
@@ -23,6 +24,8 @@ def init_db():
     db_path = "tefas.db"
     conn = sqlite3.connect(db_path, check_same_thread=False)
     cursor = conn.cursor()
+    
+    # Tabloları oluştur
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS funds (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,6 +44,32 @@ def init_db():
             FOREIGN KEY (fund_id) REFERENCES funds(id)
         )
     """)
+    
+    # EĞER VERİTABANI BOŞSA TEST VERİSİ EKLE (Arayüzü görebilmek için)
+    cursor.execute("SELECT COUNT(*) FROM funds")
+    if cursor.fetchone()[0] == 0:
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        
+        # Örnek Fonlar
+        funds_data = [
+            ("MAC", "Marmara Capital Hisse Senedi Fonu", "Hisse Senedi"),
+            ("TCD", "Tacirler Portföy Değişken Fon", "Değişken"),
+            ("AFT", "Ak Portföy Yeni Teknolojiler Yabancı Hisse", "Yabancı Hisse"),
+            ("IIH", "İstanbul Portföy Üçüncü Hisse Senedi Fonu", "Hisse Senedi"),
+            ("KUB", "Kuveyt Türk Portföy Eurobond Fonu", "Borçlanma Araçları")
+        ]
+        cursor.executemany("INSERT INTO funds (code, name, category) VALUES (?, ?, ?)", funds_data)
+        
+        # Örnek Skorlar (1'den 5'e kadar olan ID'ler için)
+        scores_data = [
+            (1, today, 88.5, "BUY"),
+            (2, today, 75.0, "WATCH"),
+            (3, today, 92.1, "BUY"),
+            (4, today, 45.3, "SELL"),
+            (5, today, 62.8, "WATCH")
+        ]
+        cursor.executemany("INSERT INTO fund_scores (fund_id, date, total_score, signal) VALUES (?, ?, ?, ?)", scores_data)
+        
     conn.commit()
     return conn
 
@@ -57,13 +86,15 @@ menu = st.sidebar.radio(
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
 
-# --- 4. HATA KORUMALI VERİ YÜKLEME ---
+# --- 4. HATA KORUMALI VERİ YÜKLEME (DÜZELTİLDİ) ---
 def load_data():
     try:
-        funds_df = pd.read_sql("SELECT id, code, title AS name, category FROM funds", con=conn)
-        s_df = pd.read_sql("SELECT * FROM fund_scores", con=conn)
-        return f_df, s_df
-    except Exception:
+        # 'title AS name' yerine veritabanındaki gerçek sütun adı olan 'name' kullanıldı.
+        funds_df = pd.read_sql("SELECT id, code, name, category FROM funds", con=conn)
+        scores_df = pd.read_sql("SELECT * FROM fund_scores", con=conn)
+        return funds_df, scores_df  # f_df yerine funds_df döndürülüyor!
+    except Exception as e:
+        st.error(f"Veri yüklenirken hata oluştu: {e}") # Hatayı gizlemek yerine ekrana yazdırıyoruz
         return pd.DataFrame(), pd.DataFrame()
 
 funds_df, scores_df = load_data()
@@ -79,8 +110,8 @@ else:
 # ==========================================
 # MODÜL 1: ANA DASHBOARD
 # ==========================================
-if menu == "🏠 Ana Dashboard":
-    st.title("🏠 Piyasa & Quant Özeti")
+if menu == " Ana Dashboard":
+    st.title(" Piyasa & Quant Özeti")
     st.markdown(f"**Son Güncelleme Tarihi:** `{latest_date}`")
     st.markdown("---")
 
@@ -119,6 +150,7 @@ if menu == "🏠 Ana Dashboard":
     else:
         st.info("⚠️ Veritabanında henüz skor verisi bulunamadı. Veriler yüklendiğinde buraya yansıyacaktır.")
 
+# ... (DİĞER MENÜ KODLARINIZ AYNI ŞEKİLDE ÇALIŞACAKTIR) ...
 elif menu == "🔍 Fon Tarama & Filtreleme":
     st.title("🔍 Gelişmiş Fon Tarama Matrisi")
     st.markdown("---")

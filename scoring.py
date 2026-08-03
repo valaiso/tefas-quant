@@ -2,7 +2,6 @@ import pandas as pd
 import sqlite3
 import datetime
 import os
-import time
 import streamlit as st
 
 try:
@@ -45,6 +44,7 @@ def get_db_connection():
             total_score REAL,
             confidence_score REAL,
             signal TEXT,
+            letter_grade TEXT,
             PRIMARY KEY (fund_id, date)
         )
     """)
@@ -65,11 +65,69 @@ def detect_qualified_fund(title, category):
             return 1
     return 0
 
+def evaluate_signal_and_grade(score, confidence, day_count):
+    if day_count < 15:
+        return 'Yeni Fon (Kuluçkada)', 'Zayıf'
+
+    # Sinyal Sınıflandırması
+    if score >= 90:
+        signal = 'Güçlü AL'
+    elif score >= 75:
+        signal = 'AL / İzle'
+    elif score >= 60:
+        signal = 'Bekle'
+    elif score >= 40:
+        signal = 'Zayıf'
+    else:
+        signal = 'Uzak Dur'
+
+    # Harf Notu Sınıflandırması (Belirttiğin kurallar)
+    if score >= 90:
+        letter_grade = 'A+'
+    elif score >= 80:
+        letter_grade = 'A'
+    elif score >= 70:
+        letter_grade = 'B'
+    elif score >= 60:
+        letter_grade = 'C'
+    else:
+        letter_grade = 'Zayıf'
+
+    # Güven Eşiği Kilitleri (Düşük güven yüksek skoru ezer)
+    if confidence < 25:
+        signal = 'Uzak Dur'
+        letter_grade = 'Zayıf'
+    elif confidence < 50:
+        if signal in ['Güçlü AL', 'AL / İzle']:
+            signal = 'Bekle'
+
+    return signal, letter_grade
+
 def calculate_confidence_and_score(p_history):
     day_count = len(p_history)
     if day_count == 0:
-        return 0.0, 50.0, "Yeni Fon (Kuluçkada)"
+        return 0.0, 50.0, "Yeni Fon (Kuluçkada)", "Zayıf"
 
+    prices = p_history['price'].values
+    
+    # Çok faktörlü getiri hesaplamaları (30g kısa vadeli, 90g orta vadeli, 365g uzun vadeli momentum)
+    r_30 = (prices[-1] / prices[-30] - 1) * 100 if day_count >= 30 else (prices[-1] / prices[0] - 1) * 100
+    r_90 = (prices[-1] / prices[-90] - 1) * 100 if day_count >= 90 else r_30
+    r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_90
+
+    score_30 = min(max(50 + r_30 * 1.5, 0), 100)
+    score_90 = min(max(50 + r_90 * 1.0, 0), 100)
+    score_365 = min(max(50 + r_365 * 0.5, 0), 100)
+    
+    # Volatilite / İstikrar Faktörü (Düşük volatilite yüksek puan alır)
+    daily_returns = p_history['price'].pct_change().dropna()
+    volatility = daily_returns.std() * (255 ** 0.5) if len(daily_returns) > 5 else 0.2
+    stability_score = max(0, min(100, 100 - (volatility * 100)))
+
+    # 100 Puanlık Kantitatif Skor Matrisi Ağırlıkları
+    raw_score = (score_30 * 0.25) + (score_90 * 0.30) + (score_365 * 0.25) + (stability_score * 0.20)
+
+    # Güven Skoru Hesaplanması
     age_score = min(100.0, (day_count / 365.0) * 100.0)
     expected_days = (pd.to_datetime(p_history['date'].iloc[-1]) - pd.to_datetime(p_history['date'].iloc[0])).days + 1
     density_score = min(100.0, (day_count / max(1, expected_days)) * 100.0) if expected_days > 0 else 100.0
@@ -81,9 +139,6 @@ def calculate_confidence_and_score(p_history):
 
     confidence = (age_score * 0.40) + (density_score * 0.30) + (integrity_score * 0.20) + (recency_score * 0.10)
     confidence = min(100.0, max(0.0, confidence))
-
-    returns_30d = (p_history['price'].iloc[-1] / p_history['price'].iloc[-30] - 1) * 100 if day_count >= 30 else 0
-    raw_score = 50 + returns_30d * 2
 
     def get_penalty(conf):
         if conf >= 95: return 0
@@ -101,27 +156,35 @@ def calculate_confidence_and_score(p_history):
     penalty = get_penalty(confidence)
     score = min(max(raw_score + penalty, 0), 100)
 
-    if day_count < 15:
-        signal = 'Yeni Fon (Kuluçkada)'
-    else:
-        if score >= 85: signal = 'Güçlü AL'
-        elif score >= 70: signal = 'AL / İzle'
-        elif score <= 50: signal = 'Zayıf'
-        else: signal = 'Bekle'
+    signal, letter_grade = evaluate_signal_and_grade(score, confidence, day_count)
 
-    if confidence < 25:
-        if signal in ['Güçlü AL', 'AL / İzle']: signal = 'Bekle'
-    elif confidence < 50:
-        if signal == 'Güçlü AL': signal = 'AL / İzle'
-
-    return float(confidence), float(score), signal
+    return float(confidence), float(score), signal, letter_grade
 
 def run_tefas_sync_and_scoring():
     if not TEFAS_LIB_READY:
         return False, "TEFAS kütüphanesi yüklü değil!"
     
-    status_text = st.empty()
     progress_bar = st.progress(0)
+    status_container = st.empty()
+    
+    labels = [
+        "TEFAS API'den Güncel Veriler Çekiliyor (5 Yıllık Dilimler)",
+        "Fon Listesi ve Nitelikli Fon Tespiti Yapılıyor",
+        "Fiyat Geçmişi ve Tarihler Veritabanına İşleniyor",
+        "100 Puanlık Kantitatif Skor ve Kalite Matrisi Hesaplanıyor"
+    ]
+    
+    def update_ui(statuses):
+        lines = []
+        icons = {0: "⏳", 1: "🔄", 2: "✅"}
+        for idx, label in enumerate(labels):
+            st_code = statuses[idx]
+            lines.append(f"{icons[st_code]} {label}")
+        status_container.markdown("\n\n".join(lines))
+
+    statuses = [1, 0, 0, 0]
+    update_ui(statuses)
+    progress_bar.progress(5)
     
     conn = get_db_connection()
     try:
@@ -133,37 +196,24 @@ def run_tefas_sync_and_scoring():
         
         today = datetime.date.today()
         all_dfs = []
-        chunk_times = []
-        
-        status_text.text("📡 TEFAS API'den güncel veriler çekiliyor...")
         
         for i in range(5):
             chunk_end = today - datetime.timedelta(days=i * 365)
             chunk_start = today - datetime.timedelta(days=(i + 1) * 365)
             
-            # Dinamik Kalan Süre Hesaplama
-            if len(chunk_times) > 0:
-                avg_time = sum(chunk_times) / len(chunk_times)
-                est_sec = int(avg_time * (5 - i))
-            else:
-                est_sec = (5 - i) * 5  # İlk dilim için ortalama 5'er saniye varsayım
-                
-            status_text.text(f"⏳ Dönem Sorgulanıyor: {chunk_start.strftime('%d.%m.%Y')} - {chunk_end.strftime('%d.%m.%Y')} (Yıl dilimi {i+1}/5) | Tahmini Kalan: ~{est_sec} sn")
-            progress_bar.progress((i + 1) * 15)
-            
-            t_start_chunk = time.time()
             try:
                 df_chunk = tefas_crawler.fetch(start=chunk_start.strftime('%Y-%m-%d'), end=chunk_end.strftime('%Y-%m-%d'))
                 if df_chunk is not None and not df_chunk.empty:
                     all_dfs.append(df_chunk)
             except Exception:
                 pass
-            chunk_times.append(time.time() - t_start_chunk)
+            progress_bar.progress(int(5 + (i + 1) * 14))
             
         if not all_dfs:
             return False, "TEFAS API veri döndüremedi."
             
-        status_text.text("🔄 Veriler işleniyor: Eski fonlar korunuyor, yeni fonlar ekleniyor ve tarihler güncelleniyor...")
+        statuses = [2, 1, 0, 0]
+        update_ui(statuses)
         progress_bar.progress(80)
         
         prices_df = pd.concat(all_dfs, ignore_index=True)
@@ -193,7 +243,8 @@ def run_tefas_sync_and_scoring():
         prices_df['fund_id'] = prices_df['code'].map(funds_map)
         prices_df = prices_df.dropna(subset=['fund_id'])
         
-        status_text.text("💾 Fiyat geçmişi ve yeni tarihler veritabanına işleniyor...")
+        statuses = [2, 2, 1, 0]
+        update_ui(statuses)
         progress_bar.progress(90)
         
         for _, row in prices_df.iterrows():
@@ -201,7 +252,8 @@ def run_tefas_sync_and_scoring():
                            (int(row['fund_id']), str(row['date'])[:10], float(row['price'])))
         conn.commit()
 
-        status_text.text("⚡ Tüm fonlar için skor ve güven matrisi güncelleniyor...")
+        statuses = [2, 2, 2, 1]
+        update_ui(statuses)
         progress_bar.progress(95)
 
         all_funds = pd.read_sql("SELECT id, code FROM funds WHERE status = 'ACTIVE'", con=conn)
@@ -210,11 +262,11 @@ def run_tefas_sync_and_scoring():
         for _, fund in all_funds.iterrows():
             f_id = int(fund['id'])
             p_history = pd.read_sql(f"SELECT date, price FROM fund_daily_prices WHERE fund_id = {f_id} ORDER BY date ASC", con=conn)
-            confidence, score, signal = calculate_confidence_and_score(p_history)
+            confidence, score, signal, letter_grade = calculate_confidence_and_score(p_history)
             
             cursor.execute("""
-                INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal) VALUES (?, ?, ?, ?, ?)
-            """, (f_id, end_date, float(score), float(confidence), signal))
+                INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal, letter_grade) VALUES (?, ?, ?, ?, ?, ?)
+            """, (f_id, end_date, float(score), float(confidence), signal, letter_grade))
         conn.commit()
         
         sync_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
@@ -223,8 +275,9 @@ def run_tefas_sync_and_scoring():
         
         total_after = len(pd.read_sql("SELECT id FROM funds", con=conn))
         
+        statuses = [2, 2, 2, 2]
+        update_ui(statuses)
         progress_bar.progress(100)
-        status_text.text("✅ Kümülatif senkronizasyon başarıyla tamamlandı!")
         
         return True, f"Başarılı! Toplam Fon: {total_after} (Eski: {old_count} | Eklenen Yeni Fon: {new_funds_detected}). Tarihler ve veriler güncellendi."
     except Exception as e:

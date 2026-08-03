@@ -2,6 +2,7 @@ import pandas as pd
 import sqlite3
 import datetime
 import os
+import time
 import streamlit as st
 
 try:
@@ -18,7 +19,6 @@ def get_db_connection():
         db_path = "tefas.db"
     conn = sqlite3.connect(db_path, check_same_thread=False)
     
-    # Tabloların var olduğundan emin olalım
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS funds (
@@ -127,13 +127,13 @@ def run_tefas_sync_and_scoring():
     try:
         cursor = conn.cursor()
         
-        # 1. Mevcut veritabanındaki kayıtlı fon kodlarını öğrenelim (Eski fon sayısını takip etmek için)
         existing_codes_df = pd.read_sql("SELECT code FROM funds", con=conn)
         existing_codes = set(existing_codes_df['code'].tolist()) if not existing_codes_df.empty else set()
         old_count = len(existing_codes)
         
         today = datetime.date.today()
         all_dfs = []
+        chunk_times = []
         
         status_text.text("📡 TEFAS API'den güncel veriler çekiliyor...")
         
@@ -141,15 +141,24 @@ def run_tefas_sync_and_scoring():
             chunk_end = today - datetime.timedelta(days=i * 365)
             chunk_start = today - datetime.timedelta(days=(i + 1) * 365)
             
-            status_text.text(f"⏳ Dönem Sorgulanıyor: {chunk_start.strftime('%d.%m.%Y')} - {chunk_end.strftime('%d.%m.%Y')} (Yıl dilimi {i+1}/5)")
+            # Dinamik Kalan Süre Hesaplama
+            if len(chunk_times) > 0:
+                avg_time = sum(chunk_times) / len(chunk_times)
+                est_sec = int(avg_time * (5 - i))
+            else:
+                est_sec = (5 - i) * 5  # İlk dilim için ortalama 5'er saniye varsayım
+                
+            status_text.text(f"⏳ Dönem Sorgulanıyor: {chunk_start.strftime('%d.%m.%Y')} - {chunk_end.strftime('%d.%m.%Y')} (Yıl dilimi {i+1}/5) | Tahmini Kalan: ~{est_sec} sn")
             progress_bar.progress((i + 1) * 15)
             
+            t_start_chunk = time.time()
             try:
                 df_chunk = tefas_crawler.fetch(start=chunk_start.strftime('%Y-%m-%d'), end=chunk_end.strftime('%Y-%m-%d'))
                 if df_chunk is not None and not df_chunk.empty:
                     all_dfs.append(df_chunk)
             except Exception:
                 pass
+            chunk_times.append(time.time() - t_start_chunk)
             
         if not all_dfs:
             return False, "TEFAS API veri döndüremedi."
@@ -161,7 +170,6 @@ def run_tefas_sync_and_scoring():
         prices_df = prices_df.drop_duplicates(subset=['code', 'date'])
         active_codes = prices_df['code'].unique() if 'code' in prices_df.columns else []
         
-        # KÜMÜLATİF EKLEME MANTIĞI: Eski fonları silmiyoruz, yenileri ekliyoruz veya güncelliyoruz.
         new_funds_detected = 0
         for code in active_codes:
             title, category = code, "Diğer"
@@ -188,7 +196,6 @@ def run_tefas_sync_and_scoring():
         status_text.text("💾 Fiyat geçmişi ve yeni tarihler veritabanına işleniyor...")
         progress_bar.progress(90)
         
-        # INSERT OR REPLACE ile eski fiyatlar silinmez, yeni tarihler eklenir/güncellenir
         for _, row in prices_df.iterrows():
             cursor.execute("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", 
                            (int(row['fund_id']), str(row['date'])[:10], float(row['price'])))

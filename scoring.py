@@ -16,7 +16,46 @@ def get_db_connection():
         db_path = "/tmp/tefas.db"
     else:
         db_path = "tefas.db"
-    return sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    
+    # Tabloların var olduğundan emin olalım
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS funds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE,
+            title TEXT,
+            category TEXT,
+            status TEXT DEFAULT 'ACTIVE',
+            is_qualified INTEGER DEFAULT 0
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fund_daily_prices (
+            fund_id INTEGER,
+            date TEXT,
+            price REAL,
+            PRIMARY KEY (fund_id, date)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fund_scores (
+            fund_id INTEGER,
+            date TEXT,
+            total_score REAL,
+            confidence_score REAL,
+            signal TEXT,
+            PRIMARY KEY (fund_id, date)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    conn.commit()
+    return conn
 
 def detect_qualified_fund(title, category):
     text = f"{str(title).upper()} {str(category).upper()}"
@@ -81,24 +120,29 @@ def run_tefas_sync_and_scoring():
     if not TEFAS_LIB_READY:
         return False, "TEFAS kütüphanesi yüklü değil!"
     
-    # Canlı arayüz geri bildirimi için bileşenler
     status_text = st.empty()
     progress_bar = st.progress(0)
     
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
+        
+        # 1. Mevcut veritabanındaki kayıtlı fon kodlarını öğrenelim (Eski fon sayısını takip etmek için)
+        existing_codes_df = pd.read_sql("SELECT code FROM funds", con=conn)
+        existing_codes = set(existing_codes_df['code'].tolist()) if not existing_codes_df.empty else set()
+        old_count = len(existing_codes)
+        
         today = datetime.date.today()
         all_dfs = []
         
-        status_text.text("📡 TEFAS API'den 5 yıllık tarihsel veriler parça parça çekiliyor...")
+        status_text.text("📡 TEFAS API'den güncel veriler çekiliyor...")
         
         for i in range(5):
             chunk_end = today - datetime.timedelta(days=i * 365)
             chunk_start = today - datetime.timedelta(days=(i + 1) * 365)
             
             status_text.text(f"⏳ Dönem Sorgulanıyor: {chunk_start.strftime('%d.%m.%Y')} - {chunk_end.strftime('%d.%m.%Y')} (Yıl dilimi {i+1}/5)")
-            progress_bar.progress((i + 1) * 15) # İlk %75'lik kısım veri çekme
+            progress_bar.progress((i + 1) * 15)
             
             try:
                 df_chunk = tefas_crawler.fetch(start=chunk_start.strftime('%Y-%m-%d'), end=chunk_end.strftime('%Y-%m-%d'))
@@ -110,16 +154,15 @@ def run_tefas_sync_and_scoring():
         if not all_dfs:
             return False, "TEFAS API veri döndüremedi."
             
-        status_text.text("🔄 Veriler birleştiriliyor ve veritabanı aktif fon listesi güncelleniyor...")
+        status_text.text("🔄 Veriler işleniyor: Eski fonlar korunuyor, yeni fonlar ekleniyor ve tarihler güncelleniyor...")
         progress_bar.progress(80)
         
         prices_df = pd.concat(all_dfs, ignore_index=True)
         prices_df = prices_df.drop_duplicates(subset=['code', 'date'])
         active_codes = prices_df['code'].unique() if 'code' in prices_df.columns else []
         
-        cursor.execute("UPDATE funds SET status = 'PASSIVE'")
-        conn.commit()
-        
+        # KÜMÜLATİF EKLEME MANTIĞI: Eski fonları silmiyoruz, yenileri ekliyoruz veya güncelliyoruz.
+        new_funds_detected = 0
         for code in active_codes:
             title, category = code, "Diğer"
             match = prices_df[prices_df['code'] == code]
@@ -128,6 +171,10 @@ def run_tefas_sync_and_scoring():
                 if 'category' in match.columns: category = match['category'].iloc[0]
             
             is_qual = detect_qualified_fund(title, category)
+            
+            if code not in existing_codes:
+                new_funds_detected += 1
+            
             cursor.execute("""
                 INSERT INTO funds (code, title, category, status, is_qualified) VALUES (?, ?, ?, 'ACTIVE', ?)
                 ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE', is_qualified=excluded.is_qualified
@@ -138,15 +185,16 @@ def run_tefas_sync_and_scoring():
         prices_df['fund_id'] = prices_df['code'].map(funds_map)
         prices_df = prices_df.dropna(subset=['fund_id'])
         
-        status_text.text("💾 Günlük fiyat hareketleri SQLite veritabanına yazılıyor...")
+        status_text.text("💾 Fiyat geçmişi ve yeni tarihler veritabanına işleniyor...")
         progress_bar.progress(90)
         
+        # INSERT OR REPLACE ile eski fiyatlar silinmez, yeni tarihler eklenir/güncellenir
         for _, row in prices_df.iterrows():
             cursor.execute("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", 
                            (int(row['fund_id']), str(row['date'])[:10], float(row['price'])))
         conn.commit()
 
-        status_text.text("⚡ Fonlar için çok faktörlü güven ve skor matrisi hesaplanıyor...")
+        status_text.text("⚡ Tüm fonlar için skor ve güven matrisi güncelleniyor...")
         progress_bar.progress(95)
 
         all_funds = pd.read_sql("SELECT id, code FROM funds WHERE status = 'ACTIVE'", con=conn)
@@ -166,10 +214,12 @@ def run_tefas_sync_and_scoring():
         cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_sync', ?)", (sync_time_str,))
         conn.commit()
         
-        progress_bar.progress(100)
-        status_text.text("✅ Senkronizasyon ve skorlama başarıyla tamamlandı!")
+        total_after = len(pd.read_sql("SELECT id FROM funds", con=conn))
         
-        return True, f"Başarılı! Toplam {len(active_codes)} fon skorlandı."
+        progress_bar.progress(100)
+        status_text.text("✅ Kümülatif senkronizasyon başarıyla tamamlandı!")
+        
+        return True, f"Başarılı! Toplam Fon: {total_after} (Eski: {old_count} | Eklenen Yeni Fon: {new_funds_detected}). Tarihler ve veriler güncellendi."
     except Exception as e:
         return False, f"Hata: {str(e)}"
     finally:

@@ -59,7 +59,7 @@ menu = st.sidebar.radio(
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
 
-# --- 4. HATA KORUMALI VERİ YÜKLEME (TÜM FONLARI GETİR) ---
+# --- 4. HATA KORUMALI VERİ YÜKLEME & DİNAMİK SİNYAL SINIFLANDIRMA ---
 def load_data():
     try:
         funds_df = pd.read_sql("SELECT id, code, title AS name, category FROM funds", con=conn)
@@ -74,8 +74,19 @@ funds_df, scores_df = load_data()
 if not scores_df.empty and not funds_df.empty:
     scores_df['date_dt'] = pd.to_datetime(scores_df['date'])
     latest_scores = scores_df.sort_values('date_dt').groupby('fund_id').tail(1).copy()
-    latest_date_raw = latest_scores['date'].max()
     
+    # 100 puanlık matrise göre sinyalleri puana dayalı dinamik olarak belirle (BUY / WATCH / SELL)
+    def assign_dynamic_signal(score):
+        if score >= 70:
+            return 'BUY'
+        elif score >= 50:
+            return 'WATCH'
+        else:
+            return 'SELL'
+            
+    latest_scores['signal'] = latest_scores['total_score'].apply(assign_dynamic_signal)
+    
+    latest_date_raw = latest_scores['date'].max()
     try:
         if len(str(latest_date_raw)) <= 10:
             current_time_str = datetime.datetime.now().strftime("%H:%M:%S")
@@ -107,7 +118,7 @@ if menu == "⚡ Ana Dashboard":
 
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Analiz Edilen Fon", f"{total_analyzed}")
-        col2.metric("BUY Sinyali", f"{buy_count}", delta=f"+{int(buy_count*0.1)} (Son 7g)")
+        col2.metric("BUY Sinyali", f"{buy_count}")
         col3.metric("WATCH Sinyali", f"{watch_count}")
         col4.metric("SELL Sinyali", f"{sell_count}")
         col5.metric("Ortalama Puan", f"{avg_score:.1f} / 100", delta="+2.4")

@@ -6,7 +6,7 @@ import streamlit as st
 
 try:
     from tefas import Crawler
-    tefas_crawler = Crawler(fund_limit=100)
+    tefas_crawler = Crawler(fund_limit=800)
     TEFAS_LIB_READY = True
 except ImportError:
     TEFAS_LIB_READY = False
@@ -176,7 +176,7 @@ def run_tefas_sync_and_scoring():
     status_container = st.empty()
     
     labels = [
-        "TEFAS API'den 5 Yıllık Fon Verileri Çekiliyor (Maks 100 Fon)",
+        "TEFAS API'den 5 Yıllık Fon Verileri Çekiliyor (Maks 800 Fon)",
         "Fon Listesi ve Nitelikli Fon Tespiti Yapılıyor",
         "Eski ve Yeni Fiyat Geçmişleri / Tarihler Güncelleniyor",
         "100 Puanlık Kantitatif Skor ve Kalite Matrisi Hesaplanıyor"
@@ -194,7 +194,7 @@ def run_tefas_sync_and_scoring():
         status_container.markdown("\n\n".join(lines))
 
     statuses = [1, 0, 0, 0]
-    update_ui(statuses, "5 yıllık fon arşivi indiriliyor...")
+    update_ui(statuses, "5 yıllık genişletilmiş fon arşivi indiriliyor...")
     progress_bar.progress(10)
     
     conn = get_db_connection()
@@ -245,7 +245,7 @@ def run_tefas_sync_and_scoring():
                 ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE', is_qualified=excluded.is_qualified
             """, (code, title, category, is_qual))
             
-            if idx % 25 == 0 or idx == total_active_codes:
+            if idx % 50 == 0 or idx == total_active_codes:
                 update_ui(statuses, f"Fon Kaydı: ({idx}/{total_active_codes})")
                 
         conn.commit()
@@ -280,7 +280,7 @@ def run_tefas_sync_and_scoring():
                 INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal, letter_grade) VALUES (?, ?, ?, ?, ?, ?)
             """, (f_id, end_date, float(score), float(confidence), signal, letter_grade))
             
-            if idx % 10 == 0 or idx == total_funds_to_score:
+            if idx % 25 == 0 or idx == total_funds_to_score:
                 update_ui(statuses, f"Skorlanan: ({idx}/{total_funds_to_score}) fon")
                 
         conn.commit()

@@ -204,4 +204,14 @@ elif menu == "⚖️ Fon Karşılaştırma":
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Güvenilirlik Testi (Backtest)")
     st.markdown("---")
-    st.markdown("### 📊 Tarihsel Backtest Sonuçları\n* **1 Aylık:** `%87.35`\n* **3 Aylık:** `%91.75`\n* **6 Aylık:** `%95.82`")
+    st.markdown("""
+    ### 🧠 Tarihsel Backtest Nedir?
+    **Tarihsel Backtest**, 100 puanlık quant skorlama sistemimizin geçmiş piyasa verileri üzerinde test edilmesidir. 
+    Sistemin geçmişte 'BUY' (Al) sinyali ürettiği fonların ilerleyen dönemlerde (1, 3 ve 6 ay sonra) ne kadar kazandırdığı 
+    analiz edilerek stratejinin başarı ve tutarlılık oranı ölçülmüştür.
+    
+    ### 📊 Strateji Başarı Oranları
+    * **1 Aylık Performans Başarısı:** `%87.35`
+    * **3 Aylık Performans Başarısı:** `%91.75`
+    * **6 Aylık Performans Başarısı:** `%95.82`
+    """)

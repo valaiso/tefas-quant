@@ -4,6 +4,7 @@ import datetime
 import os
 import time
 import streamlit as st
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     from tefas import Crawler
@@ -27,7 +28,8 @@ def get_db_connection():
             title TEXT,
             category TEXT,
             status TEXT DEFAULT 'ACTIVE',
-            is_qualified INTEGER DEFAULT 0
+            is_qualified INTEGER DEFAULT 0,
+            history_completed INTEGER DEFAULT 0
         )
     """)
     cursor.execute("""
@@ -58,6 +60,7 @@ def get_db_connection():
     
     migrations = [
         ("funds", "is_qualified INTEGER DEFAULT 0"),
+        ("funds", "history_completed INTEGER DEFAULT 0"),
         ("fund_scores", "letter_grade TEXT"),
         ("fund_scores", "signal TEXT"),
         ("fund_scores", "confidence_score REAL")
@@ -84,27 +87,17 @@ def evaluate_signal_and_grade(score, confidence, day_count):
     if day_count < 15:
         return 'Yeni Fon (Kuluçkada)', 'Zayıf'
 
-    if score >= 90:
-        signal = 'Güçlü AL'
-    elif score >= 75:
-        signal = 'AL / İzle'
-    elif score >= 60:
-        signal = 'Bekle'
-    elif score >= 40:
-        signal = 'Zayıf'
-    else:
-        signal = 'Uzak Dur'
+    if score >= 90: signal = 'Güçlü AL'
+    elif score >= 75: signal = 'AL / İzle'
+    elif score >= 60: signal = 'Bekle'
+    elif score >= 40: signal = 'Zayıf'
+    else: signal = 'Uzak Dur'
 
-    if score >= 90:
-        letter_grade = 'A+'
-    elif score >= 80:
-        letter_grade = 'A'
-    elif score >= 70:
-        letter_grade = 'B'
-    elif score >= 60:
-        letter_grade = 'C'
-    else:
-        letter_grade = 'Zayıf'
+    if score >= 90: letter_grade = 'A+'
+    elif score >= 80: letter_grade = 'A'
+    elif score >= 70: letter_grade = 'B'
+    elif score >= 60: letter_grade = 'C'
+    else: letter_grade = 'Zayıf'
 
     if confidence < 25:
         signal = 'Uzak Dur'
@@ -168,22 +161,33 @@ def calculate_confidence_and_score(p_history):
 
     return float(confidence), float(score), signal, letter_grade
 
-def run_tefas_sync_and_scoring():
+def fetch_chunk_worker(args):
+    s_str, e_str, codes_subset = args
+    try:
+        df = tefas_crawler.fetch(start=s_str, end=e_str)
+        if df is not None and not df.empty:
+            return df[df['code'].isin(codes_subset)]
+    except Exception as e:
+        print(f"Paralel çekme hatası ({s_str} - {e_str}): {e}")
+    return None
+
+def run_tefas_sync_and_scoring(full_sync=False):
     if not TEFAS_LIB_READY:
         return False, "TEFAS kütüphanesi yüklü değil!"
     
     progress_bar = st.progress(0)
     status_container = st.empty()
     
+    sync_mode_title = "Tam Senkronizasyon" if full_sync else "Artımlı (Incremental) Senkronizasyon"
     labels = [
-        "TEFAS API'den Piyasa Verileri Taranıyor (Hızlı Keşif)",
-        "Yeni Fon Keşfi (Maks 100 Yeni Fon) & Mevcut Fon Eşlemesi",
-        "Eski ve Yeni Fiyat Geçmişleri Güncelleniyor (Hızlı Sync - 1.3 Yıl)",
-        "100 Puanlık Kantitatif Skor ve Kalite Matrisi Hesaplanıyor"
+        f"TEFAS API Taranıyor ({'35 Gün' if full_sync else 'Son 7 Gün'} Incremental Scan)",
+        "Yeni Fon Keşfi & Veritabanı Eşlemesi",
+        "Geçmiş Fiyat Senkronizasyonu (Paralel Worker / history_completed)",
+        "Bellek İçi (In-Memory) Toplu Skor Matrisi Hesaplama"
     ]
     
     def update_ui(statuses, detail=""):
-        lines = []
+        lines = [f"**Mod:** `{sync_mode_title}`\n"]
         icons = {0: "⏳", 1: "🔄", 2: "✅"}
         for idx, label in enumerate(labels):
             st_code = statuses[idx]
@@ -194,22 +198,23 @@ def run_tefas_sync_and_scoring():
         status_container.markdown("\n\n".join(lines))
 
     statuses = [1, 0, 0, 0]
-    update_ui(statuses, "Piyasadaki aktif fonlar taranıyor...")
+    update_ui(statuses, "Piyasa verileri taranıyor...")
     progress_bar.progress(10)
     
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         
-        # 1. Veritabanındaki mevcut fon kodlarını al
         existing_codes_df = pd.read_sql("SELECT code FROM funds", con=conn)
         existing_codes = set(existing_codes_df['code'].tolist()) if not existing_codes_df.empty else set()
         old_count = len(existing_codes)
         
         today = datetime.date.today()
-        recent_start = today - datetime.timedelta(days=35)
+        # 8. Madde: Artımlı modda sadece 7 gün taranır
+        scan_days = 35 if (full_sync or old_count == 0) else 7
+        recent_start = today - datetime.timedelta(days=scan_days)
         
-        # AŞAMA 1: Son 35 günlük hızlı veri çekerek tüm piyasayı tara
+        # AŞAMA 1: Son günlerin verisini çek
         try:
             recent_df = tefas_crawler.fetch(start=recent_start.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'))
         except Exception as e:
@@ -224,18 +229,17 @@ def run_tefas_sync_and_scoring():
         recent_df = recent_df.drop_duplicates(subset=['code', 'date'])
         all_fetched_codes = set(recent_df['code'].unique()) if 'code' in recent_df.columns else set()
         
-        # Veritabanında OLMAYAN yepyeni fonları bul (Maks 100 fon)
         brand_new_codes = [c for c in sorted(list(all_fetched_codes)) if c not in existing_codes]
         selected_new_codes = brand_new_codes[:100]
         new_funds_detected = len(selected_new_codes)
         
-        update_ui(statuses, f"Eski Fonlar: {old_count} | Eklenen Yeni Fon: +{new_funds_detected}")
+        update_ui(statuses, f"Mevcut: {old_count} | Yeni Algılanan Fon: +{new_funds_detected}")
         progress_bar.progress(40)
         
         allowed_codes = existing_codes.union(set(selected_new_codes))
         recent_df = recent_df[recent_df['code'].isin(allowed_codes)]
         
-        # 2. Fon tanımlarını kaydet/güncelle
+        # Fon Künyelerini kaydet
         for code in allowed_codes:
             match = recent_df[recent_df['code'] == code]
             title, category = code, "Diğer"
@@ -245,7 +249,7 @@ def run_tefas_sync_and_scoring():
             
             is_qual = detect_qualified_fund(title, category)
             cursor.execute("""
-                INSERT INTO funds (code, title, category, status, is_qualified) VALUES (?, ?, ?, 'ACTIVE', ?)
+                INSERT INTO funds (code, title, category, status, is_qualified, history_completed) VALUES (?, ?, ?, 'ACTIVE', ?, 0)
                 ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE', is_qualified=excluded.is_qualified
             """, (code, title, category, is_qual))
             
@@ -255,74 +259,104 @@ def run_tefas_sync_and_scoring():
         recent_df['fund_id'] = recent_df['code'].map(funds_map)
         recent_df = recent_df.dropna(subset=['fund_id'])
         
+        # 5. Madde: executemany ile güncel fiyatları yaz
         price_records = [(int(row['fund_id']), str(row['date'])[:10], float(row['price'])) for _, row in recent_df.iterrows()]
         cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", price_records)
         conn.commit()
 
-        # AŞAMA 2: Ultra Hızlı Geçmiş Senkronizasyonu (500 Gün / 180'er Günlük Parçalar)
+        # AŞAMA 2: Geçmiş Senkronizasyonu (2. Madde: history_completed Bayrağı & 7. Madde: Paralel Çekim)
         statuses = [2, 2, 1, 0]
         progress_bar.progress(60)
         
-        # Veritabanında 60 günden az verisi olan fonları bul
-        counts_df = pd.read_sql("SELECT f.code, COUNT(p.date) as cnt FROM funds f LEFT JOIN fund_daily_prices p ON f.id = p.fund_id GROUP BY f.code", con=conn)
-        needing_history_codes = set(counts_df[counts_df['cnt'] < 60]['code'].tolist())
+        # Sadece history_completed = 0 olan (geçmişi henüz çekilmemiş) fonları bul
+        if full_sync:
+            needing_history = set(allowed_codes)
+        else:
+            incomplete_df = pd.read_sql("SELECT code FROM funds WHERE history_completed = 0", con=conn)
+            needing_history = set(incomplete_df['code'].tolist())
         
-        if needing_history_codes:
-            update_ui(statuses, f"{len(needing_history_codes)} yeni fon için 1.3 yıllık geçmiş indiriliyor...")
+        if needing_history:
+            update_ui(statuses, f"{len(needing_history)} yeni fon için 500 günlük geçmiş paralel çekiliyor...")
             
-            # 5 yıl yerine 500 gün (1.3 yıl) çekiyoruz -> Skorlama için 365 gün yettiğinden %100 uyumlu
             start_hist = today - datetime.timedelta(days=500)
-            end_hist = today - datetime.timedelta(days=30)
+            end_hist = today - datetime.timedelta(days=scan_days)
             
+            # Tarih aralıklarını 180'er günlük parçalara böl
+            tasks = []
             curr_start = start_hist
             while curr_start < end_hist:
-                curr_end = min(curr_start + datetime.timedelta(days=180), end_hist) # 90 gün yerine 180 gün
-                s_str = curr_start.strftime('%Y-%m-%d')
-                e_str = curr_end.strftime('%Y-%m-%d')
-                
-                update_ui(statuses, f"Geçmiş Veri Çekiliyor: {curr_start.strftime('%d.%m.%Y')} - {curr_end.strftime('%d.%m.%Y')}")
-                
-                try:
-                    chunk_df = tefas_crawler.fetch(start=s_str, end=e_str)
-                    if chunk_df is not None and not chunk_df.empty:
-                        chunk_df = chunk_df[chunk_df['code'].isin(needing_history_codes)]
-                        if not chunk_df.empty:
-                            chunk_df['fund_id'] = chunk_df['code'].map(funds_map)
-                            chunk_df = chunk_df.dropna(subset=['fund_id'])
-                            c_records = [(int(r['fund_id']), str(r['date'])[:10], float(r['price'])) for _, r in chunk_df.iterrows()]
-                            cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", c_records)
-                            conn.commit()
-                except Exception as e:
-                    print(f"⚠️ Parça çekme uyarısı ({s_str} - {e_str}): {e}")
-                
-                time.sleep(0.2) # Bekleme süresi 0.2 saniyeye indirildi
+                curr_end = min(curr_start + datetime.timedelta(days=180), end_hist)
+                tasks.append((curr_start.strftime('%Y-%m-%d'), curr_end.strftime('%Y-%m-%d'), needing_history))
                 curr_start = curr_end + datetime.timedelta(days=1)
+                
+            # 7. Madde: 4 Worker ile Paralel İstek
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [executor.submit(fetch_chunk_worker, task) for task in tasks]
+                for future in as_completed(futures):
+                    chunk_df = future.result()
+                    if chunk_df is not None and not chunk_df.empty:
+                        chunk_df['fund_id'] = chunk_df['code'].map(funds_map)
+                        chunk_df = chunk_df.dropna(subset=['fund_id'])
+                        c_records = [(int(r['fund_id']), str(r['date'])[:10], float(r['price'])) for _, r in chunk_df.iterrows()]
+                        cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", c_records)
+                        conn.commit()
+                        
+            # Tamamlanan fonları history_completed = 1 yap
+            completed_ids = [funds_map[code] for code in needing_history if code in funds_map]
+            if completed_ids:
+                cursor.executemany("UPDATE funds SET history_completed = 1 WHERE id = ?", [(fid,) for fid in completed_ids])
+                conn.commit()
         else:
-            update_ui(statuses, "Tüm fonların geçmişi tam, sadece güncel fiyatlar güncellendi.")
+            update_ui(statuses, "Tüm fonların geçmişi tamamlanmış (history_completed=1). Atlandı! 🚀")
 
-        # AŞAMA 3: Skorlama Matrisi Hesaplama
+        # AŞAMA 3: RAM Üzerinde Toplu Skorlama (4. Madde: N+1 Sorgu Çözümü & 1-3. Madde: Değişen Fonları Skorlama)
         statuses = [2, 2, 2, 1]
-        update_ui(statuses, "100 Puanlık matris hesaplanıyor...")
+        update_ui(statuses, "RAM'e veri yükleniyor ve matris hesaplanıyor...")
         progress_bar.progress(85)
 
-        all_funds = pd.read_sql("SELECT id, code FROM funds WHERE status = 'ACTIVE'", con=conn)
-        total_funds_to_score = len(all_funds)
-        end_date = today.strftime('%Y-%m-%d')
-        
-        for idx, (_, fund) in enumerate(all_funds.iterrows(), 1):
-            f_id = int(fund['id'])
-            p_history = pd.read_sql(f"SELECT date, price FROM fund_daily_prices WHERE fund_id = {f_id} ORDER BY date ASC", con=conn)
-            confidence, score, signal, letter_grade = calculate_confidence_and_score(p_history)
+        # 1. Son fiyatı değişen veya skor tablosunda hiç skoru olmayan fonların ID'lerini bul
+        affected_funds_query = """
+            SELECT DISTINCT f.id 
+            FROM funds f
+            LEFT JOIN fund_scores s ON f.id = s.fund_id AND s.date = ?
+            WHERE f.status = 'ACTIVE' AND (s.fund_id IS NULL OR f.history_completed = 0)
+        """
+        if full_sync:
+            funds_to_score_ids = [f_id for f_id in funds_map.values()]
+        else:
+            # Sadece son veri girişi yapılan/etkilenen fonlar
+            affected_df = pd.read_sql(f"SELECT DISTINCT fund_id FROM fund_daily_prices WHERE date >= '{recent_start.strftime('%Y-%m-%d')}'", con=conn)
+            funds_to_score_ids = affected_df['fund_id'].tolist() if not affected_df.empty else list(funds_map.values())
+
+        if funds_to_score_ids:
+            # 4. Madde: TEK SORGUDA TÜM FİYAT GEÇMİŞİNİ RAM'E ÇEK
+            ids_str = ",".join(map(str, funds_to_score_ids))
+            all_prices_df = pd.read_sql(f"""
+                SELECT fund_id, date, price 
+                FROM fund_daily_prices 
+                WHERE fund_id IN ({ids_str}) 
+                ORDER BY fund_id, date ASC
+            """, con=conn)
             
-            cursor.execute("""
-                INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal, letter_grade) VALUES (?, ?, ?, ?, ?, ?)
-            """, (f_id, end_date, float(score), float(confidence), signal, letter_grade))
+            # Memory Groupby (In-Memory Gruplama)
+            grouped_prices = dict(tuple(all_prices_df.groupby('fund_id')))
             
-            if idx % 50 == 0 or idx == total_funds_to_score:
-                update_ui(statuses, f"Skorlanan: ({idx}/{total_funds_to_score}) fon")
-                
-        conn.commit()
-        
+            end_date = today.strftime('%Y-%m-%d')
+            score_records = []
+            
+            for f_id in funds_to_score_ids:
+                if f_id in grouped_prices:
+                    p_history = grouped_prices[f_id]
+                    confidence, score, signal, letter_grade = calculate_confidence_and_score(p_history)
+                    score_records.append((f_id, end_date, float(score), float(confidence), signal, letter_grade))
+
+            # Toplu Skor Yazımı
+            cursor.executemany("""
+                INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal, letter_grade) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, score_records)
+            conn.commit()
+
         sync_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
         cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_sync', ?)", (sync_time_str,))
         conn.commit()
@@ -333,12 +367,9 @@ def run_tefas_sync_and_scoring():
         update_ui(statuses, "Tamamlandı!")
         progress_bar.progress(100)
         
-        if new_funds_detected > 0:
-            msg = f"Başarılı! Toplam Fon: {total_after} (Eski: {old_count} | Eklenen Yeni Fon: +{new_funds_detected}). Tüm fonlar senkronize edildi."
-        else:
-            msg = f"Başarılı! Yeni fon bulunamadı. Mevcut {total_after} fonun en güncel verileri ve skorları yenilendi."
-            
+        msg = f"Başarılı! Toplam Fon: {total_after} | Senkronize Edilen / Skorlanan: {len(funds_to_score_ids)} fon."
         return True, msg
+
     except Exception as e:
         return False, f"Hata: {str(e)}"
     finally:

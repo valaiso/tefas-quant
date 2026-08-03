@@ -13,10 +13,7 @@ st.set_page_config(
 )
 
 st.markdown("""
-    <style>
-    .main { background-color: #0e1117; color: #c9d1d9; }
-    .stMetric { background-color: #161b22; padding: 15px; border-radius: 8px; border: 1px solid #30363d; }
-    </style>
+    
 """, unsafe_allow_html=True)
 
 conn = get_db_connection()
@@ -46,27 +43,14 @@ if "favorites" not in st.session_state:
 
 st.sidebar.markdown(
     """
-    <style>
-        .qualified-toggle-container {
-            position: fixed;
-            bottom: 15px;
-            left: 15px;
-            z-index: 99999;
-            background-color: rgba(22, 27, 34, 0.95);
-            padding: 4px 8px;
-            border-radius: 6px;
-            border: 1px solid #30363d;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-            width: 220px;
-        }
-    </style>
-    <div class="qualified-toggle-container">
+    
+    
     """,
     unsafe_allow_html=True
 )
 
 include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False)
-st.sidebar.markdown("</div>", unsafe_allow_html=True)
+st.sidebar.markdown("", unsafe_allow_html=True)
 
 # --- 3. VERİ YÜKLEME ---
 def load_universe_data():
@@ -110,17 +94,30 @@ if menu == "🔄 Fon Senkronizasyonu":
     st.title("🔄 Otomatik Fon Senkronizasyon Merkezi")
     st.markdown("---")
     st.markdown("""
-    Tek tuşla `scoring.py` motoru üzerinden 5 yıllık fon geçmişini senkronize edebilir, nitelikli fonları ayıklayabilir ve kademeli güven cezası uygulayabilirsin.
+    Bu ekran üzerinden TEFAS verilerini senkronize edebilir, nitelikli fonları ayıklayabilir ve matris skorlamasını çalıştırabilirsin.
     """)
     
-    if st.button("🚀 Motoru Çalıştır & Fonları Güncelle", type="primary"):
-        with st.spinner("Motor çalışıyor, veriler işleniyor..."):
-            success, msg = run_tefas_sync_and_scoring()
-            if success:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("⚡ Hızlı Güncelleme (Son 30 Gün)", use_container_width=True, type="primary", help="Son 30 günü tarar, sadece fiyatı değişen veya yeni fonları günceller. (~5-8 sn)"):
+            with st.spinner("Hızlı güncelleme çalıştırılıyor..."):
+                success, msg = run_tefas_sync_and_scoring(full_sync=False)
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    with col2:
+        if st.button("🔄 Tam Senkronizasyon (500 Gün)", use_container_width=True, help="Tüm veritabanını ve 500 günlük geçmişi baştan tazeleyip tüm matrisi sıfırdan skorlar. (~25-35 sn)"):
+            with st.spinner("Tam senkronizasyon çalıştırılıyor..."):
+                success, msg = run_tefas_sync_and_scoring(full_sync=True)
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
 
 # ==========================================
 # MODÜL 1: ANA DASHBOARD

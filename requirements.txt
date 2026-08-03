@@ -1,5 +1,4 @@
 streamlit
 pandas
-matplotlib
-openai
-requests
+numpy
+tefas

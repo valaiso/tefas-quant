@@ -22,10 +22,33 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. VERİTABANI BAĞLANTI (CACHED) ---
+# --- 2. VERİTABANI BAĞLANTI & TABLO KONTROLÜ (CACHED) ---
 @st.cache_resource
 def get_db_connection():
-    return sqlite3.connect("tefas.db", check_same_thread=False)
+    conn = sqlite3.connect("tefas.db", check_same_thread=False)
+    
+    # Sunucuda tablolar yoksa otomatik oluşturur (Hata almayı önler)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS funds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE,
+            name TEXT,
+            category TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fund_scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fund_id INTEGER,
+            date TEXT,
+            total_score REAL,
+            signal TEXT,
+            FOREIGN KEY (fund_id) REFERENCES funds(id)
+        )
+    """)
+    conn.commit()
+    return conn
 
 conn = get_db_connection()
 
@@ -107,7 +130,7 @@ if menu == "🏠 Ana Dashboard":
                 st.rerun()
 
     else:
-        st.warning("Veritabanında henüz skor verisi bulunamadı. Lütfen `generate_history_scores.py` scriptini çalıştırın.")
+        st.warning("Veritabanında henüz skor verisi bulunamadı. Lütfen arka planda verilerin oluştuğundan emin olun.")
 
 # ==========================================
 # MODÜL 2: FON TARAMA & FİLTRELEME
@@ -179,7 +202,6 @@ elif menu == "📊 Fon Detay & AI Raporu":
 
         st.markdown("### 🧠 AI Quant Analist Raporu")
         
-        # Deterministik veriden üretilen simüle edilmiş AI JSON Rapor Kartı (Blackberry/Bloomberg tarzı)
         st.markdown(f"""
         > **Genel Durum:** `{fund_row['code']}` kodlu fon, güçlü momentum ve istikrarlı getiri yapısıyla öne çıkmaktadır.
         > 
@@ -193,7 +215,6 @@ elif menu == "📊 Fon Detay & AI Raporu":
         > **🎯 Sonuç:** Uzun vadeli stratejiler için uygun bir yapı sergilemektedir.
         """)
         
-        # İsteğe bağlı canlı AI sohbeti simülasyonu (Kullanıcı ek soru sorabilir)
         user_question = st.text_input("Bu fon hakkında yapay zekaya ek bir şey sor (Örn: 'Riski nedir?'):")
         if user_question:
             st.info(f"AI Yanıtı: '{user_question}' sorgunuza istinaden; fonun beta katsayısı düşük olduğu için piyasa düşüşlerinde dirençlidir.")

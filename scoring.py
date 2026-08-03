@@ -55,6 +55,21 @@ def get_db_connection():
             value TEXT
         )
     """)
+    
+    # Otomatik veritabanı şema güncellemesi (Eski tablolarda eksik sütun kalmaması için)
+    migrations = [
+        ("funds", "is_qualified INTEGER DEFAULT 0"),
+        ("fund_scores", "letter_grade TEXT"),
+        ("fund_scores", "signal TEXT"),
+        ("fund_scores", "confidence_score REAL")
+    ]
+    for table, col_def in migrations:
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass # Sütun zaten varsa hata verme, devam et
+
     conn.commit()
     return conn
 
@@ -206,7 +221,6 @@ def run_tefas_sync_and_scoring():
             except Exception:
                 pass
             
-            # Rate-limit önlemi için istekler arası bekleme
             time.sleep(1.5)
             progress_bar.progress(int(5 + (i + 1) * 14))
             

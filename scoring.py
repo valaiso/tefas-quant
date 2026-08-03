@@ -2,7 +2,6 @@ import pandas as pd
 import sqlite3
 import datetime
 import os
-import time
 import streamlit as st
 
 try:
@@ -56,7 +55,7 @@ def get_db_connection():
         )
     """)
     
-    # Otomatik veritabanı şema güncellemesi (Eski tablolarda eksik sütun kalmaması için)
+    # Otomatik veritabanı şema güncellemesi
     migrations = [
         ("funds", "is_qualified INTEGER DEFAULT 0"),
         ("fund_scores", "letter_grade TEXT"),
@@ -68,7 +67,7 @@ def get_db_connection():
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
             conn.commit()
         except sqlite3.OperationalError:
-            pass # Sütun zaten varsa hata verme, devam et
+            pass
 
     conn.commit()
     return conn
@@ -177,7 +176,7 @@ def run_tefas_sync_and_scoring():
     status_container = st.empty()
     
     labels = [
-        "TEFAS API'den Güncel Veriler Çekiliyor (Maks 100 Fon - 5 Yıllık Dilimler)",
+        "TEFAS API'den 5 Yıllık Fon Verileri Çekiliyor (Maks 100 Fon)",
         "Fon Listesi ve Nitelikli Fon Tespiti Yapılıyor",
         "Eski ve Yeni Fiyat Geçmişleri / Tarihler Güncelleniyor",
         "100 Puanlık Kantitatif Skor ve Kalite Matrisi Hesaplanıyor"
@@ -195,8 +194,8 @@ def run_tefas_sync_and_scoring():
         status_container.markdown("\n\n".join(lines))
 
     statuses = [1, 0, 0, 0]
-    update_ui(statuses, "Dilim 1/5 indiriliyor...")
-    progress_bar.progress(5)
+    update_ui(statuses, "5 yıllık fon arşivi indiriliyor...")
+    progress_bar.progress(10)
     
     conn = get_db_connection()
     try:
@@ -207,31 +206,22 @@ def run_tefas_sync_and_scoring():
         old_count = len(existing_codes)
         
         today = datetime.date.today()
-        all_dfs = []
+        start_date = today - datetime.timedelta(days=5 * 365)
         
-        for i in range(5):
-            chunk_end = today - datetime.timedelta(days=i * 365)
-            chunk_start = today - datetime.timedelta(days=(i + 1) * 365)
+        try:
+            prices_df = tefas_crawler.fetch(start=start_date.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'))
+        except Exception as e:
+            return False, f"TEFAS API bağlantı hatası: {str(e)}"
             
-            update_ui(statuses, f"Yıl Dilimi {i+1}/5 indiriliyor...")
-            try:
-                df_chunk = tefas_crawler.fetch(start=chunk_start.strftime('%Y-%m-%d'), end=chunk_end.strftime('%Y-%m-%d'))
-                if df_chunk is not None and not df_chunk.empty:
-                    all_dfs.append(df_chunk)
-            except Exception:
-                pass
+        if prices_df is None or prices_df.empty:
+            return False, "TEFAS API veri döndüremedi."
             
-            time.sleep(1.5)
-            progress_bar.progress(int(5 + (i + 1) * 14))
-            
-        if not all_dfs:
-            return False, "TEFAS API veri döndüremedi. (Sunucu yoğun olabilir, lütfen tekrar deneyin)."
-            
+        progress_bar.progress(40)
+        
         statuses = [2, 1, 0, 0]
         update_ui(statuses, "Fonlar taranıyor ve güncelleniyor...")
-        progress_bar.progress(80)
+        progress_bar.progress(60)
         
-        prices_df = pd.concat(all_dfs, ignore_index=True)
         prices_df = prices_df.drop_duplicates(subset=['code', 'date'])
         active_codes = prices_df['code'].unique() if 'code' in prices_df.columns else []
         
@@ -266,7 +256,7 @@ def run_tefas_sync_and_scoring():
         
         statuses = [2, 2, 1, 0]
         update_ui(statuses, "Fiyat geçmişleri ve yeni tarihler işleniyor...")
-        progress_bar.progress(90)
+        progress_bar.progress(80)
         
         for _, row in prices_df.iterrows():
             cursor.execute("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", 
@@ -275,7 +265,7 @@ def run_tefas_sync_and_scoring():
 
         statuses = [2, 2, 2, 1]
         update_ui(statuses, "100 Puanlık matris hesaplanıyor...")
-        progress_bar.progress(95)
+        progress_bar.progress(90)
 
         all_funds = pd.read_sql("SELECT id, code FROM funds WHERE status = 'ACTIVE'", con=conn)
         total_funds_to_score = len(all_funds)

@@ -25,7 +25,6 @@ def init_db():
     conn = sqlite3.connect(db_path, check_same_thread=False)
     cursor = conn.cursor()
     
-    # Tabloları oluştur
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS funds (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,32 +43,6 @@ def init_db():
             FOREIGN KEY (fund_id) REFERENCES funds(id)
         )
     """)
-    
-    # EĞER VERİTABANI BOŞSA TEST VERİSİ EKLE (Arayüzü görebilmek için)
-    cursor.execute("SELECT COUNT(*) FROM funds")
-    if cursor.fetchone()[0] == 0:
-        today = datetime.datetime.now().strftime("%Y-%m-%d")
-        
-        # Örnek Fonlar
-        funds_data = [
-            ("MAC", "Marmara Capital Hisse Senedi Fonu", "Hisse Senedi"),
-            ("TCD", "Tacirler Portföy Değişken Fon", "Değişken"),
-            ("AFT", "Ak Portföy Yeni Teknolojiler Yabancı Hisse", "Yabancı Hisse"),
-            ("IIH", "İstanbul Portföy Üçüncü Hisse Senedi Fonu", "Hisse Senedi"),
-            ("KUB", "Kuveyt Türk Portföy Eurobond Fonu", "Borçlanma Araçları")
-        ]
-        cursor.executemany("INSERT INTO funds (code, name, category) VALUES (?, ?, ?)", funds_data)
-        
-        # Örnek Skorlar (1'den 5'e kadar olan ID'ler için)
-        scores_data = [
-            (1, today, 88.5, "BUY"),
-            (2, today, 75.0, "WATCH"),
-            (3, today, 92.1, "BUY"),
-            (4, today, 45.3, "SELL"),
-            (5, today, 62.8, "WATCH")
-        ]
-        cursor.executemany("INSERT INTO fund_scores (fund_id, date, total_score, signal) VALUES (?, ?, ?, ?)", scores_data)
-        
     conn.commit()
     return conn
 
@@ -86,7 +59,7 @@ menu = st.sidebar.radio(
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
 
-# --- 4. HATA KORUMALI VERİ YÜKLEME ---
+# --- 4. HATA KORUMALI VERİ YÜKLEME (TÜM FONLARI GETİR) ---
 def load_data():
     try:
         funds_df = pd.read_sql("SELECT id, code, title AS name, category FROM funds", con=conn)
@@ -99,8 +72,10 @@ def load_data():
 funds_df, scores_df = load_data()
 
 if not scores_df.empty and not funds_df.empty:
-    latest_date_raw = scores_df['date'].max()
-    # Tarih bilgisinin yanına saat ekleme (Eğer saat bilgisi veritabanında yoksa anlık sistem saatini ekler)
+    scores_df['date_dt'] = pd.to_datetime(scores_df['date'])
+    latest_scores = scores_df.sort_values('date_dt').groupby('fund_id').tail(1).copy()
+    latest_date_raw = latest_scores['date'].max()
+    
     try:
         if len(str(latest_date_raw)) <= 10:
             current_time_str = datetime.datetime.now().strftime("%H:%M:%S")
@@ -110,7 +85,6 @@ if not scores_df.empty and not funds_df.empty:
     except:
         latest_date = str(latest_date_raw)
         
-    latest_scores = scores_df[scores_df['date'] == scores_df['date'].max()].copy()
     merged_df = pd.merge(latest_scores, funds_df, left_on='fund_id', right_on='id', how='inner')
 else:
     merged_df = pd.DataFrame()
@@ -157,10 +131,10 @@ if menu == "⚡ Ana Dashboard":
                     st.session_state.favorites.append(row['code'])
                 st.rerun()
     else:
-        st.info("⚠️ Veritabanında henüz skor verisi bulunamadı. Veriler yüklendiğinde buraya yansıyacaktır.")
+        st.info("⚠️ Veritabanında henüz skor verisi bulunamadı.")
 
 # ==========================================
-# MODÜL 2: FON TARAMA & FİLTRELEME (ARAMA ÇUBUĞU EKLENDİ)
+# MODÜL 2: FON TARAMA & FİLTRELEME
 # ==========================================
 elif menu == "🔍 Fon Tarama & Filtreleme":
     st.title("🔍 Gelişmiş Fon Tarama Matrisi")

@@ -2,6 +2,7 @@ import pandas as pd
 import sqlite3
 import datetime
 import os
+import time
 import streamlit as st
 
 try:
@@ -179,7 +180,7 @@ def run_tefas_sync_and_scoring():
         status_container.markdown("\n\n".join(lines))
 
     statuses = [1, 0, 0, 0]
-    update_ui(statuses, "Dilim 1/5 (Fiyat arşivi indiriliyor...)")
+    update_ui(statuses, "Dilim 1/5 indiriliyor...")
     progress_bar.progress(5)
     
     conn = get_db_connection()
@@ -204,10 +205,13 @@ def run_tefas_sync_and_scoring():
                     all_dfs.append(df_chunk)
             except Exception:
                 pass
+            
+            # Rate-limit önlemi için istekler arası bekleme
+            time.sleep(1.5)
             progress_bar.progress(int(5 + (i + 1) * 14))
             
         if not all_dfs:
-            return False, "TEFAS API veri döndüremedi."
+            return False, "TEFAS API veri döndüremedi. (Sunucu yoğun olabilir, lütfen tekrar deneyin)."
             
         statuses = [2, 1, 0, 0]
         update_ui(statuses, "Fonlar taranıyor ve güncelleniyor...")
@@ -232,7 +236,6 @@ def run_tefas_sync_and_scoring():
             if code not in existing_codes:
                 new_funds_detected += 1
             
-            # Eski fonları yeni bilgilerle güncel tut (UPSERT)
             cursor.execute("""
                 INSERT INTO funds (code, title, category, status, is_qualified) VALUES (?, ?, ?, 'ACTIVE', ?)
                 ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE', is_qualified=excluded.is_qualified
@@ -251,7 +254,6 @@ def run_tefas_sync_and_scoring():
         update_ui(statuses, "Fiyat geçmişleri ve yeni tarihler işleniyor...")
         progress_bar.progress(90)
         
-        # INSERT OR REPLACE ile eski/yeni tarihli tüm fiyatlar güncellenir
         for _, row in prices_df.iterrows():
             cursor.execute("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", 
                            (int(row['fund_id']), str(row['date'])[:10], float(row['price'])))

@@ -2,6 +2,7 @@ import pandas as pd
 import sqlite3
 import datetime
 import os
+import streamlit as st
 
 try:
     from tefas import Crawler
@@ -30,7 +31,6 @@ def calculate_confidence_and_score(p_history):
     if day_count == 0:
         return 0.0, 50.0, "Yeni Fon (Kuluçkada)"
 
-    # 1. Çok Faktörlü Güven Hesabı (0 - 100)
     age_score = min(100.0, (day_count / 365.0) * 100.0)
     expected_days = (pd.to_datetime(p_history['date'].iloc[-1]) - pd.to_datetime(p_history['date'].iloc[0])).days + 1
     density_score = min(100.0, (day_count / max(1, expected_days)) * 100.0) if expected_days > 0 else 100.0
@@ -43,11 +43,9 @@ def calculate_confidence_and_score(p_history):
     confidence = (age_score * 0.40) + (density_score * 0.30) + (integrity_score * 0.20) + (recency_score * 0.10)
     confidence = min(100.0, max(0.0, confidence))
 
-    # 2. Ham Puan Hesabı
     returns_30d = (p_history['price'].iloc[-1] / p_history['price'].iloc[-30] - 1) * 100 if day_count >= 30 else 0
     raw_score = 50 + returns_30d * 2
 
-    # 3. Kademeli Güven Cezası
     def get_penalty(conf):
         if conf >= 95: return 0
         elif conf >= 90: return -1
@@ -64,7 +62,6 @@ def calculate_confidence_and_score(p_history):
     penalty = get_penalty(confidence)
     score = min(max(raw_score + penalty, 0), 100)
 
-    # 4. Sinyal Belirleme & Kilitler
     if day_count < 15:
         signal = 'Yeni Fon (Kuluçkada)'
     else:
@@ -84,15 +81,25 @@ def run_tefas_sync_and_scoring():
     if not TEFAS_LIB_READY:
         return False, "TEFAS kütüphanesi yüklü değil!"
     
+    # Canlı arayüz geri bildirimi için bileşenler
+    status_text = st.empty()
+    progress_bar = st.progress(0)
+    
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         today = datetime.date.today()
         all_dfs = []
         
+        status_text.text("📡 TEFAS API'den 5 yıllık tarihsel veriler parça parça çekiliyor...")
+        
         for i in range(5):
             chunk_end = today - datetime.timedelta(days=i * 365)
             chunk_start = today - datetime.timedelta(days=(i + 1) * 365)
+            
+            status_text.text(f"⏳ Dönem Sorgulanıyor: {chunk_start.strftime('%d.%m.%Y')} - {chunk_end.strftime('%d.%m.%Y')} (Yıl dilimi {i+1}/5)")
+            progress_bar.progress((i + 1) * 15) # İlk %75'lik kısım veri çekme
+            
             try:
                 df_chunk = tefas_crawler.fetch(start=chunk_start.strftime('%Y-%m-%d'), end=chunk_end.strftime('%Y-%m-%d'))
                 if df_chunk is not None and not df_chunk.empty:
@@ -103,6 +110,9 @@ def run_tefas_sync_and_scoring():
         if not all_dfs:
             return False, "TEFAS API veri döndüremedi."
             
+        status_text.text("🔄 Veriler birleştiriliyor ve veritabanı aktif fon listesi güncelleniyor...")
+        progress_bar.progress(80)
+        
         prices_df = pd.concat(all_dfs, ignore_index=True)
         prices_df = prices_df.drop_duplicates(subset=['code', 'date'])
         active_codes = prices_df['code'].unique() if 'code' in prices_df.columns else []
@@ -128,10 +138,16 @@ def run_tefas_sync_and_scoring():
         prices_df['fund_id'] = prices_df['code'].map(funds_map)
         prices_df = prices_df.dropna(subset=['fund_id'])
         
+        status_text.text("💾 Günlük fiyat hareketleri SQLite veritabanına yazılıyor...")
+        progress_bar.progress(90)
+        
         for _, row in prices_df.iterrows():
             cursor.execute("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", 
                            (int(row['fund_id']), str(row['date'])[:10], float(row['price'])))
         conn.commit()
+
+        status_text.text("⚡ Fonlar için çok faktörlü güven ve skor matrisi hesaplanıyor...")
+        progress_bar.progress(95)
 
         all_funds = pd.read_sql("SELECT id, code FROM funds WHERE status = 'ACTIVE'", con=conn)
         end_date = today.strftime('%Y-%m-%d')
@@ -149,6 +165,9 @@ def run_tefas_sync_and_scoring():
         sync_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
         cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_sync', ?)", (sync_time_str,))
         conn.commit()
+        
+        progress_bar.progress(100)
+        status_text.text("✅ Senkronizasyon ve skorlama başarıyla tamamlandı!")
         
         return True, f"Başarılı! Toplam {len(active_codes)} fon skorlandı."
     except Exception as e:

@@ -60,7 +60,7 @@ if "favorites" not in st.session_state:
 # --- 4. HATA KORUMALI VERİ YÜKLEME ---
 def load_data():
     try:
-        funds_df = pd.read_sql("SELECT * FROM funds", con=conn)
+        funds_df = pd.read_sql("SELECT id, code, title AS name, category FROM funds", con=conn)
         s_df = pd.read_sql("SELECT * FROM fund_scores", con=conn)
         return f_df, s_df
     except Exception:

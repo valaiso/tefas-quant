@@ -3,6 +3,7 @@ import sqlite3
 import datetime
 import os
 import time
+import random
 import streamlit as st
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -161,14 +162,33 @@ def calculate_confidence_and_score(p_history):
 
     return float(confidence), float(score), signal, letter_grade
 
+# --- TEFAS RATE LIMIT (BOT KORUMASI) AŞMA FONKSİYONU ---
+def safe_fetch(start_date, end_date, max_retries=3):
+    """TEFAS sunucuları bağlantıyı keserse bekleyip tekrar dener."""
+    for attempt in range(max_retries):
+        try:
+            df = tefas_crawler.fetch(start=start_date, end=end_date)
+            return df
+        except Exception as e:
+            if attempt < max_retries - 1:
+                sleep_time = random.uniform(3.0, 6.0) * (attempt + 1)
+                print(f"TEFAS API Darboğazı ({start_date}): {sleep_time:.1f}sn bekleniyor... (Deneme {attempt+1})")
+                time.sleep(sleep_time)
+            else:
+                raise e # Son deneme de başarısızsa hatayı dışarı fırlat
+    return None
+
 def fetch_chunk_worker(args):
     s_str, e_str, codes_subset = args
     try:
-        df = tefas_crawler.fetch(start=s_str, end=e_str)
+        # Worker'ların aynı milisaniyede TEFAS'a yüklenmesini önlemek için rastgele gecikme
+        time.sleep(random.uniform(0.5, 2.5))
+        
+        df = safe_fetch(start_date=s_str, end_date=e_str)
         if df is not None and not df.empty:
             return df[df['code'].isin(codes_subset)]
     except Exception as e:
-        print(f"Paralel çekme hatası ({s_str} - {e_str}): {e}")
+        print(f"Paralel çekme kalıcı hatası ({s_str} - {e_str}): {e}")
     return None
 
 def run_tefas_sync_and_scoring(full_sync=False):
@@ -192,7 +212,7 @@ def run_tefas_sync_and_scoring(full_sync=False):
         for idx, label in enumerate(labels):
             st_code = statuses[idx]
             if st_code == 1 and detail:
-                lines.append(f"{icons[st_code]} {label}    **`{detail}`**")
+                lines.append(f"{icons[st_code]} {label}    **`{detail}`**")
             else:
                 lines.append(f"{icons[st_code]} {label}")
         status_container.markdown("\n\n".join(lines))
@@ -214,14 +234,14 @@ def run_tefas_sync_and_scoring(full_sync=False):
         scan_days = 500 if full_sync else (35 if old_count == 0 else 30)
         recent_start = today - datetime.timedelta(days=scan_days)
         
-        # AŞAMA 1: Son günlerin verisini çek
+        # AŞAMA 1: Son günlerin verisini çek (safe_fetch kullanıldı)
         try:
-            recent_df = tefas_crawler.fetch(start=recent_start.strftime('%Y-%m-%d'), end=today.strftime('%Y-%m-%d'))
+            recent_df = safe_fetch(recent_start.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d'))
         except Exception as e:
-            return False, f"TEFAS API bağlantı hatası: {str(e)}"
+            return False, f"TEFAS API bağlantı hatası (Yeniden denemeler başarısız): {str(e)}"
             
         if recent_df is None or recent_df.empty:
-            return False, "TEFAS API veri döndüremedi."
+            return False, "TEFAS API veri döndüremedi. (Sunucu meşgul olabilir)"
             
         progress_bar.progress(25)
         statuses = [2, 1, 0, 0]
@@ -275,7 +295,7 @@ def run_tefas_sync_and_scoring(full_sync=False):
             needing_history = set(incomplete_df['code'].tolist())
         
         if needing_history:
-            update_ui(statuses, f"{len(needing_history)} fon için 500 günlük geçmiş paralel çekiliyor...")
+            update_ui(statuses, f"{len(needing_history)} fon için geçmiş limitlere takılmadan çekiliyor...")
             
             start_hist = today - datetime.timedelta(days=500)
             end_hist = today - datetime.timedelta(days=scan_days)
@@ -287,7 +307,8 @@ def run_tefas_sync_and_scoring(full_sync=False):
                 tasks.append((curr_start.strftime('%Y-%m-%d'), curr_end.strftime('%Y-%m-%d'), needing_history))
                 curr_start = curr_end + datetime.timedelta(days=1)
                 
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            # max_workers 4'ten 2'ye düşürüldü (Daha güvenli, rate limit'e takılmaz)
+            with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = [executor.submit(fetch_chunk_worker, task) for task in tasks]
                 for future in as_completed(futures):
                     chunk_df = future.result()

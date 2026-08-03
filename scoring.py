@@ -178,9 +178,9 @@ def run_tefas_sync_and_scoring(full_sync=False):
     progress_bar = st.progress(0)
     status_container = st.empty()
     
-    sync_mode_title = "Tam Senkronizasyon" if full_sync else "Artımlı (Incremental) Senkronizasyon"
+    sync_mode_title = "Tam Senkronizasyon (500 Gün)" if full_sync else "Hızlı Güncelleme (Son 30 Gün)"
     labels = [
-        f"TEFAS API Taranıyor ({'35 Gün' if full_sync else 'Son 7 Gün'} Incremental Scan)",
+        f"TEFAS API Taranıyor ({'500 Gün' if full_sync else 'Son 30 Gün'})",
         "Yeni Fon Keşfi & Veritabanı Eşlemesi",
         "Geçmiş Fiyat Senkronizasyonu (Paralel Worker / history_completed)",
         "Bellek İçi (In-Memory) Toplu Skor Matrisi Hesaplama"
@@ -192,7 +192,7 @@ def run_tefas_sync_and_scoring(full_sync=False):
         for idx, label in enumerate(labels):
             st_code = statuses[idx]
             if st_code == 1 and detail:
-                lines.append(f"{icons[st_code]} {label} &nbsp;&nbsp; **`{detail}`**")
+                lines.append(f"{icons[st_code]} {label}    **`{detail}`**")
             else:
                 lines.append(f"{icons[st_code]} {label}")
         status_container.markdown("\n\n".join(lines))
@@ -210,8 +210,8 @@ def run_tefas_sync_and_scoring(full_sync=False):
         old_count = len(existing_codes)
         
         today = datetime.date.today()
-        # 8. Madde: Artımlı modda sadece 7 gün taranır
-        scan_days = 35 if (full_sync or old_count == 0) else 7
+        # Hızlı Güncelleme için 30 gün, Tam Senkronizasyon veya ilk kurulum için 500 gün
+        scan_days = 500 if full_sync else (35 if old_count == 0 else 30)
         recent_start = today - datetime.timedelta(days=scan_days)
         
         # AŞAMA 1: Son günlerin verisini çek
@@ -259,16 +259,15 @@ def run_tefas_sync_and_scoring(full_sync=False):
         recent_df['fund_id'] = recent_df['code'].map(funds_map)
         recent_df = recent_df.dropna(subset=['fund_id'])
         
-        # 5. Madde: executemany ile güncel fiyatları yaz
+        # executemany ile güncel fiyatları yaz
         price_records = [(int(row['fund_id']), str(row['date'])[:10], float(row['price'])) for _, row in recent_df.iterrows()]
         cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", price_records)
         conn.commit()
 
-        # AŞAMA 2: Geçmiş Senkronizasyonu (2. Madde: history_completed Bayrağı & 7. Madde: Paralel Çekim)
+        # AŞAMA 2: Geçmiş Senkronizasyonu (history_completed Bayrağı & Paralel Çekim)
         statuses = [2, 2, 1, 0]
         progress_bar.progress(60)
         
-        # Sadece history_completed = 0 olan (geçmişi henüz çekilmemiş) fonları bul
         if full_sync:
             needing_history = set(allowed_codes)
         else:
@@ -276,12 +275,11 @@ def run_tefas_sync_and_scoring(full_sync=False):
             needing_history = set(incomplete_df['code'].tolist())
         
         if needing_history:
-            update_ui(statuses, f"{len(needing_history)} yeni fon için 500 günlük geçmiş paralel çekiliyor...")
+            update_ui(statuses, f"{len(needing_history)} fon için 500 günlük geçmiş paralel çekiliyor...")
             
             start_hist = today - datetime.timedelta(days=500)
             end_hist = today - datetime.timedelta(days=scan_days)
             
-            # Tarih aralıklarını 180'er günlük parçalara böl
             tasks = []
             curr_start = start_hist
             while curr_start < end_hist:
@@ -289,7 +287,6 @@ def run_tefas_sync_and_scoring(full_sync=False):
                 tasks.append((curr_start.strftime('%Y-%m-%d'), curr_end.strftime('%Y-%m-%d'), needing_history))
                 curr_start = curr_end + datetime.timedelta(days=1)
                 
-            # 7. Madde: 4 Worker ile Paralel İstek
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = [executor.submit(fetch_chunk_worker, task) for task in tasks]
                 for future in as_completed(futures):
@@ -301,35 +298,25 @@ def run_tefas_sync_and_scoring(full_sync=False):
                         cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", c_records)
                         conn.commit()
                         
-            # Tamamlanan fonları history_completed = 1 yap
             completed_ids = [funds_map[code] for code in needing_history if code in funds_map]
             if completed_ids:
                 cursor.executemany("UPDATE funds SET history_completed = 1 WHERE id = ?", [(fid,) for fid in completed_ids])
                 conn.commit()
         else:
-            update_ui(statuses, "Tüm fonların geçmişi tamamlanmış (history_completed=1). Atlandı! 🚀")
+            update_ui(statuses, "Tüm fonların geçmişi tamamlanmış. Atlandı! 🚀")
 
-        # AŞAMA 3: RAM Üzerinde Toplu Skorlama (4. Madde: N+1 Sorgu Çözümü & 1-3. Madde: Değişen Fonları Skorlama)
+        # AŞAMA 3: RAM Üzerinde Toplu Skorlama
         statuses = [2, 2, 2, 1]
         update_ui(statuses, "RAM'e veri yükleniyor ve matris hesaplanıyor...")
         progress_bar.progress(85)
 
-        # 1. Son fiyatı değişen veya skor tablosunda hiç skoru olmayan fonların ID'lerini bul
-        affected_funds_query = """
-            SELECT DISTINCT f.id 
-            FROM funds f
-            LEFT JOIN fund_scores s ON f.id = s.fund_id AND s.date = ?
-            WHERE f.status = 'ACTIVE' AND (s.fund_id IS NULL OR f.history_completed = 0)
-        """
         if full_sync:
-            funds_to_score_ids = [f_id for f_id in funds_map.values()]
+            funds_to_score_ids = list(funds_map.values())
         else:
-            # Sadece son veri girişi yapılan/etkilenen fonlar
             affected_df = pd.read_sql(f"SELECT DISTINCT fund_id FROM fund_daily_prices WHERE date >= '{recent_start.strftime('%Y-%m-%d')}'", con=conn)
             funds_to_score_ids = affected_df['fund_id'].tolist() if not affected_df.empty else list(funds_map.values())
 
         if funds_to_score_ids:
-            # 4. Madde: TEK SORGUDA TÜM FİYAT GEÇMİŞİNİ RAM'E ÇEK
             ids_str = ",".join(map(str, funds_to_score_ids))
             all_prices_df = pd.read_sql(f"""
                 SELECT fund_id, date, price 
@@ -338,9 +325,7 @@ def run_tefas_sync_and_scoring(full_sync=False):
                 ORDER BY fund_id, date ASC
             """, con=conn)
             
-            # Memory Groupby (In-Memory Gruplama)
             grouped_prices = dict(tuple(all_prices_df.groupby('fund_id')))
-            
             end_date = today.strftime('%Y-%m-%d')
             score_records = []
             
@@ -350,7 +335,6 @@ def run_tefas_sync_and_scoring(full_sync=False):
                     confidence, score, signal, letter_grade = calculate_confidence_and_score(p_history)
                     score_records.append((f_id, end_date, float(score), float(confidence), signal, letter_grade))
 
-            # Toplu Skor Yazımı
             cursor.executemany("""
                 INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal, letter_grade) 
                 VALUES (?, ?, ?, ?, ?, ?)

@@ -80,13 +80,13 @@ st.sidebar.markdown("## ⚡ TEFAS QUANT TERMINAL")
 st.sidebar.markdown("---")
 menu = st.sidebar.radio(
     "Navigasyon",
-    ["🏠 Ana Dashboard", "🔍 Fon Tarama & Filtreleme", "⭐ Favori Sepetim", "📊 Fon Detay & AI Raporu", "⚖️ Fon Karşılaştırma", "🚀 Backtest Performansı"]
+    ["⚡ Ana Dashboard", "🔍 Fon Tarama & Filtreleme", "⭐ Favori Sepetim", "📊 Fon Detay & AI Raporu", "⚖️ Fon Karşılaştırma", "🚀 Backtest Performansı"]
 )
 
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
 
-# --- 4. HATA KORUMALI VERİ YÜKLEME (DÜZELTİLDİ) ---
+# --- 4. HATA KORUMALI VERİ YÜKLEME ---
 def load_data():
     try:
         funds_df = pd.read_sql("SELECT id, code, title AS name, category FROM funds", con=conn)
@@ -99,8 +99,18 @@ def load_data():
 funds_df, scores_df = load_data()
 
 if not scores_df.empty and not funds_df.empty:
-    latest_date = scores_df['date'].max()
-    latest_scores = scores_df[scores_df['date'] == latest_date].copy()
+    latest_date_raw = scores_df['date'].max()
+    # Tarih bilgisinin yanına saat ekleme (Eğer saat bilgisi veritabanında yoksa anlık sistem saatini ekler)
+    try:
+        if len(str(latest_date_raw)) <= 10:
+            current_time_str = datetime.datetime.now().strftime("%H:%M:%S")
+            latest_date = f"{latest_date_raw} {current_time_str}"
+        else:
+            latest_date = latest_date_raw
+    except:
+        latest_date = str(latest_date_raw)
+        
+    latest_scores = scores_df[scores_df['date'] == scores_df['date'].max()].copy()
     merged_df = pd.merge(latest_scores, funds_df, left_on='fund_id', right_on='id', how='inner')
 else:
     merged_df = pd.DataFrame()
@@ -109,8 +119,8 @@ else:
 # ==========================================
 # MODÜL 1: ANA DASHBOARD
 # ==========================================
-if menu == "🏠 Ana Dashboard":
-    st.title("🏠 Piyasa & Quant Özeti")
+if menu == "⚡ Ana Dashboard":
+    st.title("⚡ Piyasa & Quant Özeti")
     st.markdown(f"**Son Güncelleme Tarihi:** `{latest_date}`")
     st.markdown("---")
 
@@ -129,10 +139,10 @@ if menu == "🏠 Ana Dashboard":
         col5.metric("Ortalama Puan", f"{avg_score:.1f} / 100", delta="+2.4")
 
         st.markdown("---")
-        st.subheader("🏆 Günün En Güçlü Fonları (Top 5)")
-        top5 = merged_df.sort_values(by='total_score', ascending=False).head(5)
+        st.subheader("🏆 Günün En Güçlü Fonları (Top 10)")
+        top10 = merged_df.sort_values(by='total_score', ascending=False).head(10)
         
-        for idx, row in top5.reset_index().iterrows():
+        for idx, row in top10.reset_index().iterrows():
             col_a, col_b, col_c, col_d = st.columns([1, 3, 2, 2])
             col_a.markdown(f"**#{idx+1}**")
             col_b.markdown(f"**{row['code']}** - {row['name']}")
@@ -140,7 +150,7 @@ if menu == "🏠 Ana Dashboard":
             
             is_fav = row['code'] in st.session_state.favorites
             btn_label = "⭐ Favoride" if is_fav else "☆ Favoriye Ekle"
-            if col_d.button(btn_label, key=f"fav_dash_{row['code']}"):
+            if col_d.button(btn_label, key=f"fav_dash_{row['code']}_{idx}"):
                 if is_fav:
                     st.session_state.favorites.remove(row['code'])
                 else:
@@ -149,17 +159,22 @@ if menu == "🏠 Ana Dashboard":
     else:
         st.info("⚠️ Veritabanında henüz skor verisi bulunamadı. Veriler yüklendiğinde buraya yansıyacaktır.")
 
-# ... (DİĞER MENÜ KODLARINIZ AYNI ŞEKİLDE ÇALIŞACAKTIR) ...
+# ==========================================
+# MODÜL 2: FON TARAMA & FİLTRELEME (ARAMA ÇUBUĞU EKLENDİ)
+# ==========================================
 elif menu == "🔍 Fon Tarama & Filtreleme":
     st.title("🔍 Gelişmiş Fon Tarama Matrisi")
     st.markdown("---")
     if not merged_df.empty:
-        col1, col2, col3 = st.columns(3)
+        col_search, col1, col2, col3 = st.columns([2, 2, 2, 2])
+        search_code = col_search.text_input("🔍 Fon Kodu Ara (Örn: MAC, TCD)", "").upper().strip()
         signal_filter = col1.selectbox("Sinyal Filtresi", ["Tümü", "BUY", "WATCH", "SELL"])
         category_filter = col2.selectbox("Kategori Filtresi", ["Tümü"] + list(merged_df['category'].dropna().unique()))
         min_score = col3.slider("Minimum Skor", 0, 100, 50)
 
         filtered_df = merged_df.copy()
+        if search_code:
+            filtered_df = filtered_df[filtered_df['code'].str.contains(search_code, na=False)]
         if signal_filter != "Tümü":
             filtered_df = filtered_df[filtered_df['signal'] == signal_filter]
         if category_filter != "Tümü":
@@ -170,6 +185,9 @@ elif menu == "🔍 Fon Tarama & Filtreleme":
     else:
         st.warning("Görüntülenecek veri yok.")
 
+# ==========================================
+# MODÜL 3: FAVORİ SEPETİM
+# ==========================================
 elif menu == "⭐ Favori Sepetim":
     st.title("⭐ Takip Ettiğim Favori Fonlar")
     st.markdown("---")
@@ -179,6 +197,9 @@ elif menu == "⭐ Favori Sepetim":
     else:
         st.info("Henüz veri yok veya favori seçmediniz.")
 
+# ==========================================
+# MODÜL 4: FON DETAY & AI RAPORU
+# ==========================================
 elif menu == "📊 Fon Detay & AI Raporu":
     st.title("📊 Derinlemesine Fon Analizi & AI Yorumcusu")
     st.markdown("---")
@@ -189,6 +210,9 @@ elif menu == "📊 Fon Detay & AI Raporu":
     else:
         st.warning("Veri bulunamadı.")
 
+# ==========================================
+# MODÜL 5: FON KARŞILAŞTIRMA
+# ==========================================
 elif menu == "⚖️ Fon Karşılaştırma":
     st.title("⚖️ Fon Karşılaştırma Matrisi")
     st.markdown("---")
@@ -200,6 +224,9 @@ elif menu == "⚖️ Fon Karşılaştırma":
     else:
         st.warning("Veri bulunamadı.")
 
+# ==========================================
+# MODÜL 6: BACKTEST PERFORMANSI
+# ==========================================
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Güvenilirlik Testi (Backtest)")
     st.markdown("---")

@@ -7,7 +7,8 @@ import os
 
 try:
     from tefas import Crawler
-    tefas_crawler = Crawler()
+    # Tüm 600-700+ fonun çekilebilmesi için limit 1000 yapıldı
+    tefas_crawler = Crawler(fund_limit=1000)
     TEFAS_LIB_READY = True
 except ImportError:
     TEFAS_LIB_READY = False
@@ -45,7 +46,8 @@ def init_db():
             category TEXT,
             manager TEXT,
             launch_date TEXT,
-            status TEXT DEFAULT 'ACTIVE'
+            status TEXT DEFAULT 'ACTIVE',
+            is_qualified INTEGER DEFAULT 0
         )
     """)
     
@@ -56,7 +58,7 @@ def init_db():
         )
     """)
     
-    for col, col_type in [("status", "TEXT DEFAULT 'ACTIVE'"), ("manager", "TEXT"), ("launch_date", "TEXT")]:
+    for col, col_type in [("status", "TEXT DEFAULT 'ACTIVE'"), ("manager", "TEXT"), ("launch_date", "TEXT"), ("is_qualified", "INTEGER DEFAULT 0")]:
         try:
             cursor.execute(f"ALTER TABLE funds ADD COLUMN {col} {col_type}")
         except sqlite3.OperationalError:
@@ -111,7 +113,7 @@ def init_db():
 
 conn = init_db()
 
-# --- 3. YAN MENÜ ---
+# --- 3. YAN MENÜ & NİTELİKLİ FON FİLTRELEME AYARI ---
 st.sidebar.markdown("## ⚡ INSTITUTIONAL QUANT")
 
 current_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
@@ -128,6 +130,10 @@ except Exception:
 st.sidebar.markdown(f"🔄 **Son Güncelleme:** `{last_sync_str}`")
 st.sidebar.markdown("---")
 
+include_qualified = st.sidebar.checkbox("🔒 Nitelikli Yatırımcı Fonlarını Dahil Et", value=False, help="İşaretlenmezse; Serbest, Özel, Gayrimenkul ve Girişim Sermayesi gibi sadece nitelikli yatırımcıya açık fonlar sistemden otomatik olarak hariç tutulur.")
+
+st.sidebar.markdown("---")
+
 menu = st.sidebar.radio(
     "Navigasyon",
     ["⚡ Ana Dashboard", "🔄 Evren Senkronizasyonu", "🔍 Fon Evreni & Yaş Filtresi", "💼 Portföyüm", "⭐ Favori Sepetim", "📊 Fon Detay & AI Raporu", "⚖️ Fon Karşılaştırma", "🚀 Backtest Performansı"]
@@ -136,7 +142,16 @@ menu = st.sidebar.radio(
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
 
-# --- 4. 5 YILLIK PARÇALI (CHUNKED) SENKRONİZASYON VE GÜVEN SKORU MOTORU ---
+# --- 4. NİTELİKLİ YATIRIMCI TESPİT FONKSİYONU ---
+def detect_qualified_fund(title, category):
+    text = f"{str(title).upper()} {str(category).upper()}"
+    qualified_keywords = ["SERBEST", "ÖZEL", "GİRİŞİM", "GAYRİMENKUL", "NİTELİKLİ", "HEDGE"]
+    for kw in qualified_keywords:
+        if kw in text:
+            return 1
+    return 0
+
+# --- 5. 5 YILLIK PARÇALI SENKRONİZASYON & TÜM FONLARI ÇEKME ---
 def run_tefas_sync_and_scoring():
     if not TEFAS_LIB_READY:
         return False, "TEFAS kütüphanesi yüklü değil! requirements.txt dosyasını kontrol edin."
@@ -146,8 +161,7 @@ def run_tefas_sync_and_scoring():
         today = datetime.date.today()
         all_dfs = []
         
-        # 5 yıllık veriyi bağlantı kopmalarını önlemek için 1'er yıllık 5 parça halinde çekiyoruz
-        with st.status("🔄 5 Yıllık TEFAS Evreni Parçalı Senkronizasyon Başlatıldı...", expanded=True) as status:
+        with st.status("🔄 5 Yıllık Tüm TEFAS Evreni Parçalı Senkronizasyon Başlatıldı...", expanded=True) as status:
             for i in range(5):
                 chunk_end = today - datetime.timedelta(days=i * 365)
                 chunk_start = today - datetime.timedelta(days=(i + 1) * 365)
@@ -172,7 +186,7 @@ def run_tefas_sync_and_scoring():
         
         total_codes = len(active_codes)
         
-        with st.status("⚡ Fonlar ve 5 Yıllık Fiyat Geçmişi Veritabanına İşleniyor...", expanded=True) as status_process:
+        with st.status(f"⚡ Toplam {total_codes} Fon, Nitelikli Analizi ve Fiyatlar İşleniyor...", expanded=True) as status_process:
             progress_bar = st.progress(0)
             status_text = st.empty()
             
@@ -186,19 +200,21 @@ def run_tefas_sync_and_scoring():
                     if 'category' in match.columns:
                         category = match['category'].iloc[0]
                 
+                is_qual = detect_qualified_fund(title, category)
+                
                 cursor.execute("""
-                    INSERT INTO funds (code, title, category, status) VALUES (?, ?, ?, 'ACTIVE')
-                    ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE'
-                """, (code, title, category))
+                    INSERT INTO funds (code, title, category, status, is_qualified) VALUES (?, ?, ?, 'ACTIVE', ?)
+                    ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE', is_qualified=excluded.is_qualified
+                """, (code, title, category, is_qual))
                 
                 remaining = total_codes - (idx + 1)
                 progress_bar.progress((idx + 1) / total_codes)
-                status_text.markdown(f"✅ **{code}** güncellendi/eklendi. | Kalan Fon: **{remaining}**")
+                status_text.markdown(f"✅ **{code}** işlendi (Nitelikli: {bool(is_qual)}). | Kalan: **{remaining}**")
             
             conn.commit()
-            status_process.update(label=f"✅ Toplam **{total_codes}** adet fon evreni veritabanına işlendi!", state="complete", expanded=False)
+            status_process.update(label=f"✅ Toplam **{total_codes}** adet fon işlendi!", state="complete", expanded=False)
 
-        with st.status("📊 Fiyat Verileri Eski Kayıtların Üzerine Güncelleniyor...", expanded=True) as status_prices:
+        with st.status("📊 Fiyat Verileri Güncelleniyor...", expanded=True) as status_prices:
             funds_map = pd.read_sql("SELECT id, code FROM funds", con=conn).set_index('code')['id'].to_dict()
             prices_df['fund_id'] = prices_df['code'].map(funds_map)
             prices_df = prices_df.dropna(subset=['fund_id'])
@@ -207,14 +223,13 @@ def run_tefas_sync_and_scoring():
                 f_id = int(row['fund_id'])
                 f_date = str(row['date'])[:10]
                 f_price = float(row['price'])
-                # INSERT OR REPLACE ile eski veriler korunur, yeni veriler eklenir/güncellenir
                 cursor.execute("""
                     INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)
                 """, (f_id, f_date, f_price))
             conn.commit()
-            status_prices.update(label="✅ 5 yıllık fiyat geçmişi başarıyla güncellendi!", state="complete", expanded=False)
+            status_prices.update(label="✅ Fiyat geçmişi güncellendi!", state="complete", expanded=False)
 
-        with st.status("🧮 Kalite Puanı, Güven Skoru & Belirsizlik Düzeltmesi Hesaplanıyor...", expanded=True) as status_scores:
+        with st.status("🧮 Kalite Puanı & Güven Skoru Hesaplanıyor...", expanded=True) as status_scores:
             all_funds = pd.read_sql("SELECT id, code, category FROM funds WHERE status = 'ACTIVE'", con=conn)
             end_date = today.strftime('%Y-%m-%d')
             
@@ -254,20 +269,20 @@ def run_tefas_sync_and_scoring():
                     INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal) VALUES (?, ?, ?, ?, ?)
                 """, (f_id, end_date, float(score), float(confidence), signal))
             conn.commit()
-            status_scores.update(label="✅ 5 yıllık verilere göre puanlar hesaplandı!", state="complete", expanded=False)
+            status_scores.update(label="✅ Puanlama tamamlandı!", state="complete", expanded=False)
         
         sync_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
         cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_sync', ?)", (sync_time_str,))
         conn.commit()
         
-        return True, f"🎉 İşlem Tamamlandı! **5 yıllık** veriler eski kayıtların üzerine güncellenip toplam **{total_codes}** fon puanlandı."
+        return True, f"🎉 İşlem Tamamlandı! Tüm TEFAS evreni ({total_codes} fon) 5 yıllık verileriyle güncellendi."
     except Exception as e:
         return False, f"Senkronizasyon Hatası: {str(e)}"
 
-# --- 5. VERİ YÜKLEME ---
+# --- 6. VERİ YÜKLEME VE OTOMATİK NİTELİKLİ FİLTRELEME ---
 def load_universe_data():
     try:
-        funds_df = pd.read_sql("SELECT id, code, title AS name, category, status FROM funds", con=conn)
+        funds_df = pd.read_sql("SELECT id, code, title AS name, category, status, is_qualified FROM funds", con=conn)
     except Exception:
         return pd.DataFrame()
         
@@ -293,6 +308,9 @@ def load_universe_data():
     merged = pd.merge(merged, price_counts, on='fund_id', how='left')
     merged['day_count'] = merged['day_count'].fillna(0)
     
+    if not include_qualified:
+        merged = merged[merged['is_qualified'] == 0]
+        
     return merged
 
 merged_df = load_universe_data()
@@ -305,12 +323,12 @@ if menu == "🔄 Evren Senkronizasyonu":
     st.markdown("---")
     st.markdown("""
     Bu ekrandan tek tuşla **TEFAS API**'ye bağlanarak:
-    1. **5 yıllık geçmiş verileri** parçalı olarak indirebilir ve mevcut veritabanındaki eski kayıtların üzerine güvenle güncelleyebilirsin.
-    2. Yeni fonları ekleyebilir, kapananları pasif duruma getirebilirsin.
-    3. Kalite Puanı ve Güven Skoru (% Confidence) hesaplayarak yeni fonlara adil belirsizlik düzeltmesi uygulayabilirsin.
+    1. 5 yıllık geçmiş verileri indirebilir ve tüm piyasadaki **600+ fonun** tamamını güncelleyebilirsin.
+    2. **Nitelikli Yatırımcı Fonlarını (Serbest, Özel, Girişim vb.) otomatik olarak ayıklayabilirsin.**
+    3. Kalite Puanı ve Güven Skoru hesaplayabilirsin.
     """)
     
-    if st.button("🚀 5 Yıllık TEFAS Evrenini Senkronize Et ve Güncelle", type="primary"):
+    if st.button("🚀 5 Yıllık Tüm TEFAS Evrenini Senkronize Et ve Güncelle", type="primary"):
         success, msg = run_tefas_sync_and_scoring()
         if success:
             st.success(msg)

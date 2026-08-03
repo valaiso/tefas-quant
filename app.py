@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import datetime
 import numpy as np
+import os
 
 try:
     from tefas import Crawler
@@ -28,7 +29,11 @@ st.markdown("""
 
 # --- 2. KURUMSAL VERİTABANI MİMARİSİ VE OTOMATİK MİGRASYON ---
 def init_db():
-    db_path = "tefas.db"
+    if os.path.exists("/mount/src"):
+        db_path = "/tmp/tefas.db"
+    else:
+        db_path = "tefas.db"
+        
     conn = sqlite3.connect(db_path, check_same_thread=False)
     cursor = conn.cursor()
     
@@ -80,10 +85,17 @@ def init_db():
             fund_id INTEGER,
             date TEXT,
             total_score REAL,
+            confidence_score REAL,
             signal TEXT,
             PRIMARY KEY (fund_id, date)
         )
     """)
+    
+    # Migrasyon: confidence_score sütunu yoksa ekle
+    try:
+        cursor.execute("ALTER TABLE fund_scores ADD COLUMN confidence_score REAL")
+    except sqlite3.OperationalError:
+        pass
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS portfolio (
@@ -103,7 +115,6 @@ conn = init_db()
 # --- 3. YAN MENÜ ---
 st.sidebar.markdown("## ⚡ INSTITUTIONAL QUANT")
 
-# Canlı Saat ve Son Senkronizasyon Bilgisi
 current_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
 st.sidebar.markdown(f"🕒 **Canlı Saat:** `{current_time_str}`")
 
@@ -126,19 +137,20 @@ menu = st.sidebar.radio(
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
 
-# --- 4. OTOMATİK SENKRONİZASYON VE KATEGORİ BAZLI KUANT MOTORU (5 YILLIK VERİ) ---
+# --- 4. OTOMATİK SENKRONİZASYON VE KURUMLARARASI KUANT MOTORU (Güven Skoru & Belirsizlik Düzeltmesi) ---
 def run_tefas_sync_and_scoring():
     if not TEFAS_LIB_READY:
-        return False, "TEFAS kütüphanesi yüklü değil! Lütfen terminale 'pip install tefas-crawler' yazın."
+        return False, "TEFAS kütüphanesi yüklü değil! requirements.txt dosyasını kontrol edin."
     
     try:
         cursor = conn.cursor()
         today = datetime.date.today()
-        start_date = (today - datetime.timedelta(days=1825)).strftime('%Y-%m-%d')
+        # Bağlantı kopmalarını önlemek ve stabilite için 1 yıllık periyot (365 gün)
+        start_date = (today - datetime.timedelta(days=365)).strftime('%Y-%m-%d')
         end_date = today.strftime('%Y-%m-%d')
         
-        with st.status("🔄 TEFAS Senkronizasyon Merkezi Çalışıyor (5 Yıllık Veri)...", expanded=True) as status:
-            st.write(f"📥 TEFAS API'den 5 yıllık ({start_date} ile {end_date} arası) fon evreni ve fiyat verileri indiriliyor...")
+        with st.status("🔄 TEFAS Senkronizasyon Merkezi Çalışıyor (1 Yıllık Veri)...", expanded=True) as status:
+            st.write(f"📥 TEFAS API'den 1 yıllık ({start_date} ile {end_date} arası) fon evreni ve fiyat verileri indiriliyor...")
             df = tefas_crawler.fetch(start=start_date, end=end_date)
             
         if df is None or df.empty:
@@ -178,7 +190,7 @@ def run_tefas_sync_and_scoring():
             conn.commit()
             status_process.update(label=f"✅ Toplam **{total_codes}** adet fon evreni veritabanına işlendi!", state="complete", expanded=False)
 
-        with st.status("📊 5 Yıllık Fiyatlar ve Günlük Kayıtlar İşleniyor...", expanded=True) as status_prices:
+        with st.status("📊 Fiyatlar ve Günlük Kayıtlar İşleniyor...", expanded=True) as status_prices:
             funds_map = pd.read_sql("SELECT id, code FROM funds", con=conn).set_index('code')['id'].to_dict()
             prices_df['fund_id'] = prices_df['code'].map(funds_map)
             prices_df = prices_df.dropna(subset=['fund_id'])
@@ -191,9 +203,9 @@ def run_tefas_sync_and_scoring():
                     INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)
                 """, (f_id, f_date, f_price))
             conn.commit()
-            status_prices.update(label="✅ 5 yıllık fiyat kayıtları tamamlandı!", state="complete", expanded=False)
+            status_prices.update(label="✅ Fiyat kayıtları tamamlandı!", state="complete", expanded=False)
 
-        with st.status("🧮 Kategori Bazlı Kuant Skorlama ve Sinyal Üretiliyor...", expanded=True) as status_scores:
+        with st.status("🧮 Kuant Skor, Güven Skoru & Belirsizlik Düzeltmesi Hesaplanıyor...", expanded=True) as status_scores:
             all_funds = pd.read_sql("SELECT id, code, category FROM funds WHERE status = 'ACTIVE'", con=conn)
             
             for _, fund in all_funds.iterrows():
@@ -201,13 +213,27 @@ def run_tefas_sync_and_scoring():
                 p_history = pd.read_sql(f"SELECT price FROM fund_daily_prices WHERE fund_id = {f_id} ORDER BY date ASC", con=conn)
                 day_count = len(p_history)
                 
-                if day_count < 90:
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, signal) VALUES (?, ?, ?, ?)
-                    """, (f_id, end_date, 0.0, 'Yeni Fon (İzlemede)'))
+                # Güven Skoru (Confidence Score): 365 gün tam güven (%100) kabul edilir.
+                confidence = min(100.0, (day_count / 365.0) * 100.0)
+                
+                if day_count < 15:
+                    score = 50.0
+                    signal = 'Yeni Fon (Kuluçkada)'
                 else:
                     returns_30d = (p_history['price'].iloc[-1] / p_history['price'].iloc[-30] - 1) * 100 if day_count >= 30 else 0
-                    score = min(max(50 + returns_30d * 2, 0), 100)
+                    raw_score = 50 + returns_30d * 2
+                    
+                    # Kurumsal Yaş Bazlı Belirsizlik Düzeltmesi (Uncertainty Penalty)
+                    # 0–3 ay (<90 gün): -5 | 3–6 ay (90-180 gün): -3 | 6–12 ay (180-365 gün): -1 | 12+ ay: 0
+                    penalty = 0.0
+                    if day_count < 90:
+                        penalty = 5.0
+                    elif day_count < 180:
+                        penalty = 3.0
+                    elif day_count < 365:
+                        penalty = 1.0
+                    
+                    score = min(max(raw_score - penalty, 0), 100)
                     
                     signal = 'Bekle'
                     if score >= 85: 
@@ -216,19 +242,18 @@ def run_tefas_sync_and_scoring():
                         signal = 'AL / İzle'
                     elif score <= 50: 
                         signal = 'Zayıf'
-                    
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, signal) VALUES (?, ?, ?, ?)
-                    """, (f_id, end_date, float(score), signal))
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal) VALUES (?, ?, ?, ?, ?)
+                """, (f_id, end_date, float(score), float(confidence), signal))
             conn.commit()
-            status_scores.update(label="✅ Kuant puanlama ve sinyaller başarıyla oluşturuldu!", state="complete", expanded=False)
+            status_scores.update(label="✅ Kalite puanları ve güven skorları başarıyla üretildi!", state="complete", expanded=False)
         
-        # Son senkronizasyon zamanını veritabanına kaydet
         sync_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
         cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_sync', ?)", (sync_time_str,))
         conn.commit()
         
-        return True, f"🎉 İşlem Tamamlandı! Toplam **{total_codes}** adet fon ve **5 yıllık** veri havuzu başarıyla senkronize edilip puanlandı."
+        return True, f"🎉 İşlem Tamamlandı! Toplam **{total_codes}** adet fon analiz edilip güven skorlarıyla birlikte işlendi."
     except Exception as e:
         return False, f"Senkronizasyon Hatası: {str(e)}"
 
@@ -273,9 +298,9 @@ if menu == "🔄 Evren Senkronizasyonu":
     st.markdown("---")
     st.markdown("""
     Bu ekrandan tek tuşla **TEFAS API**'ye bağlanarak:
-    1. Son **5 yıla ait** aktif fon listesini güncelleyebilir, yeni fonları ekleyebilir, kapananları pasif yapabilirsin.
-    2. Geçmiş fiyatları 5 yıllık periyotta indirip veritabanına işleyebilirsin.
-    3. 90 günden az geçmişi olanları **'Yeni Fon'** olarak etiketleyip, kategorilerine göre puanlama yapabilirsin.
+    1. Aktif fon listesini güncelleyebilir, yeni fonları ekleyebilir, kapananları pasif yapabilirsin.
+    2. Geçmiş fiyatları indirip veritabanına işleyebilirsin.
+    3. **Kalite Puanı** ve **Güven Skoru (% Confidence)** hesaplayarak yeni fonlara adil belirsizlik düzeltmesi uygulayabilirsin.
     """)
     
     if st.button("🚀 TEFAS Evrenini Şimdi Senkronize Et ve Puanla", type="primary"):
@@ -299,27 +324,27 @@ elif menu == "⚡ Ana Dashboard":
         al_izle = len(merged_df[merged_df['signal'] == 'AL / İzle'])
         bekle = len(merged_df[merged_df['signal'] == 'Bekle'])
         zayif = len(merged_df[merged_df['signal'] == 'Zayıf'])
-        yeni_fon = len(merged_df[merged_df['signal'].str.contains('Yeni Fon')])
         avg_score = merged_df['total_score'].mean()
+        avg_conf = merged_df['confidence_score'].mean() if 'confidence_score' in merged_df.columns else 0
 
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Toplam Evren", f"{total_analyzed}")
         col2.metric("Güçlü AL", f"{guclu_al}")
         col3.metric("AL / İzle", f"{al_izle}")
         col4.metric("Bekle", f"{bekle}")
-        col5.metric("Zayıf", f"{zayif}")
-        col6.metric("Ortalama Puan", f"{avg_score:.1f}")
+        col5.metric("Ort. Puan", f"{avg_score:.1f}")
+        col6.metric("Ort. Güven", f"%{avg_conf:.1f}")
 
         st.markdown("---")
         st.subheader("🏆 Kategori Bazlı En Güçlü Fonlar (Top 10)")
-        mature_df = merged_df[~merged_df['signal'].str.contains('Yeni Fon')]
-        top10 = mature_df.sort_values(by='total_score', ascending=False).head(10)
+        top10 = merged_df.sort_values(by='total_score', ascending=False).head(10)
         
         for idx, row in top10.reset_index().iterrows():
             col_a, col_b, col_c, col_d = st.columns([1, 3, 2, 2])
             col_a.markdown(f"**#{idx+1}**")
             col_b.markdown(f"**{row['code']}** - {row['name']} *({row['category']})*")
-            col_c.markdown(f"Skor: **{row['total_score']:.1f}** | *{row['signal']}*")
+            conf_val = row['confidence_score'] if 'confidence_score' in row else 0
+            col_c.markdown(f"Skor: **{row['total_score']:.1f}** | Güven: **%{conf_val:.0f}** | *{row['signal']}*")
             
             is_fav = row['code'] in st.session_state.favorites
             btn_label = "⭐ Favoride" if is_fav else "☆ Favoriye Ekle"
@@ -328,19 +353,19 @@ elif menu == "⚡ Ana Dashboard":
                 else: st.session_state.favorites.append(row['code'])
                 st.rerun()
     else:
-        st.info("⚠️ Veritabanında evren verisi bulunamadı. Lütfen sol menüden **'🔄 Evren Senkronizasyonu'** sekmesine gidip senkronizasyon başlatın.")
+        st.info("⚠️ Veritabanında evren verisi bulunamadı. Lütfen sol menüden **'🔄 Evren Senkronizasyonu'** sekmesine gidin.")
 
 # ==========================================
-# MODÜL 2: FON EVRESİ & YAŞ FİLTRESİ
+# MODÜL 2: FON EVRESI & YAŞ FİLTRESİ
 # ==========================================
 elif menu == "🔍 Fon Evreni & Yaş Filtresi":
-    st.title("🔍 Kategori Bazlı Fon Evreni ve Yaş Süzgeci")
+    st.title("🔍 Kategori Bazlı Fon Evreni ve Güven Süzgeci")
     st.markdown("---")
     if not merged_df.empty:
         col_search, col1, col2, col3 = st.columns([2, 2, 2, 2])
         search_code = col_search.text_input("🔍 Fon Kodu Ara", "").upper().strip()
         category_filter = col1.selectbox("Kategori", ["Tümü"] + list(merged_df['category'].unique()))
-        signal_filter = col2.selectbox("Sinyal Durumu", ["Tümü", "Güçlü AL", "AL / İzle", "Bekle", "Zayıf", "Yeni Fon (İzlemede)"])
+        signal_filter = col2.selectbox("Sinyal Durumu", ["Tümü", "Güçlü AL", "AL / İzle", "Bekle", "Zayıf", "Yeni Fon (Kuluçkada)"])
         min_score = col3.slider("Minimum Skor", 0, 100, 0)
 
         filtered_df = merged_df.copy()
@@ -349,7 +374,11 @@ elif menu == "🔍 Fon Evreni & Yaş Filtresi":
         if signal_filter != "Tümü": filtered_df = filtered_df[filtered_df['signal'] == signal_filter]
         filtered_df = filtered_df[filtered_df['total_score'] >= min_score]
 
-        st.dataframe(filtered_df[['code', 'name', 'category', 'day_count', 'total_score', 'signal']].rename(columns={'day_count': 'Geçmiş Gün', 'total_score': 'Quant Skor'}).sort_values(by='Quant Skor', ascending=False), use_container_width=True)
+        display_df = filtered_df[['code', 'name', 'category', 'day_count', 'total_score', 'confidence_score', 'signal']].rename(
+            columns={'day_count': 'Geçmiş Gün', 'total_score': 'Kalite Puanı', 'confidence_score': 'Güven (%)'}
+        ).sort_values(by='Kalite Puanı', ascending=False)
+        
+        st.dataframe(display_df, use_container_width=True)
     else:
         st.warning("Veritabanı boş. Önce Evren Senkronizasyonu yapın.")
 
@@ -429,7 +458,7 @@ elif menu == "⭐ Favori Sepetim":
     st.title("⭐ Takip Ettiğim Favoriler")
     st.markdown("---")
     if st.session_state.favorites and not merged_df.empty:
-        st.dataframe(merged_df[merged_df['code'].isin(st.session_state.favorites)][['code', 'name', 'category', 'total_score', 'signal']], use_container_width=True)
+        st.dataframe(merged_df[merged_df['code'].isin(st.session_state.favorites)][['code', 'name', 'category', 'total_score', 'confidence_score', 'signal']], use_container_width=True)
     else:
         st.info("Favori seçilmedi.")
 
@@ -439,7 +468,10 @@ elif menu == "📊 Fon Detay & AI Raporu":
     if not merged_df.empty:
         sel_code = st.selectbox("Fon Seçin", merged_df['code'].unique())
         row = merged_df[merged_df['code'] == sel_code].iloc[0]
-        st.metric("Quant Skor", f"{row['total_score']:.1f} / 100", f"Sinyal: {row['signal']}")
+        col_d1, col_d2 = st.columns(2)
+        col_d1.metric("Kalite Puanı", f"{row['total_score']:.1f} / 100", f"Sinyal: {row['signal']}")
+        conf_val = row['confidence_score'] if 'confidence_score' in row else 0
+        col_d2.metric("Güven Skoru", f"%{conf_val:.1f}", f"Geçmiş Gün: {int(row['day_count'])}")
     else:
         st.warning("Veri yok.")
 
@@ -449,9 +481,9 @@ elif menu == "⚖️ Fon Karşılaştırma":
     if not merged_df.empty:
         selfunds = st.multiselect("Fonlar (Max 3)", merged_df['code'].unique(), max_selections=3)
         if selfunds:
-            st.dataframe(merged_df[merged_df['code'].isin(selfunds)][['code', 'name', 'category', 'total_score', 'signal']], use_container_width=True)
+            st.dataframe(merged_df[merged_df['code'].isin(selfunds)][['code', 'name', 'category', 'total_score', 'confidence_score', 'signal']], use_container_width=True)
 
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Güvenilirlik Testi (Backtest)")
     st.markdown("---")
-    st.markdown("Otonom fon evresi ve kategori bazlı backtest altyapısı hazır.")
+    st.markdown("Otonom fon evresi ve güven skorlu backtest altyapısı hazır.")

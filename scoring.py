@@ -6,7 +6,7 @@ import streamlit as st
 
 try:
     from tefas import Crawler
-    tefas_crawler = Crawler(fund_limit=1000)
+    tefas_crawler = Crawler(fund_limit=100)
     TEFAS_LIB_READY = True
 except ImportError:
     TEFAS_LIB_READY = False
@@ -69,7 +69,6 @@ def evaluate_signal_and_grade(score, confidence, day_count):
     if day_count < 15:
         return 'Yeni Fon (Kuluçkada)', 'Zayıf'
 
-    # Sinyal Sınıflandırması
     if score >= 90:
         signal = 'Güçlü AL'
     elif score >= 75:
@@ -81,7 +80,6 @@ def evaluate_signal_and_grade(score, confidence, day_count):
     else:
         signal = 'Uzak Dur'
 
-    # Harf Notu Sınıflandırması
     if score >= 90:
         letter_grade = 'A+'
     elif score >= 80:
@@ -93,7 +91,6 @@ def evaluate_signal_and_grade(score, confidence, day_count):
     else:
         letter_grade = 'Zayıf'
 
-    # Güven Eşiği Kilitleri
     if confidence < 25:
         signal = 'Uzak Dur'
         letter_grade = 'Zayıf'
@@ -164,9 +161,9 @@ def run_tefas_sync_and_scoring():
     status_container = st.empty()
     
     labels = [
-        "TEFAS API'den Güncel Veriler Çekiliyor (5 Yıllık Dilimler)",
+        "TEFAS API'den Güncel Veriler Çekiliyor (Maks 100 Fon - 5 Yıllık Dilimler)",
         "Fon Listesi ve Nitelikli Fon Tespiti Yapılıyor",
-        "Fiyat Geçmişi ve Tarihler Veritabanına İşleniyor",
+        "Eski ve Yeni Fiyat Geçmişleri / Tarihler Güncelleniyor",
         "100 Puanlık Kantitatif Skor ve Kalite Matrisi Hesaplanıyor"
     ]
     
@@ -182,7 +179,7 @@ def run_tefas_sync_and_scoring():
         status_container.markdown("\n\n".join(lines))
 
     statuses = [1, 0, 0, 0]
-    update_ui(statuses, "Dilim 1/5 çekiliyor...")
+    update_ui(statuses, "Dilim 1/5 (Fiyat arşivi indiriliyor...)")
     progress_bar.progress(5)
     
     conn = get_db_connection()
@@ -200,7 +197,7 @@ def run_tefas_sync_and_scoring():
             chunk_end = today - datetime.timedelta(days=i * 365)
             chunk_start = today - datetime.timedelta(days=(i + 1) * 365)
             
-            update_ui(statuses, f"Yıl Dilimi {i+1}/5 sorgulanıyor...")
+            update_ui(statuses, f"Yıl Dilimi {i+1}/5 indiriliyor...")
             try:
                 df_chunk = tefas_crawler.fetch(start=chunk_start.strftime('%Y-%m-%d'), end=chunk_end.strftime('%Y-%m-%d'))
                 if df_chunk is not None and not df_chunk.empty:
@@ -213,7 +210,7 @@ def run_tefas_sync_and_scoring():
             return False, "TEFAS API veri döndüremedi."
             
         statuses = [2, 1, 0, 0]
-        update_ui(statuses, "Fonlar taranıyor...")
+        update_ui(statuses, "Fonlar taranıyor ve güncelleniyor...")
         progress_bar.progress(80)
         
         prices_df = pd.concat(all_dfs, ignore_index=True)
@@ -235,12 +232,13 @@ def run_tefas_sync_and_scoring():
             if code not in existing_codes:
                 new_funds_detected += 1
             
+            # Eski fonları yeni bilgilerle güncel tut (UPSERT)
             cursor.execute("""
                 INSERT INTO funds (code, title, category, status, is_qualified) VALUES (?, ?, ?, 'ACTIVE', ?)
                 ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE', is_qualified=excluded.is_qualified
             """, (code, title, category, is_qual))
             
-            if idx % 100 == 0 or idx == total_active_codes:
+            if idx % 25 == 0 or idx == total_active_codes:
                 update_ui(statuses, f"Fon Kaydı: ({idx}/{total_active_codes})")
                 
         conn.commit()
@@ -250,16 +248,17 @@ def run_tefas_sync_and_scoring():
         prices_df = prices_df.dropna(subset=['fund_id'])
         
         statuses = [2, 2, 1, 0]
-        update_ui(statuses, "Fiyatlar işleniyor...")
+        update_ui(statuses, "Fiyat geçmişleri ve yeni tarihler işleniyor...")
         progress_bar.progress(90)
         
+        # INSERT OR REPLACE ile eski/yeni tarihli tüm fiyatlar güncellenir
         for _, row in prices_df.iterrows():
             cursor.execute("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", 
                            (int(row['fund_id']), str(row['date'])[:10], float(row['price'])))
         conn.commit()
 
         statuses = [2, 2, 2, 1]
-        update_ui(statuses, "Skorlar hesaplanıyor...")
+        update_ui(statuses, "100 Puanlık matris hesaplanıyor...")
         progress_bar.progress(95)
 
         all_funds = pd.read_sql("SELECT id, code FROM funds WHERE status = 'ACTIVE'", con=conn)
@@ -275,9 +274,8 @@ def run_tefas_sync_and_scoring():
                 INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal, letter_grade) VALUES (?, ?, ?, ?, ?, ?)
             """, (f_id, end_date, float(score), float(confidence), signal, letter_grade))
             
-            # Her 10 fonda bir veya son fonda ekranı güncelle (canlı sayac)
             if idx % 10 == 0 or idx == total_funds_to_score:
-                update_ui(statuses, f"İşlenen: ({idx}/{total_funds_to_score}) fon")
+                update_ui(statuses, f"Skorlanan: ({idx}/{total_funds_to_score}) fon")
                 
         conn.commit()
         

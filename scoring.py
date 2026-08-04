@@ -45,7 +45,6 @@ def calculate_risk_composite(group_df):
     z_sortino = _get_z_score(group_df['sortino'])
     z_vol = _get_z_score(group_df['volatility'])
     z_mdd = _get_z_score(group_df['mdd'])
-    # Volatilite ve MDD ters etkili olduğu için eksi alıyoruz
     comp_risk_z = (z_sharpe*0.4 + z_sortino*0.4 - z_vol*0.1 - z_mdd*0.1)
     return comp_risk_z.rank(pct=True, ascending=True) * 100.0
 
@@ -56,17 +55,16 @@ def calculate_quality_composite(group_df):
     return comp_qual_z.rank(pct=True, ascending=True) * 100.0
 
 def calculate_cost_composite(group_df):
-    return pd.Series(50.0, index=group_df.index) # Geçici placeholder
+    return pd.Series(50.0, index=group_df.index)
 
 def calculate_cashflow_composite(group_df):
-    return pd.Series(50.0, index=group_df.index) # Geçici placeholder
+    return pd.Series(50.0, index=group_df.index)
 
 # --- SCORING ENGINE ---
 def calculate_absolute_score(perf_pct, risk_pct, qual_pct, cash_pct, cost_pct):
     return (perf_pct * 0.40) + (risk_pct * 0.30) + (qual_pct * 0.10) + (cash_pct * 0.10) + (cost_pct * 0.10)
 
-def calculate_continuous_penalty(mdd, volatility, confidence):
-    # MDD Cezası
+def calculate_continuous_penalty(mdd, volatility):
     mdd_pen = 0.0
     if mdd <= 35.0: mdd_pen = 0.0
     elif mdd <= 40.0: mdd_pen = (mdd - 35.0) * 0.2
@@ -75,28 +73,27 @@ def calculate_continuous_penalty(mdd, volatility, confidence):
     elif mdd <= 60.0: mdd_pen = 3.0 + (mdd - 50.0) * 0.1
     else: mdd_pen = min(5.0, 4.0 + (mdd - 60.0) * 0.1)
 
-    # Volatilite Cezası
     vol_pen = 0.0
     if volatility > 0.40: vol_pen = min(5.0, (volatility - 0.40) * 10.0)
 
-    # Confidence Cezası
-    conf_pen = 0.0
-    if confidence < 70.0: conf_pen = min(5.0, (70.0 - confidence) * 0.08)
+    total_pen = mdd_pen + vol_pen
+    return total_pen, mdd_pen, vol_pen
 
-    total_pen = mdd_pen + vol_pen + conf_pen
-    return total_pen, mdd_pen, vol_pen, conf_pen
-
-def calculate_final_score(absolute_score, total_penalty):
-    return max(0.0, min(100.0, absolute_score - total_penalty))
+def calculate_final_score(absolute_score, total_penalty, confidence):
+    raw_score = absolute_score - total_penalty
+    confidence_factor = 0.60 + (confidence / 100.0) * 0.40
+    final_score = raw_score * confidence_factor
+    return max(0.0, min(100.0, final_score)), raw_score, confidence_factor
 
 def calculate_category_percentile(df_scored):
     return df_scored.groupby('category')['final_score'].rank(pct=True, ascending=True) * 100.0
 
 # --- RATING & EXPLAINABILITY ---
 def calculate_rating(final_score, percentile, confidence):
-    if percentile >= 99.0 and final_score >= 80.0 and confidence >= 70.0:
+    # Confidence şartı kaldırıldı, Final Score zaten confidence çarpanını içeriyor
+    if percentile >= 99.0 and final_score >= 85.0:
         return 'A+', 'Güçlü AL'
-    elif percentile >= 95.0 and final_score >= 75.0 and confidence >= 60.0:
+    elif percentile >= 95.0 and final_score >= 75.0:
         return 'A', 'AL'
     elif percentile >= 85.0 and final_score >= 70.0:
         return 'B+', 'İzle'
@@ -107,7 +104,7 @@ def calculate_rating(final_score, percentile, confidence):
     else:
         return 'D', 'Uzak Dur'
 
-def explain_score(perf_pts, risk_pts, qual_pts, cash_pts, cost_pts, abs_score, mdd_pen, vol_pen, conf_pen, tot_pen, final_sc):
+def explain_score(perf_pts, risk_pts, qual_pts, cash_pts, cost_pts, abs_score, mdd_pen, vol_pen, raw_score, confidence, confidence_factor, final_sc):
     return json.dumps({
         "Performance": f"+{round(perf_pts, 1)}",
         "Risk": f"+{round(risk_pts, 1)}",
@@ -117,9 +114,10 @@ def explain_score(perf_pts, risk_pts, qual_pts, cash_pts, cost_pts, abs_score, m
         "Absolute Score": round(abs_score, 1),
         "Penalties": {
             "MDD": f"-{round(mdd_pen, 1)}" if mdd_pen > 0 else "0",
-            "Volatility": f"-{round(vol_pen, 1)}" if vol_pen > 0 else "0",
-            "Confidence": f"-{round(conf_pen, 1)}" if conf_pen > 0 else "0"
+            "Volatility": f"-{round(vol_pen, 1)}" if vol_pen > 0 else "0"
         },
-        "Total Penalty": f"-{round(tot_pen, 1)}",
+        "Raw Score": round(raw_score, 1),
+        "Confidence": round(confidence, 1),
+        "Confidence Factor": round(confidence_factor, 2),
         "Final Score": round(final_sc, 1)
     }, ensure_ascii=False)

@@ -15,8 +15,8 @@ except ImportError:
     TEFAS_LIB_READY = False
 
 def get_db_connection():
-    if os.path.exists("/mount/src"):
-        db_path = "/tmp/tefas.db"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(base_dir, "tefas.db")
     else:
         db_path = "tefas.db"
     conn = sqlite3.connect(db_path, check_same_thread=False)

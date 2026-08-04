@@ -375,13 +375,26 @@ elif menu == "🚀 Backtest Performansı":
     st.markdown("Bu modül, veritabanındaki gerçek günlük fiyatlar ve **Güçlü AL / AL İzle** sinyalleri üzerinden zaman serisi simülasyonu çalıştırır.")
     
     col_b1, col_b2 = st.columns(2)
-    b_period_label = col_b1.selectbox("Simülasyon Süresi (Holding Period)", ["21 Gün (1 Ay)", "63 Gün (3 Ay)", "126 Gün (6 Ay)"])
+    b_period_label = col_b1.selectbox(
+        "Simülasyon Süresi",
+        [
+            "1 Ay",
+            "3 Ay",
+            "6 Ay",
+            "1 Yıl",
+            "3 Yıl",
+            "5 Yıl"
+        ]
+    )
     b_strat = col_b2.selectbox("Strateji Kuralı", ["Güçlü AL ve AL / İzle Sinyalleri"])
     
     period_mapping = {
-        "21 Gün (1 Ay)": 21,
-        "63 Gün (3 Ay)": 63,
-        "126 Gün (6 Ay)": 126
+        "1 Ay": 21,
+        "3 Ay": 63,
+        "6 Ay": 126,
+        "1 Yıl": 252,
+        "3 Yıl": 756,
+        "5 Yıl": 1260
     }
     selected_period = period_mapping[b_period_label]
     
@@ -395,7 +408,9 @@ elif menu == "🚀 Backtest Performansı":
                     st.warning("Veritabanında yeterli fiyat veya skor verisi bulunamadı! Lütfen önce sol menüden veri senkronizasyonu çalıştırın.")
                 else:
                     from backtest.engine import VectorizedBacktestEngine
-                    engine = VectorizedBacktestEngine(holding_periods=[21, 63, 126])
+                    engine = VectorizedBacktestEngine(
+                        holding_periods=[21, 63, 126, 252, 756, 1260]
+                    )
                     report = engine.run(prices_df=prices_df, signals_df=scores_df)
                     
                     key_str = f"{selected_period}_days_performance"

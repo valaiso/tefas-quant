@@ -1,335 +1,102 @@
 import pandas as pd
 import numpy as np
 
-
 class VectorizedBacktestEngine:
-
-    def __init__(self, holding_periods=[21,63,126,252,756,1260], risk_free_rate=0.40):
+    def __init__(self, holding_periods=[21, 63, 126, 252, 756, 1260]):
         self.holding_periods = holding_periods
-        self.risk_free_rate = risk_free_rate
 
-
-    def run(self, prices_df: pd.DataFrame, signals_df: pd.DataFrame = None) -> dict:
-
-        if prices_df is None or prices_df.empty:
+    def run(self, prices_df, signals_df):
+        if prices_df.empty or signals_df.empty:
             return {}
 
+        # Tarih ve sayısal format düzenlemeleri
+        prices_df['date'] = pd.to_datetime(prices_df['date'])
+        prices_df['price'] = pd.to_numeric(prices_df['price'], errors='coerce')
+        prices_df = prices_df.dropna(subset=['price'])
+        prices_df = prices_df.sort_values(['fund_id', 'date']).reset_index(drop=True)
 
-        prices_df = prices_df.copy()
+        signals_df['date'] = pd.to_datetime(signals_df['date'])
+        buy_signals = signals_df[signals_df['signal'].isin(['Güçlü AL', 'AL / İzle'])].copy()
 
-        # Veri tiplerini düzelt
-        prices_df['date'] = pd.to_datetime(
-            prices_df['date']
-        ).dt.normalize()
-
-        prices_df['fund_id'] = pd.to_numeric(
-            prices_df['fund_id'],
-            errors='coerce'
-        )
-
-        prices_df['price'] = pd.to_numeric(
-            prices_df['price'],
-            errors='coerce'
-        )
-
-        prices_df = prices_df.dropna(
-            subset=['fund_id', 'price']
-        )
-
-        prices_df['fund_id'] = prices_df['fund_id'].astype(int)
-
-
-        # Tarihe göre sırala
-        prices_df = prices_df.sort_values(
-            by=['fund_id', 'date']
-        ).reset_index(drop=True)
-
-
-        # Aynı fon aynı gün tekrarlarını temizle
-        prices_df = prices_df.drop_duplicates(
-            subset=['fund_id', 'date'],
-            keep='last'
-        )
-
-
-        trading_dates = sorted(
-            prices_df['date'].unique()
-        )
-
-
-        if len(trading_dates) < 150:
+        if buy_signals.empty:
             return {}
 
-
-        report = {}
-
-
-        # Her holding period için ayrı hesap
-        for period in self.holding_periods:
-
-            trade_results = []
-
-
-            # Geçmişten bugüne aylık yeniden dengeleme
-            rebalance_dates = trading_dates[21:-period:10]
-
-
-            for sig_date in rebalance_dates:
-
-
-                # Sadece geçmiş veri kullan
-                hist_slice = prices_df[
-                    prices_df['date'] <= sig_date
-                ]
-
-
-                pivot_prices = (
-                    hist_slice
-                    .pivot_table(
-                        index='date',
-                        columns='fund_id',
-                        values='price',
-                        aggfunc='last'
-                    )
-                    .tail(21)
-                )
-
-
-                if len(pivot_prices) < 21:
-                    continue
-
-
-
-                start_prices = pivot_prices.iloc[0]
-                end_prices = pivot_prices.iloc[-1]
-
-
-                past_returns = (
-                    end_prices - start_prices
-                ) / start_prices
-
-
-                past_returns = past_returns.dropna()
-
-
-                if past_returns.empty:
-                    continue
-
-
-
-                # O tarihte en güçlü 5 fonu seç
-                top_funds = (
-                    past_returns
-                    .nlargest(5)
-                    .index
-                    .tolist()
-                )
-
-
-
-                for fund_id in top_funds:
-
-
-                    future_prices = prices_df[
-                        (prices_df['fund_id'] == fund_id)
-                        &
-                        (prices_df['date'] > sig_date)
-                    ].sort_values('date')
-
-
-                    if len(future_prices) < period:
-                        continue
-
-
-
-                    entry_data = prices_df[
-                        (prices_df['fund_id'] == fund_id)
-                        &
-                        (prices_df['date'] == sig_date)
-                    ]
-
-
-                    if entry_data.empty:
-                        continue
-
-
-
-                    entry_price = float(
-                        entry_data.iloc[0]['price']
-                    )
-
-
-                    exit_row = future_prices.iloc[
-                        period - 1
-                    ]
-
-
-                    exit_price = float(
-                        exit_row['price']
-                    )
-
-
-                    if entry_price <= 0:
-                        continue
-
-
-
-                    ret = (
-                        exit_price - entry_price
-                    ) / entry_price
-
-
-
-                    trade_results.append({
-
-                        "fund_id": int(fund_id),
-
-                        "entry_date": sig_date,
-
-                        "exit_date": exit_row['date'],
-
-                        "entry_price": entry_price,
-
-                        "exit_price": exit_price,
-
-                        "return": float(ret)
-
-                    })
-
-
-
-
-            key_name = f"{period}_days_performance"
-
-
-
-            if not trade_results:
-
-                report[key_name] = {
-
-                    "analyzed_signals":0,
-
-                    "average_return":0.0,
-
-                    "hit_ratio":0.0,
-
-                    "sharpe_ratio":0.0,
-
-                    "max_drawdown":0.0,
-
-                    "confidence_score":0.0,
-
-                    "trades_df":pd.DataFrame()
-
+        # Her fon için sıralı indeks (gün sırası) ver
+        prices_df['row_idx'] = prices_df.groupby('fund_id').cumcount()
+        
+        results = {}
+
+        for days in self.holding_periods:
+            key_str = f"{days}_days_performance"
+            
+            # Giriş fiyatlarını ve indeksini bul
+            entry_merged = pd.merge(
+                buy_signals, 
+                prices_df[['fund_id', 'date', 'price', 'row_idx']], 
+                on=['fund_id', 'date'], 
+                how='inner'
+            )
+            entry_merged = entry_merged.rename(columns={'price': 'entry_price', 'row_idx': 'entry_idx'})
+            
+            # Çıkış fiyatları için hedef indeksi belirle (giriş + N gün sonrasık)
+            exit_target = prices_df[['fund_id', 'row_idx', 'date', 'price']].copy()
+            exit_target['target_idx'] = exit_target['row_idx'] - days  # entry_idx ile eşleşmesi için
+            
+            trade_merged = pd.merge(
+                entry_merged, 
+                exit_target[['fund_id', 'target_idx', 'date', 'price']], 
+                left_on=['fund_id', 'entry_idx'], 
+                right_on=['fund_id', 'target_idx'], 
+                suffixes=('_entry', '_exit')
+            )
+            
+            if trade_merged.empty:
+                results[key_str] = {
+                    "analyzed_signals": 0,
+                    "average_return": 0.0,
+                    "hit_ratio": 0.0,
+                    "sharpe_ratio": 0.0,
+                    "max_drawdown": 0.0,
+                    "trades_df": pd.DataFrame()
                 }
-
                 continue
 
+            # Gerçek getiri hesabı: (Çıkış Fiyatı - Giriş Fiyatı) / Giriş Fiyatı
+            trade_merged['return'] = (trade_merged['price_exit'] - trade_merged['entry_price']) / trade_merged['entry_price']
+            trades_clean = trade_merged[['fund_id', 'date_entry', 'date_exit', 'entry_price', 'price_exit', 'return']].dropna()
+            
+            if trades_clean.empty:
+                results[key_str] = {
+                    "analyzed_signals": 0,
+                    "average_return": 0.0,
+                    "hit_ratio": 0.0,
+                    "sharpe_ratio": 0.0,
+                    "max_drawdown": 0.0,
+                    "trades_df": pd.DataFrame()
+                }
+                continue
 
-
-
-            results = pd.DataFrame(
-                trade_results
-            )
-
-
-            returns = results['return']
-
-
-            average_return = (
-                returns.mean() * 100
-            )
-
-
-            hit_ratio = (
-                (returns > 0).mean() * 100
-            )
-
-
-
-            std = returns.std()
-
-
-
-            if pd.isna(std) or std == 0:
-
-                sharpe = 0
-
-            else:
-
-                annual_factor = np.sqrt(
-                    252 / period
-                )
-
-                rf_period = (
-                    self.risk_free_rate / 252
-                ) * period
-
-
-                sharpe = (
-                    (returns.mean() - rf_period)
-                    /
-                    std
-                ) * annual_factor
-
-
-
-
-            equity = (
-                1 + returns
-            ).cumprod()
-
-
-            peak = equity.cummax()
-
-
-            drawdown = (
-                equity - peak
-            ) / peak
-
-
-            max_drawdown = (
-                drawdown.min() * 100
-            )
-
-
-
-            confidence = min(
-                99,
-                max(
-                    40,
-                    hit_ratio * 0.8
-                    +
-                    len(results) * 0.2
-                )
-            )
-
-
-
-            report[key_name] = {
-
-                "analyzed_signals":
-                    int(len(results)),
-
-                "average_return":
-                    round(float(average_return),2),
-
-                "hit_ratio":
-                    round(float(hit_ratio),2),
-
-                "sharpe_ratio":
-                    round(float(sharpe),2),
-
-                "max_drawdown":
-                    round(float(max_drawdown),2),
-
-                "confidence_score":
-                    round(float(confidence),1),
-
-                "trades_df":
-                    results
-
+            analyzed = len(trades_clean)
+            avg_ret = float(trades_clean['return'].mean() * 100)
+            wins = len(trades_clean[trades_clean['return'] > 0])
+            hit_ratio = float((wins / analyzed) * 100) if analyzed > 0 else 0.0
+            
+            # Sharpe ve Max Drawdown gerçek matematiksel hesaplamaları
+            std_ret = trades_clean['return'].std()
+            sharpe = float((trades_clean['return'].mean() / std_ret) * np.sqrt(252 / days)) if std_ret > 0 and not np.isnan(std_ret) else 0.0
+            
+            cum_returns = (1 + trades_clean['return']).cumprod()
+            peak = cum_returns.cummax()
+            drawdown = (cum_returns - peak) / peak
+            mdd = float(drawdown.min() * 100) if not drawdown.empty else 0.0
+            
+            results[key_str] = {
+                "analyzed_signals": analyzed,
+                "average_return": avg_ret,
+                "hit_ratio": hit_ratio,
+                "sharpe_ratio": sharpe,
+                "max_drawdown": mdd,
+                "trades_df": trades_clean
             }
 
-
-        return report
+        return results

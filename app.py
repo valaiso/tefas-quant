@@ -313,7 +313,7 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
         selected_fund_id = fund_options[selected_label]
         selected_code = selected_label.split(" - ")[0]
         
-        fund_detail = get_fund_detail_with_ranking(selected_fund_id, conn=conn)
+        fund_detail = get_fund_detail_with_ranking(selected_fund_id)
         
         if fund_detail:
             badge_html = get_grade_badge_html(fund_detail['letter_grade'])

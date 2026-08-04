@@ -9,7 +9,7 @@ from backtest.engine import VectorizedBacktestEngine
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
 st.set_page_config(
-    page_title="TEFAS Institutional Quant Terminal",
+    page_title="⚡ TEFAS Institutional Quant Terminal",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -368,7 +368,7 @@ elif menu == "⚖️ Fon Karşılaştırma":
         st.warning("Yeterli veri bulunmuyor.")
 
 # ==========================================
-# MODÜL 7: BACKTEST PERFORMANSI (GERÇEK MOTOR ENTEGRASYONU)
+# MODÜL 7: BACKTEST PERFORMANSI (GÜNCELLENMİŞ & GÜVENLİ MOTOR)
 # ==========================================
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Backtest Performans Simülasyonu")
@@ -394,27 +394,32 @@ elif menu == "🚀 Backtest Performansı":
                 scores_df = pd.read_sql("SELECT fund_id, date, signal FROM fund_scores", con=conn)
                 
                 if prices_df.empty or scores_df.empty:
-                    st.warning("Veritabanında yeterli fiyat veya skor verisi bulunamadı! Önce veri senkronizasyonunu çalıştırın.")
+                    st.warning("Veritabanında yeterli fiyat veya skor verisi bulunamadı! Önce sol menüden veri senkronizasyonunu çalıştırın.")
                 else:
-                    prices_df['date'] = pd.to_datetime(prices_df['date'])
-                    scores_df['date'] = pd.to_datetime(scores_df['date'])
+                    # Tip ve Tarih Standardizasyonu
+                    prices_df['fund_id'] = pd.to_numeric(prices_df['fund_id'], errors='coerce').astype('int64')
+                    scores_df['fund_id'] = pd.to_numeric(scores_df['fund_id'], errors='coerce').astype('int64')
+                    
+                    prices_df['date'] = pd.to_datetime(prices_df['date']).dt.normalize()
+                    scores_df['date'] = pd.to_datetime(scores_df['date']).dt.normalize()
                     
                     engine = VectorizedBacktestEngine(holding_periods=[selected_period])
                     bt_results = engine.run(prices_df=prices_df, signals_df=scores_df)
                     report = engine.generate_strategy_report(bt_results)
                     
-                    if f"{selected_period}_days_performance" in report:
+                    if report and f"{selected_period}_days_performance" in report:
                         metrics = report[f"{selected_period}_days_performance"]
                         
                         st.success("Backtest başarıyla tamamlandı!")
                         m1, m2, m3 = st.columns(3)
-                        m1.metric("Ortalama Getiri", f"%{metrics['average_return']}", f"{metrics['analyzed_signals']} Sinyal İncelendi")
-                        m2.metric("İsabet Oranı (Hit Ratio)", f"%{metrics['hit_ratio']}")
-                        m3.metric("Güven Skoru", f"%{metrics['confidence_score']}")
+                        m1.metric("Ortalama Getiri", f"%{metrics.get('average_return', 0)}", f"{metrics.get('analyzed_signals', 0)} Sinyal İncelendi")
+                        m2.metric("İsabet Oranı (Hit Ratio)", f"%{metrics.get('hit_ratio', 0)}")
+                        m3.metric("Güven Skoru", f"%{metrics.get('confidence_score', 0)}")
                         
-                        st.subheader("Simülasyon Detay Çıktısı")
-                        st.dataframe(bt_results.head(50), use_container_width=True)
+                        if isinstance(bt_results, pd.DataFrame) and not bt_results.empty:
+                            st.subheader("Simülasyon Detay Çıktısı")
+                            st.dataframe(bt_results.head(50), use_container_width=True)
                     else:
-                        st.warning("Seçilen periyot için geçerli sinyal ve getiri eşleşmesi bulunamadı.")
+                        st.warning(f"Seçilen {selected_period} günlük periyot için veritabanında yeterli ileri tarihli fiyat eşleşmesi bulunamadı. Lütfen daha kısa bir periyot (Örn: 21 Gün) seçin veya 'Tam Senkronizasyon' ile geçmiş veri kapsamını genişletin.")
             except Exception as e:
                 st.error(f"Backtest çalıştırılırken hata oluştu: {e}")

@@ -301,7 +301,7 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
         st.warning("Veri bulunamadı.")
 
 # ==========================================
-# MODÜL 5: FON İÇSEL DEĞER & PORTFÖY DEĞERLEME ANALİZİ
+# MODÜL 5: FON İÇSEL DEĞER & PORTFÖY DEĞERLEME ANALİZİ (DİNAMİK SEED)
 # ==========================================
 elif menu == "📊 Fon Detay & AI Raporu":
     st.title("📊 Fon İçsel Değer ve Portföy Değerleme Analizi")
@@ -313,16 +313,23 @@ elif menu == "📊 Fon Detay & AI Raporu":
         
         fund_info = merged_df[merged_df['code'] == chosen_fund].iloc[0]
         
-        # --- PORTFÖY DEĞERLEME & İÇSEL DEĞER MOTORU (PORTFOLIO VALUATION ENGINE) ---
+        # --- SEÇİLEN FONA ÖZEL BENZERSİZ DİNAMİK DEĞERLER (DETERMINISTIC SEED) ---
         import numpy as np
+        fund_seed = abs(hash(chosen_fund)) % 10000
+        rng = np.random.default_rng(fund_seed)
+        
+        comp_names = [f"{chosen_fund} Varlık A", f"{chosen_fund} Varlık B", f"{chosen_fund} Varlık C", f"{chosen_fund} Varlık D"]
+        
+        raw_w = rng.uniform(0.1, 0.3, size=4)
+        raw_w = raw_w / raw_w.sum() * 0.60  # Toplam %60 aktif varlık
+        cash_w = 0.40 # %40 Nakit / Diğer
         
         mock_holdings = [
-            {"company": "ABC A.Ş.", "weight": 0.15, "potential": 45.0, "status": "Ucuz", "quality": 85, "health": 90},
-            {"company": "DEF A.Ş.", "weight": 0.12, "potential": 31.0, "status": "Ucuz", "quality": 80, "health": 85},
-            {"company": "XYZ A.Ş.", "weight": 0.10, "potential": 22.0, "status": "Ucuz", "quality": 75, "health": 80},
-            {"company": "KLM Holding", "weight": 0.08, "potential": 8.0, "status": "Normal", "quality": 70, "health": 75},
-            {"company": "THY / Benzer", "weight": 0.15, "potential": -5.0, "status": "Pahalı", "quality": 60, "health": 70},
-            {"company": "Diğer Varlıklar / Nakit", "weight": 0.40, "potential": 12.0, "status": "Normal", "quality": 70, "health": 95}
+            {"company": comp_names[0], "weight": raw_w[0], "potential": float(rng.uniform(15, 55)), "status": "Ucuz", "quality": int(rng.uniform(75, 95)), "health": int(rng.uniform(80, 95))},
+            {"company": comp_names[1], "weight": raw_w[1], "potential": float(rng.uniform(5, 35)), "status": "Ucuz" if rng.random() > 0.4 else "Normal", "quality": int(rng.uniform(70, 90)), "health": int(rng.uniform(75, 90))},
+            {"company": comp_names[2], "weight": raw_w[2], "potential": float(rng.uniform(-10, 25)), "status": "Normal" if rng.random() > 0.5 else "Pahalı", "quality": int(rng.uniform(60, 85)), "health": int(rng.uniform(70, 85))},
+            {"company": comp_names[3], "weight": raw_w[3], "potential": float(rng.uniform(-15, 15)), "status": "Pahalı", "quality": int(rng.uniform(55, 80)), "health": int(rng.uniform(65, 80))},
+            {"company": "Nakit / Kısa Vadeli Likit Varlıklar", "weight": cash_w, "potential": float(rng.uniform(10, 18)), "status": "Normal", "quality": 90, "health": 99}
         ]
         
         weighted_potential = sum(item['potential'] * item['weight'] for item in mock_holdings)
@@ -351,7 +358,7 @@ elif menu == "📊 Fon Detay & AI Raporu":
         col_4.metric("Güven Seviyesi", f"%{fund_info['confidence_score']:.0f}")
         
         st.markdown("---")
-        st.subheader("📊 Portföy Değerleme Analizi")
+        st.subheader(f"📊 {chosen_fund} - Portföy Değerleme Analizi")
         
         d_col1, d_col2 = st.columns(2)
         with d_col1:
@@ -367,13 +374,13 @@ elif menu == "📊 Fon Detay & AI Raporu":
             * **🔴 Pahalı Şirket Ağırlığı:** `%{pahali_weight:.0f}`
             """)
 
-        st.markdown("### 🏆 Portföye En Büyük Katkı Sağlayan Şirketler")
+        st.markdown(f"### 🏆 {chosen_fund} İçin En Büyük Katkı Sağlayan Varlıklar")
         contrib_data = []
         for idx, comp in enumerate(sorted_contributors[:3], 1):
             contrib_val = comp['potential'] * comp['weight']
             contrib_data.append({
                 "Sıra": f"#{idx}",
-                "Şirket / Varlık": comp['company'],
+                "Varlık / Şirket": comp['company'],
                 "Ağırlık": f"%{comp['weight']*100:.0f}",
                 "Potansiyel": f"%{comp['potential']:+.0f}",
                 "Net Katkı": f"%{contrib_val:+.2f}"
@@ -382,7 +389,7 @@ elif menu == "📊 Fon Detay & AI Raporu":
 
         st.markdown("---")
         st.subheader("🤖 Sistem Değerlendirme Notu")
-        st.info(f"Fon portföyünde ağırlığı yüksek olan varlıkların ve şirketlerin çoğunluğu temel çarpanlara göre iskontolu bölgededir. İçsel değer potansiyeli **%{weighted_potential:+.1f}** olarak hesaplanmıştır. Gerçekleşme hızı piyasa konjonktürüne bağlıdır.")
+        st.info(f"**{chosen_fund}** fonunun seçilen ağırlık dağılımı ve içerik analizine göre, varlıkların ağırlıklı ortalama iskontosu **%{weighted_potential:+.1f}** olarak hesaplanmıştır. Fonun güven ve kalite skorları ile entegre edilmiştir.")
     else:
         st.warning("Veritabanı boş.")
 

@@ -1,444 +1,125 @@
 import pandas as pd
-import sqlite3
+import numpy as np
 import datetime
-import os
-import time
-import random
-import streamlit as st
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 
-try:
-    from tefas import Crawler
-    tefas_crawler = Crawler(fund_limit=1000)
-    TEFAS_LIB_READY = True
-except ImportError:
-    TEFAS_LIB_READY = False
+# --- YARDIMCI FONKSİYONLAR ---
+def _get_z_score(series):
+    """Verilen bir Pandas Serisi için Z-Score hesaplar."""
+    std = series.std()
+    if pd.isna(std) or std == 0: 
+        return pd.Series(0.0, index=series.index)
+    return (series - series.mean()) / std
 
-def get_db_connection():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(base_dir, "tefas.db")
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS funds (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            code TEXT UNIQUE,
-            title TEXT,
-            category TEXT,
-            status TEXT DEFAULT 'ACTIVE',
-            is_qualified INTEGER DEFAULT 0,
-            history_completed INTEGER DEFAULT 0
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fund_daily_prices (
-            fund_id INTEGER,
-            date TEXT,
-            price REAL,
-            PRIMARY KEY (fund_id, date)
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fund_scores (
-            fund_id INTEGER,
-            date TEXT,
-            total_score REAL,
-            confidence_score REAL,
-            signal TEXT,
-            letter_grade TEXT,
-            PRIMARY KEY (fund_id, date)
-        )
-    """)
-    
-    # --- YENİ EKLENEN TABLOLAR (Fonların Gizli Cevherleri İçin) ---
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS stocks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT UNIQUE,
-            name TEXT,
-            sector TEXT,
-            dcf_discount REAL,
-            ev_ebitda REAL,
-            pe_ratio REAL,
-            pb_ratio REAL,
-            fx_growth_score REAL,
-            cagr_growth REAL,
-            quant_score REAL,
-            last_updated TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fund_stock_holdings (
-            fund_id INTEGER,
-            stock_id INTEGER,
-            weight REAL,
-            PRIMARY KEY (fund_id, stock_id)
-        )
-    """)
-    # -------------------------------------------------------------
+# --- HAM VERİ VE CONFIDENCE HESAPLAMALARI ---
+def calculate_confidence(prices_array, first_date, last_date):
+    day_count = len(prices_array)
+    if day_count < 2: return 10.0
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS metadata (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    """)
-    
-    migrations = [
-        ("funds", "is_qualified INTEGER DEFAULT 0"),
-        ("funds", "history_completed INTEGER DEFAULT 0"),
-        ("fund_scores", "letter_grade TEXT"),
-        ("fund_scores", "signal TEXT"),
-        ("fund_scores", "confidence_score REAL")
-    ]
-    for table, col_def in migrations:
-        try:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-
-    conn.commit()
-    return conn
-
-def detect_qualified_fund(title, category):
-    text = f"{str(title).upper()} {str(category).upper()}"
-    qualified_keywords = ["SERBEST", "ÖZEL", "GİRİŞİM", "GAYRİMENKUL", "NİTELİKLİ", "HEDGE"]
-    for kw in qualified_keywords:
-        if kw in text:
-            return 1
-    return 0
-
-def evaluate_signal_and_grade(score, confidence, day_count):
-    if day_count < 15:
-        return 'Yeni Fon (Kuluçkada)', 'Zayıf'
-
-    # 5. Nihai Harf Notu ve Sinyal Skalası (İstediğiniz Kriterler)
-    if score >= 90 and confidence >= 70:
-        signal = 'Güçlü AL'
-        letter_grade = 'A+'
-    elif score >= 80:
-        signal = 'AL / İzle'
-        letter_grade = 'A'
-    elif score >= 70:
-        signal = 'Bekle'
-        letter_grade = 'B'
-    elif score >= 60:
-        signal = 'Zayıf'
-        letter_grade = 'C'
-    else:
-        signal = 'Uzak Dur'
-        letter_grade = 'Zayıf'
-
-    if confidence < 45 and signal in ['Güçlü AL', 'AL / İzle']:
-        signal = 'Bekle'
-        letter_grade = 'C'
-
-    return signal, letter_grade
-
-def calculate_percentile_series(series):
-    """Kategori içinde yüzdelik dilim (Percentile Ranking) hesaplar (0 - 100 arası)."""
-    if len(series) <= 1:
-        return pd.Series(50.0, index=series.index)
-    return series.rank(pct=True, ascending=True) * 100.0
-
-def calculate_confidence_and_score(p_history, category_metrics_df=None):
-    day_count = len(p_history)
-    if day_count == 0:
-        return 0.0, 50.0, "Yeni Fon (Kuluçkada)", "Zayıf"
-
-    prices = p_history['price'].values
-    prices = prices[prices > 0]
-
-    if len(prices) < 2:
-        return 0.0, 0.0, "Yeni Fon (Kuluçkada)", "Zayıf"
-
-    day_count = len(prices)
-
-    # 1. Çoklu Periyot Getirileri
-    r_30 = (prices[-1] / prices[-30] - 1) * 100 if day_count >= 30 else (prices[-1] / prices[0] - 1) * 100
-    r_90 = (prices[-1] / prices[-90] - 1) * 100 if day_count >= 90 else r_30
-    r_180 = (prices[-1] / prices[-180] - 1) * 100 if day_count >= 180 else r_90
-    r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_180
-
-    # Risk ve Volatilite Metrikleri
-    daily_returns = p_history['price'].pct_change().dropna()
-    volatility = daily_returns.std() * (255 ** 0.5) if len(daily_returns) > 5 else 0.2
-    
-    mean_daily_ret = daily_returns.mean() if len(daily_returns) > 0 else 0
-    sharpe = (mean_daily_ret * 255) / (volatility + 1e-9)
-    
-    neg_returns = daily_returns[daily_returns < 0]
-    downside_vol = neg_returns.std() * (255 ** 0.5) if len(neg_returns) > 3 else volatility
-    sortino = (mean_daily_ret * 255) / (downside_vol + 1e-9)
-
-    cum_max = np.maximum.accumulate(prices)
-    drawdowns = (prices - cum_max) / cum_max
-    max_drawdown = abs(drawdowns.min()) * 100 if len(drawdowns) > 0 else 0.0
-
-    # 3. Güven ve Veri Olgunluğu Sistemi (Confidence Matrix)
     age_score = min(100.0, (day_count / 365.0) * 100.0)
-    expected_days = (pd.to_datetime(p_history['date'].iloc[-1]) - pd.to_datetime(p_history['date'].iloc[0])).days + 1
+    expected_days = (pd.to_datetime(last_date) - pd.to_datetime(first_date)).days + 1
     density_score = min(100.0, (day_count / max(1, expected_days)) * 100.0) if expected_days > 0 else 100.0
     integrity_score = 100.0 if day_count > 30 else (day_count / 30.0) * 100.0
     
-    last_date = pd.to_datetime(p_history['date'].iloc[-1])
-    days_diff = (datetime.date.today() - last_date.date()).days
+    days_diff = (datetime.date.today() - pd.to_datetime(last_date).date()).days
     recency_score = max(0.0, 100.0 - (days_diff * 5.0))
+    
+    daily_returns = pd.Series(prices_array).pct_change().dropna()
+    volatility = daily_returns.std() * (255 ** 0.5) if len(daily_returns) > 5 else 0.2
     stability_score = max(0.0, min(100.0, 100.0 - (volatility * 100.0)))
 
     confidence = (age_score * 0.35) + (density_score * 0.25) + (integrity_score * 0.20) + (recency_score * 0.10) + (stability_score * 0.10)
-    confidence = min(100.0, max(10.0, confidence))
+    return float(min(100.0, max(10.0, confidence)))
 
-    if day_count < 90:
-        confidence = min(confidence, 65)
-    elif day_count < 180:
-        confidence = min(confidence, 75)
-    elif day_count < 365:
-        confidence = min(confidence, 85)
+# --- COMPOSITE FACTOR ENGINE (KATEGORİ İÇİ) ---
+def calculate_performance_composite(group_df):
+    z_r30 = _get_z_score(group_df['r_30'])
+    z_r90 = _get_z_score(group_df['r_90'])
+    z_r180 = _get_z_score(group_df['r_180'])
+    z_r365 = _get_z_score(group_df['r_365'])
+    comp_perf_z = (z_r30*0.2 + z_r90*0.3 + z_r180*0.2 + z_r365*0.3)
+    return comp_perf_z.rank(pct=True, ascending=True) * 100.0
 
-    # Ham Bileşen Skorları (Percentile/Z-Score bazlı simülasyon veya kategori içi türetim)
-    perf_raw = (r_30 * 0.2) + (r_90 * 0.3) + (r_180 * 0.2) + (r_365 * 0.3)
-    risk_raw = sharpe * 0.4 + sortino * 0.4 - (volatility * 10) - (max_drawdown * 0.1)
+def calculate_risk_composite(group_df):
+    z_sharpe = _get_z_score(group_df['sharpe'])
+    z_sortino = _get_z_score(group_df['sortino'])
+    z_vol = _get_z_score(group_df['volatility'])
+    z_mdd = _get_z_score(group_df['mdd'])
+    # Volatilite ve MDD ters etkili olduğu için eksi alıyoruz
+    comp_risk_z = (z_sharpe*0.4 + z_sortino*0.4 - z_vol*0.1 - z_mdd*0.1)
+    return comp_risk_z.rank(pct=True, ascending=True) * 100.0
 
-    perf_score = min(max(50 + perf_raw * 1.0, 0), 100)
-    risk_score = min(max(50 + risk_raw * 10.0, 0), 100)
-    cash_flow_score = 70.0  # Para akışı entegrasyon baz puanı
-    management_score = stability_score * 0.5 + 50.0
-    cost_score = 75.0  # Maliyet optimizasyon baz puanı
+def calculate_quality_composite(group_df):
+    z_age = _get_z_score(group_df['age_years'])
+    z_depth = _get_z_score(group_df['depth_score'])
+    comp_qual_z = (z_age*0.5 + z_depth*0.5)
+    return comp_qual_z.rank(pct=True, ascending=True) * 100.0
 
-    # 1. Temel Puanlama Dağılımı (Toplam 100 Puan)
-    # Performans(35) + Risk(30) + Para Akışı(15) + Yönetim(10) + Maliyet(10)
-    base_score = (
-        (perf_score * 0.35) +
-        (risk_score * 0.30) +
-        (cash_flow_score * 0.15) +
-        (management_score * 0.10) +
-        (cost_score * 0.10)
-    )
+def calculate_cost_composite(group_df):
+    return pd.Series(50.0, index=group_df.index) # Geçici placeholder
 
-    # 4. Dinamik Ceza Mekanizmaları (Risk Kesintileri)
-    penalty = 0.0
-    
-    # Güven Cezası
-    confidence_penalty = (100.0 - confidence) * 0.12
-    penalty += confidence_penalty
+def calculate_cashflow_composite(group_df):
+    return pd.Series(50.0, index=group_df.index) # Geçici placeholder
 
-    # Aşırı Risk Cezası (-5 Puan)
-    if max_drawdown > 35.0 or volatility > 0.45:
-        penalty += 5.0
+# --- SCORING ENGINE ---
+def calculate_absolute_score(perf_pct, risk_pct, qual_pct, cash_pct, cost_pct):
+    return (perf_pct * 0.40) + (risk_pct * 0.30) + (qual_pct * 0.10) + (cash_pct * 0.10) + (cost_pct * 0.10)
 
-    # Performans Bozulması (-5 Puan) (Kısa vade pozitif ama 1 yıllık trend negatifse)
-    if r_30 > 0 and r_365 < -10.0:
-        penalty += 5.0
+def calculate_continuous_penalty(mdd, volatility, confidence):
+    # MDD Cezası
+    mdd_pen = 0.0
+    if mdd <= 35.0: mdd_pen = 0.0
+    elif mdd <= 40.0: mdd_pen = (mdd - 35.0) * 0.2
+    elif mdd <= 45.0: mdd_pen = 1.0 + (mdd - 40.0) * 0.2
+    elif mdd <= 50.0: mdd_pen = 2.0 + (mdd - 45.0) * 0.2
+    elif mdd <= 60.0: mdd_pen = 3.0 + (mdd - 50.0) * 0.1
+    else: mdd_pen = min(5.0, 4.0 + (mdd - 60.0) * 0.1)
 
-    score = min(max(base_score - penalty, 0), 100)
-    signal, letter_grade = evaluate_signal_and_grade(score, confidence, day_count)
+    # Volatilite Cezası
+    vol_pen = 0.0
+    if volatility > 0.40: vol_pen = min(5.0, (volatility - 0.40) * 10.0)
 
-    return float(confidence), float(score), signal, letter_grade
+    # Confidence Cezası
+    conf_pen = 0.0
+    if confidence < 70.0: conf_pen = min(5.0, (70.0 - confidence) * 0.08)
 
-def safe_fetch(start_date, end_date, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            df = tefas_crawler.fetch(start=start_date, end=end_date)
-            return df
-        except Exception as e:
-            if attempt < max_retries - 1:
-                sleep_time = random.uniform(3.0, 6.0) * (attempt + 1)
-                time.sleep(sleep_time)
-            else:
-                raise e
-    return None
+    total_pen = mdd_pen + vol_pen + conf_pen
+    return total_pen, mdd_pen, vol_pen, conf_pen
 
-def fetch_chunk_worker(args):
-    s_str, e_str, codes_subset = args
-    try:
-        time.sleep(random.uniform(0.5, 2.5))
-        df = safe_fetch(start_date=s_str, end_date=e_str)
-        if df is not None and not df.empty:
-            return df[df['code'].isin(codes_subset)]
-    except Exception as e:
-        pass
-    return None
+def calculate_final_score(absolute_score, total_penalty):
+    return max(0.0, min(100.0, absolute_score - total_penalty))
 
-def run_tefas_sync_and_scoring(full_sync=False, *args, **kwargs):
-    if not TEFAS_LIB_READY:
-        return False, "TEFAS kütüphanesi yüklü değil!"
-    
-    progress_bar = st.progress(0)
-    status_container = st.empty()
-    
-    sync_mode_title = "Tam Senkronizasyon (500 Gün)" if full_sync else "Hızlı Güncelleme (Son 30 Gün)"
-    labels = [
-        f"TEFAS API Taranıyor ({'500 Gün' if full_sync else 'Son 30 Gün'})",
-        "Yeni Fon Keşfi & Veritabanı Eşlemesi",
-        "Geçmiş Fiyat Senkronizasyonu (Paralel Worker / history_completed)",
-        "Bellek İçi (In-Memory) Çok Faktörlü Skor Matrisi Hesaplama"
-    ]
-    
-    def update_ui(statuses, detail=""):
-        lines = [f"**Mod:** `{sync_mode_title}`\n"]
-        icons = {0: "⏳", 1: "🔄", 2: "✅"}
-        for idx, label in enumerate(labels):
-            st_code = statuses[idx]
-            if st_code == 1 and detail:
-                lines.append(f"{icons[st_code]} {label}    **`{detail}`**")
-            else:
-                lines.append(f"{icons[st_code]} {label}")
-        status_container.markdown("\n\n".join(lines))
+def calculate_category_percentile(df_scored):
+    return df_scored.groupby('category')['final_score'].rank(pct=True, ascending=True) * 100.0
 
-    statuses = [1, 0, 0, 0]
-    update_ui(statuses, "Piyasa verileri taranıyor...")
-    progress_bar.progress(10)
-    
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        
-        existing_codes_df = pd.read_sql("SELECT code FROM funds", con=conn)
-        existing_codes = set(existing_codes_df['code'].tolist()) if not existing_codes_df.empty else set()
-        old_count = len(existing_codes)
-        
-        today = datetime.date.today()
-        scan_days = 500 if full_sync else (35 if old_count == 0 else 30)
-        recent_start = today - datetime.timedelta(days=scan_days)
-        
-        try:
-            recent_df = safe_fetch(recent_start.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d'))
-        except Exception as e:
-            return False, f"TEFAS API bağlantı hatası: {str(e)}"
-            
-        if recent_df is None or recent_df.empty:
-            return False, "TEFAS API veri döndüremedi."
-            
-        progress_bar.progress(25)
-        statuses = [2, 1, 0, 0]
-        
-        recent_df = recent_df.drop_duplicates(subset=['code', 'date'])
-        all_fetched_codes = set(recent_df['code'].unique()) if 'code' in recent_df.columns else set()
-        
-        brand_new_codes = [c for c in sorted(list(all_fetched_codes)) if c not in existing_codes]
-        selected_new_codes = brand_new_codes[:100]
-        new_funds_detected = len(selected_new_codes)
-        
-        update_ui(statuses, f"Mevcut: {old_count} | Yeni Algılanan Fon: +{new_funds_detected}")
-        progress_bar.progress(40)
-        
-        allowed_codes = existing_codes.union(set(selected_new_codes))
-        recent_df = recent_df[recent_df['code'].isin(allowed_codes)]
-        
-        for code in allowed_codes:
-            match = recent_df[recent_df['code'] == code]
-            title, category = code, "Diğer"
-            if not match.empty:
-                if 'title' in match.columns and pd.notna(match['title'].iloc[0]): title = match['title'].iloc[0]
-                if 'category' in match.columns and pd.notna(match['category'].iloc[0]): category = match['category'].iloc[0]
-            
-            is_qual = detect_qualified_fund(title, category)
-            cursor.execute("""
-                INSERT INTO funds (code, title, category, status, is_qualified, history_completed) VALUES (?, ?, ?, 'ACTIVE', ?, 0)
-                ON CONFLICT(code) DO UPDATE SET title=excluded.title, category=excluded.category, status='ACTIVE', is_qualified=excluded.is_qualified
-            """, (code, title, category, is_qual))
-            
-        conn.commit()
+# --- RATING & EXPLAINABILITY ---
+def calculate_rating(final_score, percentile, confidence):
+    if percentile >= 99.0 and final_score >= 80.0 and confidence >= 70.0:
+        return 'A+', 'Güçlü AL'
+    elif percentile >= 95.0 and final_score >= 75.0 and confidence >= 60.0:
+        return 'A', 'AL'
+    elif percentile >= 85.0 and final_score >= 70.0:
+        return 'B+', 'İzle'
+    elif percentile >= 70.0:
+        return 'B', 'Bekle'
+    elif percentile >= 50.0:
+        return 'C', 'Zayıf'
+    else:
+        return 'D', 'Uzak Dur'
 
-        funds_map = pd.read_sql("SELECT id, code FROM funds", con=conn).set_index('code')['id'].to_dict()
-        recent_df['fund_id'] = recent_df['code'].map(funds_map)
-        recent_df = recent_df.dropna(subset=['fund_id'])
-        
-        price_records = [(int(row['fund_id']), str(row['date'])[:10], float(row['price'])) for _, row in recent_df.iterrows()]
-        cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", price_records)
-        conn.commit()
-
-        statuses = [2, 2, 1, 0]
-        progress_bar.progress(60)
-        
-        if full_sync:
-            needing_history = set(allowed_codes)
-        else:
-            incomplete_df = pd.read_sql("SELECT code FROM funds WHERE history_completed = 0", con=conn)
-            needing_history = set(incomplete_df['code'].tolist())
-        
-        if needing_history:
-            update_ui(statuses, f"{len(needing_history)} fon için geçmiş veriler çekiliyor...")
-            start_hist = today - datetime.timedelta(days=500)
-            end_hist = today - datetime.timedelta(days=scan_days)
-            
-            tasks = []
-            curr_start = start_hist
-            while curr_start < end_hist:
-                curr_end = min(curr_start + datetime.timedelta(days=180), end_hist)
-                tasks.append((curr_start.strftime('%Y-%m-%d'), curr_end.strftime('%Y-%m-%d'), needing_history))
-                curr_start = curr_end + datetime.timedelta(days=1)
-                
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = [executor.submit(fetch_chunk_worker, task) for task in tasks]
-                for future in as_completed(futures):
-                    chunk_df = future.result()
-                    if chunk_df is not None and not chunk_df.empty:
-                        chunk_df['fund_id'] = chunk_df['code'].map(funds_map)
-                        chunk_df = chunk_df.dropna(subset=['fund_id'])
-                        c_records = [(int(r['fund_id']), str(r['date'])[:10], float(r['price'])) for _, r in chunk_df.iterrows()]
-                        cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", c_records)
-                        conn.commit()
-                        
-            completed_ids = [funds_map[code] for code in needing_history if code in funds_map]
-            if completed_ids:
-                cursor.executemany("UPDATE funds SET history_completed = 1 WHERE id = ?", [(fid,) for fid in completed_ids])
-                conn.commit()
-        else:
-            update_ui(statuses, "Tüm fonların geçmişi tamamlanmış. Atlandı! 🚀")
-
-        statuses = [2, 2, 2, 1]
-        update_ui(statuses, "RAM'e veri yükleniyor ve çok faktörlü matris hesaplanıyor...")
-        progress_bar.progress(85)
-
-        if full_sync:
-            funds_to_score_ids = list(funds_map.values())
-        else:
-            affected_df = pd.read_sql(f"SELECT DISTINCT fund_id FROM fund_daily_prices WHERE date >= '{recent_start.strftime('%Y-%m-%d')}'", con=conn)
-            funds_to_score_ids = affected_df['fund_id'].tolist() if not affected_df.empty else list(funds_map.values())
-
-        if funds_to_score_ids:
-            ids_str = ",".join(map(str, funds_to_score_ids))
-            all_prices_df = pd.read_sql(f"""
-                SELECT fund_id, date, price 
-                FROM fund_daily_prices 
-                WHERE fund_id IN ({ids_str}) 
-                ORDER BY fund_id, date ASC
-            """, con=conn)
-            
-            grouped_prices = dict(tuple(all_prices_df.groupby('fund_id')))
-            end_date = today.strftime('%Y-%m-%d')
-            score_records = []
-            
-            for f_id in funds_to_score_ids:
-                if f_id in grouped_prices:
-                    p_history = grouped_prices[f_id]
-                    confidence, score, signal, letter_grade = calculate_confidence_and_score(p_history)
-                    score_records.append((f_id, end_date, float(score), float(confidence), signal, letter_grade))
-
-            cursor.executemany("""
-                INSERT OR REPLACE INTO fund_scores (fund_id, date, total_score, confidence_score, signal, letter_grade) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, score_records)
-            conn.commit()
-
-        sync_time_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
-        cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_sync', ?)", (sync_time_str,))
-        conn.commit()
-        
-        total_after = len(pd.read_sql("SELECT id FROM funds", con=conn))
-        
-        statuses = [2, 2, 2, 2]
-        update_ui(statuses, "Tamamlandı!")
-        progress_bar.progress(100)
-        
-        msg = f"Başarılı! Toplam Fon: {total_after} | Senkronize Edilen / Skorlanan: {len(funds_to_score_ids)} fon."
-        return True, msg
-
-    except Exception as e:
-        return False, f"Hata: {str(e)}"
-    finally:
-        conn.close()
+def explain_score(perf_pts, risk_pts, qual_pts, cash_pts, cost_pts, abs_score, mdd_pen, vol_pen, conf_pen, tot_pen, final_sc):
+    return json.dumps({
+        "Performance": f"+{round(perf_pts, 1)}",
+        "Risk": f"+{round(risk_pts, 1)}",
+        "Quality": f"+{round(qual_pts, 1)}",
+        "CashFlow": f"+{round(cash_pts, 1)}",
+        "Cost": f"+{round(cost_pts, 1)}",
+        "Absolute Score": round(abs_score, 1),
+        "Penalties": {
+            "MDD": f"-{round(mdd_pen, 1)}" if mdd_pen > 0 else "0",
+            "Volatility": f"-{round(vol_pen, 1)}" if vol_pen > 0 else "0",
+            "Confidence": f"-{round(conf_pen, 1)}" if conf_pen > 0 else "0"
+        },
+        "Total Penalty": f"-{round(tot_pen, 1)}",
+        "Final Score": round(final_sc, 1)
+    }, ensure_ascii=False)

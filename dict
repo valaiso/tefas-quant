@@ -1,1 +1,0 @@
-    def run(self, prices_df: pd.DataFrame, signals_df: pd.DataFrame) -

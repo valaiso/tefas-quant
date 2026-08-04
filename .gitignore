@@ -1,6 +1,4 @@
 venv/
-tefas.db
 __pycache__/
-*.pyc
 *.csv
 *.xlsx

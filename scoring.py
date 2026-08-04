@@ -161,7 +161,7 @@ def calculate_confidence_and_score(p_history):
     volatility = daily_returns.std() * (255 ** 0.5) if len(daily_returns) > 5 else 0.2
     stability_score = max(0, min(100, 100 - (volatility * 100)))
 
-    raw_score = (score_30 * 0.25) + (score_90 * 0.30) + (score_365 * 0.25) + (stability_score * 0.20)
+    raw_score = (score_30 * 0.30) + (score_90 * 0.35) + (score_365 * 0.25) + (stability_score * 0.10)
 
     age_score = min(100.0, (day_count / 365.0) * 100.0)
     expected_days = (pd.to_datetime(p_history['date'].iloc[-1]) - pd.to_datetime(p_history['date'].iloc[0])).days + 1

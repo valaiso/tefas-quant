@@ -69,7 +69,15 @@ def calculate_percentile_rank(series, ascending=True):
     else:
         return series.rank(pct=True, ascending=False) * 100
 
-def run_scoring_pipeline(conn=None):
+def run_scoring_pipeline(
+    conn=None,
+    full_sync=False,
+    history_years=5,
+    fund_limit=400
+):
+    print(
+        f"SYNC={full_sync}, YEARS={history_years}, LIMIT={fund_limit}"
+    )
     print("SCORING ENGINE BAŞLADI")
     
     close_conn = False

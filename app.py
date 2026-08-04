@@ -283,7 +283,7 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
         chosen_fund = st.selectbox("İncelemek İstediğin Fonu Seç", all_codes)
         
         fund_info = merged_df[merged_df['code'] == chosen_fund].iloc[0]
-        fund_id = int(fund_info['id'])
+        fund_id = int(fund_info['fund_id'])
         
         # Veritabanından gerçek fon varlıklarını çekmeye çalışalım
         try:

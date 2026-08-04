@@ -50,10 +50,11 @@ menu = st.sidebar.radio(
     ]
 )
 
+# Nitelikli fonların dashboard ve listelerden izole edilmesi (Varsayılan olarak kapalı)
 include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False)
 st.sidebar.markdown("---", unsafe_allow_html=True)
 
-# --- 3. VERİ YÜKLEME VE KADEMELİ CEZA MEKANİZMASI ---
+# --- 3. VERİ YÜKLEME VE YENİ RANKING MEKANİZMASI ---
 def load_universe_data():
     try:
         funds_df = pd.read_sql("SELECT id, code, title AS name, category, status, is_qualified FROM funds", con=conn)
@@ -89,6 +90,7 @@ def load_universe_data():
     merged = pd.merge(merged, price_counts, on='fund_id', how='left')
     merged['day_count'] = merged['day_count'].fillna(0)
     
+    # Nitelikli yatırımcı filtrelemesi
     if not include_qualified:
         merged = merged[merged['is_qualified_clean'] == 0]
         
@@ -101,22 +103,16 @@ def load_universe_data():
         
     merged['confidence_score'] = merged['day_count'].apply(get_confidence_score)
     
+    # Sisteme giriş için Minimum 65 Confidence Eşiği
+    merged = merged[merged['confidence_score'] >= 65]
+    
     if 'total_score' in merged.columns:
         merged['total_score'] = pd.to_numeric(merged['total_score'], errors='coerce').fillna(0)
         
-        def apply_user_penalty(row):
-            total = row['total_score']
-            conf = row['confidence_score']
-            if conf >= 90: mult = 1.00
-            elif conf >= 70: mult = 0.95
-            elif conf >= 50: mult = 0.85
-            elif conf >= 30: mult = 0.70
-            else: mult = 0.50
-            return total * mult
-            
-        merged['ranking_score'] = merged.apply(apply_user_penalty, axis=1)
+        # Yeni Ranking Formülü: Score * 0.90 + Confidence * 0.10
+        merged['ranking_score'] = (merged['total_score'] * 0.90) + (merged['confidence_score'] * 0.10)
     else:
-        merged['ranking_score'] = merged.get('total_score', 0)
+        merged['ranking_score'] = 0
         
     return merged
 
@@ -141,7 +137,8 @@ if menu == "🔄 Fon Senkronizasyonu":
                 else:
                     st.error(msg)
     with col2:
-        if st.button("🔄 Tam Senkronizasyon (500 Gün)", use_container_width=True):
+        # API limitlerine takılmamak adına 2-yıl ve 200 fon kısıtlamasına uyumlu buton güncellemesi
+        if st.button("🔄 Tam Senkronizasyon (2 Yıl / 200 Fon Limitli)", use_container_width=True):
             with st.spinner("Tam senkronizasyon çalıştırılıyor..."):
                 success, msg = run_tefas_sync_and_scoring(full_sync=True)
                 if success:
@@ -184,10 +181,10 @@ elif menu == "⚡ Ana Dashboard":
             col_b.markdown(f"**{row['code']}** - {row['name']} *({row['category']})*")
             rank_val = row['ranking_score'] if pd.notna(row.get('ranking_score')) else 0.0
             conf_val = row['confidence_score'] if pd.notna(row.get('confidence_score')) else 0.0
-            badge = "⭐ Premium" if conf_val >= 85 else ("🛡️ Yüksek Güven" if conf_val >= 60 else "⚠️ Yeni / Riskli")
+            badge = "⭐ Premium" if conf_val >= 85 else ("🛡️ Yüksek Güven" if conf_val >= 65 else "⚠️ Sınırda")
             col_c.markdown(f"Ranking: **{rank_val:.1f}** | Güven: **%{conf_val:.0f}** ({badge})")
     else:
-        st.info("⚠️ Veri bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
+        st.info("⚠️ Gerekli güven eşiğini geçen veri bulunamadı veya veritabanı boş. Lütfen sol menüden senkronizasyon yapın.")
 
 # ==========================================
 # MODÜL 1.5: FON KEŞİF MERKEZİ

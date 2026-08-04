@@ -95,14 +95,11 @@ def load_universe_data():
     if not include_qualified:
         merged = merged[merged['is_qualified_clean'] == 0]
         
-    def get_confidence_score(days):
-        if days >= 500: return 95.0 
-        elif days >= 250: return 80.0 
-        elif days >= 125: return 60.0 
-        elif days >= 60: return 40.0 
-        else: return 20.0 
-        
-    merged['confidence_score'] = merged['day_count'].apply(get_confidence_score)
+    # Gerçek scoring motorundan gelen confidence kullanılır
+    merged['confidence_score'] = pd.to_numeric(
+        merged['confidence_score'],
+        errors='coerce'
+    ).fillna(0)
     
     # Sisteme giriş için Minimum 65 Confidence Eşiği
     merged = merged[merged['confidence_score'] >= 65]

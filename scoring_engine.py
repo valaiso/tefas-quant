@@ -3,209 +3,237 @@ import numpy as np
 import sqlite3
 import datetime
 import os
-import time
-import random
-import streamlit as st
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import scoring 
-
-try:
-    from tefas import Crawler
-    tefas_crawler = Crawler(fund_limit=1000)
-    TEFAS_LIB_READY = True
-except ImportError:
-    TEFAS_LIB_READY = False
+import json
 
 def get_db_connection():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     db_path = os.path.join(base_dir, "tefas.db")
     conn = sqlite3.connect(db_path, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS funds (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE, title TEXT, category TEXT, status TEXT DEFAULT 'ACTIVE', is_qualified INTEGER DEFAULT 0, history_completed INTEGER DEFAULT 0)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS fund_daily_prices (fund_id INTEGER, date TEXT, price REAL, PRIMARY KEY (fund_id, date))")
-    cursor.execute("CREATE TABLE IF NOT EXISTS fund_scores (fund_id INTEGER, date TEXT, absolute_score REAL, final_score REAL, confidence_score REAL, category_percentile REAL, signal TEXT, letter_grade TEXT, breakdown_json TEXT, raw_score REAL, confidence_factor REAL, PRIMARY KEY (fund_id, date))")
-    cursor.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)")
-    
-    migrations = [
-        ("funds", "is_qualified INTEGER DEFAULT 0"), 
-        ("funds", "history_completed INTEGER DEFAULT 0"), 
-        ("fund_scores", "absolute_score REAL"), 
-        ("fund_scores", "final_score REAL"), 
-        ("fund_scores", "category_percentile REAL"), 
-        ("fund_scores", "letter_grade TEXT"), 
-        ("fund_scores", "signal TEXT"), 
-        ("fund_scores", "confidence_score REAL"), 
-        ("fund_scores", "breakdown_json TEXT"),
-        ("fund_scores", "raw_score REAL"),
-        ("fund_scores", "confidence_factor REAL")
-    ]
-    for table, col_def in migrations:
-        try: cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
-        except sqlite3.OperationalError: pass
-        
-    conn.commit()
     return conn
 
-def detect_qualified_fund(title, category):
-    text = f"{str(title).upper()} {str(category).upper()}"
-    qualified_keywords = ["SERBEST", "ÖZEL", "GİRİŞİM", "GAYRİMENKUL", "NİTELİKLİ", "HEDGE"]
-    for kw in qualified_keywords:
-        if kw in text: return 1
-    return 0
-
-def run_batch_scoring_engine(conn):
-    funds_df = pd.read_sql("SELECT id, code, category FROM funds WHERE status = 'ACTIVE'", con=conn)
-    if funds_df.empty: return
-    
-    prices_df = pd.read_sql("SELECT fund_id, date, price FROM fund_daily_prices ORDER BY fund_id, date ASC", con=conn)
-    if prices_df.empty: return
-
-    grouped = dict(tuple(prices_df.groupby('fund_id')))
-    raw_data = []
-
-    # 1. HAM VERİLERİ HAZIRLAMA
-    for _, row in funds_df.iterrows():
-        f_id = row['id']
-        category = row['category']
-        if f_id not in grouped: continue
-        
-        p_history = grouped[f_id]
-        prices = p_history['price'].values
-        prices = prices[prices > 0]
-        if len(prices) < 30: continue
-        
-        day_count = len(prices)
-        r_30 = (prices[-1] / prices[-30] - 1) * 100 if day_count >= 30 else 0
-        r_90 = (prices[-1] / prices[-90] - 1) * 100 if day_count >= 90 else r_30
-        r_180 = (prices[-1] / prices[-180] - 1) * 100 if day_count >= 180 else r_90
-        r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_180
-
-        daily_returns = pd.Series(prices).pct_change().dropna()
-        volatility = float(daily_returns.std() * (255 ** 0.5)) if len(daily_returns) > 5 else 0.2
-        mean_ret = float(daily_returns.mean()) if len(daily_returns) > 0 else 0
-        sharpe = (mean_ret * 255) / (volatility + 1e-9)
-        
-        neg_ret = daily_returns[daily_returns < 0]
-        downside_vol = float(neg_ret.std() * (255 ** 0.5)) if len(neg_ret) > 3 else volatility
-        sortino = (mean_ret * 255) / (downside_vol + 1e-9)
-
-        cum_max = np.maximum.accumulate(prices)
-        drawdowns = (prices - cum_max) / cum_max
-        mdd = float(abs(drawdowns.min()) * 100) if len(drawdowns) > 0 else 0.0
-
-        first_date = p_history['date'].iloc[0]
-        last_date = p_history['date'].iloc[-1]
-        
-        conf = scoring.calculate_confidence(prices, first_date, last_date)
-
-        raw_data.append({
-            'fund_id': f_id, 'category': category,
-            'r_30': r_30, 'r_90': r_90, 'r_180': r_180, 'r_365': r_365,
-            'sharpe': sharpe, 'sortino': sortino, 'volatility': volatility, 'mdd': mdd,
-            'confidence': conf, 'age_years': day_count / 365.0, 'depth_score': min(100, day_count / 3.65)
-        })
-
-    if not raw_data: return
-    df = pd.DataFrame(raw_data)
-
-    # 2. VEKTÖREL HESAPLAMALAR (Kategori bazlı)
-    composite_dfs = []
-    for cat, group in df.groupby('category'):
-        group['perf_percentile'] = scoring.calculate_performance_composite(group)
-        group['risk_percentile'] = scoring.calculate_risk_composite(group)
-        group['qual_percentile'] = scoring.calculate_quality_composite(group)
-        group['cash_percentile'] = scoring.calculate_cashflow_composite(group)
-        group['cost_percentile'] = scoring.calculate_cost_composite(group)
-        composite_dfs.append(group)
-
-    df_scored = pd.concat(composite_dfs)
-    
-    print(df_scored[['perf_percentile','risk_percentile','qual_percentile','cash_percentile','cost_percentile']].isna().sum())
-    df_scored['absolute_score'] = scoring.calculate_absolute_score(
-        df_scored['perf_percentile'], df_scored['risk_percentile'],
-        df_scored['qual_percentile'], df_scored['cash_percentile'], df_scored['cost_percentile']
-    )
-
-    final_scores = []
-    for _, row in df_scored.iterrows():
-        tot_pen, mdd_pen, vol_pen = scoring.calculate_continuous_penalty(
-            row['mdd'], row['volatility']
-        )
-        
-        final_sc, raw_score, conf_factor = scoring.calculate_final_score(
-            row['absolute_score'], tot_pen, row['confidence']
-        )
-        
-        breakdown_json = scoring.explain_score(
-            row['perf_percentile']*0.40, row['risk_percentile']*0.30, row['qual_percentile']*0.10, 
-            row['cash_percentile']*0.10, row['cost_percentile']*0.10, row['absolute_score'], 
-            mdd_pen, vol_pen, raw_score, row['confidence'], conf_factor, final_sc
-        )
-        
-        final_scores.append({
-            'fund_id': row['fund_id'],
-            'final_score': final_sc,
-            'raw_score': raw_score,
-            'confidence_factor': conf_factor,
-            'breakdown_json': breakdown_json
-        })
-
-    df_final = pd.DataFrame(final_scores)
-    df_scored = pd.merge(df_scored, df_final, on='fund_id')
-
-    # 3. KATEGORİ İÇİ PERCENTILE
-    df_scored['final_percentile'] = scoring.calculate_category_percentile(df_scored)
-
-    # 4. VERİTABANI KAYITLARI
-    today_str = datetime.date.today().strftime('%Y-%m-%d')
-    db_records = []
-
-    for _, row in df_scored.iterrows():
-        grade, signal = scoring.calculate_rating(row['final_score'], row['final_percentile'], row['confidence'])
-        
-        db_records.append((
-            int(row['fund_id']), today_str, float(row['absolute_score']), float(row['final_score']),
-            float(row['confidence']), float(row['final_percentile']), signal, grade, row['breakdown_json'],
-            float(row['raw_score']), float(row['confidence_factor'])
-        ))
-
+def ensure_column(conn, table, column, dtype):
+    """Tabloda eksik bir kolon varsa güvenli bir şekilde ALTER TABLE uygular (Migration)."""
     cursor = conn.cursor()
-    cursor.executemany("""
-        INSERT OR REPLACE INTO fund_scores 
-        (fund_id, date, absolute_score, final_score, confidence_score, category_percentile, signal, letter_grade, breakdown_json, raw_score, confidence_factor) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, db_records)
+    cols = [
+        x[1] 
+        for x in cursor.execute(
+            f"PRAGMA table_info({table})"
+        )
+    ]
+    if column not in cols:
+        cursor.execute(
+            f"ALTER TABLE {table} ADD COLUMN {column} {dtype}"
+        )
+        conn.commit()
+
+def init_fund_scores_table(conn):
+    """fund_scores tablosunu ve gelecekteki olası genişlemeler için migration destekli yapıyı hazırlar."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fund_scores (
+            fund_id INTEGER,
+            date TEXT,
+            performance_score REAL,
+            risk_score REAL,
+            consistency_score REAL,
+            stability_score REAL,
+            raw_score REAL,
+            confidence_score REAL,
+            final_score REAL,
+            category_rank INTEGER,
+            category_total INTEGER,
+            category_percentile REAL,
+            letter_grade TEXT,
+            signal TEXT,
+            breakdown_json TEXT,
+            PRIMARY KEY (fund_id, date)
+        )
+    """)
     conn.commit()
 
+    # İleride eklenebilecek olası yeni metrik veya skor kolonları için güvenli migration kontrolü
+    migration_columns = [
+        ("momentum_score", "REAL"),
+        ("quality_score", "REAL"),
+        ("valuation_score", "REAL")
+    ]
+    for col_name, col_dtype in migration_columns:
+        ensure_column(conn, "fund_scores", col_name, col_dtype)
 
-# TEFAS API Crawler Fonksiyonları
-def safe_fetch(start_date, end_date, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            return tefas_crawler.fetch(start=start_date, end=end_date)
-        except Exception as e:
-            if attempt < max_retries - 1: time.sleep(random.uniform(2.0, 5.0) * (attempt + 1))
-            else: raise e
-    return None
+def calculate_percentile_rank(series, ascending=True):
+    """Verilen pandas serisini 0-100 arasında percentile skora çevirir (yüksek score = yüksek percentile)."""
+    if len(series.dropna()) == 0:
+        return pd.Series(50.0, index=series.index)
+    if ascending:
+        return series.rank(pct=True, ascending=True) * 100
+    else:
+        return series.rank(pct=True, ascending=False) * 100
 
-def fetch_chunk_worker(args):
-    s_str, e_str, codes_subset = args
-    try:
-        time.sleep(random.uniform(0.3, 1.5))
-        df = safe_fetch(start_date=s_str, end_date=e_str)
-        if df is not None and not df.empty: return df[df['code'].isin(codes_subset)]
-    except Exception: pass
-    return None
-
-def run_tefas_sync_and_scoring(full_sync=False, *args, **kwargs):
-    if not TEFAS_LIB_READY: return False, "TEFAS kütüphanesi yüklü değil!"
+def run_scoring_pipeline(conn=None):
+    print("SCORING ENGINE BAŞLADI")
     
-    conn = get_db_connection()
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
     try:
-        run_batch_scoring_engine(conn)
-        return True, "Başarılı! Multiplier Mimarili ve Raw Score Kolonlu V2 Quant Motoru çalıştırıldı."
+        init_fund_scores_table(conn)
+        
+        # fund_metrics ve funds tablolarını birleştirerek verileri çek
+        query = """
+            SELECT m.*, f.code, f.category 
+            FROM fund_metrics m
+            JOIN funds f ON m.fund_id = f.id
+        """
+        df = pd.read_sql(query, con=conn)
+        print(f"Skorlanacak fon metrik sayısı: {len(df)}")
+        if df.empty:
+            return False, "Skorlanacak fon metrik verisi bulunamadı."
+
+        # Fonun geçmiş uzunluğunu / veri derinliğini hesaplamak için veritabanından gün sayısını çekelim
+        history_counts = pd.read_sql("""
+            SELECT fund_id, COUNT(date) as day_count 
+            FROM fund_daily_prices 
+            GROUP BY fund_id
+        """, con=conn).set_index('fund_id')['day_count']
+        
+        df['day_count'] = df['fund_id'].map(history_counts).fillna(0)
+
+        # 1) BİLEŞEN SKORLARI (0-100 Normalizasyonu / Percentile Ranking)
+        
+        # Performance Score (%40 Ağırlık)
+        perf_metrics = ['annual_return', 'sharpe_ratio', 'sortino_ratio', 'alpha', 'information_ratio', 'calmar_ratio']
+        perf_rank_sum = pd.Series(0.0, index=df.index)
+        for m in perf_metrics:
+            if m in df.columns:
+                perf_rank_sum += calculate_percentile_rank(df[m], ascending=True)
+        df['performance_score'] = perf_rank_sum / len(perf_metrics)
+
+        # Risk Score (%30 Ağırlık) - Düşük risk iyi olduğu için ascending=False
+        risk_metrics = ['max_drawdown', 'volatility', 'var_95', 'cvar_95']
+        risk_rank_sum = pd.Series(0.0, index=df.index)
+        for m in risk_metrics:
+            if m in df.columns:
+                risk_rank_sum += calculate_percentile_rank(df[m], ascending=False)
+        df['risk_score'] = risk_rank_sum / len(risk_metrics)
+
+        # Consistency Score (%20 Ağırlık)
+        cons_metrics = ['win_rate', 'information_ratio', 'skewness']
+        cons_rank_sum = pd.Series(0.0, index=df.index)
+        for m in cons_metrics:
+            if m in df.columns:
+                cons_rank_sum += calculate_percentile_rank(df[m], ascending=True)
+        df['consistency_score'] = cons_rank_sum / len(cons_metrics)
+
+        # Stability Score (%10 Ağırlık)
+        if 'beta' in df.columns:
+            df['beta_stability'] = -(df['beta'] - 1.0).abs()
+        else:
+            df['beta_stability'] = 0.0
+
+        stab_metrics = ['recovery_time', 'beta_stability', 'day_count']
+        stab_rank_sum = pd.Series(0.0, index=df.index)
+        
+        if 'recovery_time' in df.columns:
+            stab_rank_sum += calculate_percentile_rank(df['recovery_time'], ascending=False)
+        if 'beta_stability' in df.columns:
+            stab_rank_sum += calculate_percentile_rank(df['beta_stability'], ascending=True)
+        if 'day_count' in df.columns:
+            stab_rank_sum += calculate_percentile_rank(df['day_count'], ascending=True)
+            
+        df['stability_score'] = stab_rank_sum / len(stab_metrics)
+
+        # RAW SCORE HESAPLAMASI (Ağırlıklı Ortalama)
+        df['raw_score'] = (
+            df['performance_score'] * 0.40 +
+            df['risk_score'] * 0.30 +
+            df['consistency_score'] * 0.20 +
+            df['stability_score'] * 0.10
+        )
+
+        # 2) CONFIDENCE SİSTEMİ & BASE SCORE (Yumuşatılmış: 0.85 + 0.15 * confidence)
+        base_confidence = df['day_count'].apply(lambda x: min(max(x / 750.0, 0.2), 1.0))
+        df['confidence_score'] = base_confidence
+        df['base_score'] = df['raw_score'] * (0.85 + 0.15 * df['confidence_score'])
+
+        # 3) KATEGORİ BAZINDA RELATİVE RANKING & PERCENTILE (100 = en iyi, 0 = en kötü)
+        df['category_percentile'] = (
+            df.groupby('category')['base_score']
+            .rank(pct=True, ascending=True) * 100
+        )
+        
+        df['category_rank'] = df.groupby('category')['base_score'].rank(ascending=False, method='min').astype(int)
+        df['category_total'] = df.groupby('category')['base_score'].transform('count')
+
+        # 4) FİNAL SCORE (Base Score %70 + Kategori Persentil %30) VE SCORE BOOST
+        df['final_score'] = (
+            df['base_score'] * 0.70 +
+            df['category_percentile'] * 0.30
+        )
+        
+        # Üstün performansları ve elit fonları gerçek rating dağılımına taşımak için Score Boost (%10 Çarpan, Max 100)
+        df['final_score'] = np.minimum(
+            df['final_score'] * 1.10,
+            100.0
+        )
+
+        # 5) PROFESYONEL HARF NOTU VE SİNYAL ÜRETİMİ
+        def assign_grade_and_signal(score):
+            if score >= 95:
+                return 'A+', 'GÜÇLÜ AL / ELİT'
+            elif score >= 90:
+                return 'A', 'AL'
+            elif score >= 85:
+                return 'B+', 'İYİ'
+            elif score >= 75:
+                return 'B', 'TUT'
+            elif score >= 65:
+                return 'C', 'İZLE'
+            else:
+                return 'D', 'ZAYIF'
+
+        grades_signals = df['final_score'].apply(assign_grade_and_signal)
+        df['letter_grade'] = [gs[0] for gs in grades_signals]
+        df['signal'] = [gs[1] for gs in grades_signals]
+
+        today_str = datetime.date.today().strftime('%Y-%m-%d')
+        score_records = []
+
+        for _, row in df.iterrows():
+            breakdown_dict = {
+                "performance": round(float(row['performance_score']), 1),
+                "risk": round(float(row['risk_score']), 1),
+                "consistency": round(float(row['consistency_score']), 1),
+                "stability": round(float(row['stability_score']), 1)
+            }
+            breakdown_json_str = json.dumps(breakdown_dict)
+
+            score_records.append((
+                int(row['fund_id']), today_str,
+                float(row['performance_score']), float(row['risk_score']),
+                float(row['consistency_score']), float(row['stability_score']),
+                float(row['raw_score']), float(row['confidence_score']),
+                float(row['final_score']), int(row['category_rank']),
+                int(row['category_total']), float(row['category_percentile']),
+                str(row['letter_grade']), str(row['signal']), str(breakdown_json_str)
+            ))
+
+        if score_records:
+            cursor = conn.cursor()
+            cursor.executemany("""
+                INSERT OR REPLACE INTO fund_scores 
+                (fund_id, date, performance_score, risk_score, consistency_score, stability_score, 
+                 raw_score, confidence_score, final_score, category_rank, category_total, 
+                 category_percentile, letter_grade, signal, breakdown_json) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, score_records)
+            conn.commit()
+
+        return True, f"Başarılı! {len(score_records)} fon için migration uyumlu, 70/30 ağırlıklı, boost destekli profesyonel skorlama tamamlandı."
+
     except Exception as e:
-        return False, f"Hata: {str(e)}"
+        return False, f"Scoring Engine Hatası: {str(e)}"
     finally:
-        conn.close()
+        if close_conn:
+            conn.close()

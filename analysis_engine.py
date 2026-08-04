@@ -1,85 +1,192 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime
-from database.database import SessionLocal
-from database.models import Fund, FundDailyPrice
+import sqlite3
+import datetime
+import os
+import metrics
 
-def run_analysis_engine():
-    print("📊 3. Aşama: Analiz Motoru Çalıştırılıyor (Sharpe, Alpha, Beta, Z-Score)...")
-    db = SessionLocal()
-    funds = db.query(Fund).all()
+def get_db_connection():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(base_dir, "tefas.db")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    return conn
+
+def init_fund_metrics_table(conn):
+    """fund_metrics tablosunu ve eksik kolonları güvenli bir şekilde oluşturur / günceller."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fund_metrics (
+            fund_id INTEGER,
+            date TEXT,
+            total_return REAL,
+            annual_return REAL,
+            volatility REAL,
+            sharpe_ratio REAL,
+            sortino_ratio REAL,
+            calmar_ratio REAL,
+            max_drawdown REAL,
+            recovery_time INTEGER,
+            win_rate REAL,
+            var_95 REAL,
+            cvar_95 REAL,
+            skewness REAL,
+            beta REAL,
+            alpha REAL,
+            information_ratio REAL,
+            PRIMARY KEY (fund_id, date)
+        )
+    """)
+    conn.commit()
+
+def get_benchmark_returns(benchmark_returns, dates_index):
+    """
+    Önceden önbelleğe alınmış global benchmark getiri serisini, 
+    ilgili fonun tarih indeksine göre güvenli bir şekilde hizalar.
+    """
+    benchmark_returns = benchmark_returns[
+        ~benchmark_returns.index.duplicated()
+    ]
+
+    dates_index = pd.to_datetime(
+        dates_index
+    )
+
+    bm = benchmark_returns.reindex(
+        dates_index,
+        method='ffill'
+    )
+
+    return bm.dropna()
+
+def run_analysis_pipeline(conn=None):
+    print("ANALYSIS ENGINE BAŞLADI")
     
-    if not funds:
-        print("⚠️ Veritabanında fon bulunamadı.")
-        db.close()
-        return
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        init_fund_metrics_table(conn)
         
-    # Tüm fonların fiyat geçmişini bir DataFrame'de topluyoruz (Market proxy için)
-    data = {}
-    for fund in funds:
-        prices = db.query(FundDailyPrice).filter(FundDailyPrice.fund_id == fund.id).order_by(FundDailyPrice.date.asc()).all()
-        if len(prices) >= 10:
-            data[fund.code] = {p.date: p.price for p in prices}
+        funds_df = pd.read_sql("SELECT id, code, category FROM funds WHERE status = 'ACTIVE'", con=conn)
+        print(f"Fon sayısı: {len(funds_df)}")
+        if funds_df.empty:
+            return False, "Analiz edilecek aktif fon bulunamadı."
+
+        prices_df = pd.read_sql("SELECT fund_id, date, price FROM fund_daily_prices ORDER BY fund_id, date ASC", con=conn)
+        print(f"Fiyat kayıt sayısı: {len(prices_df)}")
+        if prices_df.empty:
+            return False, "Fiyat verisi bulunamadı."
+
+        # Benchmark Cache (Tek Seferde Hazırlanır ve Güvenli Hale Getirilir)
+        print("Benchmark hazırlanıyor...")
+        benchmark_df = pd.read_sql("""
+            SELECT date, AVG(price) as price
+            FROM fund_daily_prices
+            GROUP BY date
+        """, conn)
+        
+        benchmark_df['date'] = pd.to_datetime(
+            benchmark_df['date']
+        ).dt.normalize()
+        
+        benchmark_df = (
+            benchmark_df
+            .groupby('date')['price']
+            .mean()
+            .to_frame()
+        )
+        
+        benchmark_returns = (
+            benchmark_df['price']
+            .pct_change()
+            .dropna()
+        )
+        
+        benchmark_returns = benchmark_returns[
+            ~benchmark_returns.index.duplicated()
+        ]
+        
+        print(f"Benchmark hazır. Gün sayısı: {len(benchmark_returns)}")
+
+        grouped_prices = dict(tuple(prices_df.groupby('fund_id')))
+        today_str = datetime.date.today().strftime('%Y-%m-%d')
+        metrics_records = []
+
+        print(f"Analiz başladı. Toplam fon: {len(funds_df)}")
+        for i, row in funds_df.iterrows():
+            print(f"{i+1}/{len(funds_df)} Fon ID: {row['id']}")
+            f_id = row['id']
+            category = row['category']
             
-    df_prices = pd.DataFrame(data).dropna()
-    if df_prices.empty:
-        print("⚠️ Yeterli örtüşen fiyat verisi bulunamadı.")
-        db.close()
-        return
-        
-    # Günlük getiriler
-    df_returns = df_prices.pct_change().dropna()
-    
-    # Piyasa Getirisi (Takip edilen fonların ortalaması - Market Proxy)
-    market_returns = df_returns.mean(axis=1)
-    
-    # Riskten arındırılmış oran varsayımı (Yıllık %40, günlük karşılığı)
-    risk_free_rate_daily = 0.40 / 252
-    
-    print("-" * 90)
-    print(f"{'FON':<6} | {'GETİRİ':<8} | {'SHARPE':<8} | {'BETA':<6} | {'ALPHA':<8} | {'Z-SCORE':<8}")
-    print("-" * 90)
-    
-    results = []
-    for code in df_returns.columns:
-        fund_ret = df_returns[code]
-        total_ret = (df_prices[code].iloc[-1] - df_prices[code].iloc[0]) / df_prices[code].iloc[0]
-        
-        # Sharpe Oranı (Yıllıklandırılmış)
-        mean_daily_ret = fund_ret.mean()
-        std_daily_ret = fund_ret.std()
-        sharpe = (mean_daily_ret - risk_free_rate_daily) / std_daily_ret * np.sqrt(252) if std_daily_ret > 0 else 0
-        
-        # Beta ve Alpha Hesaplama
-        covariance = np.cov(fund_ret, market_returns)[0][1]
-        market_variance = np.var(market_returns)
-        beta = covariance / market_variance if market_variance > 0 else 1.0
-        
-        expected_return = risk_free_rate_daily + beta * (market_returns.mean() - risk_free_rate_daily)
-        alpha = (mean_daily_ret - expected_return) * 252 # Yıllıklandırılmış Alpha
-        
-        results.append({
-            "code": code,
-            "total_ret": total_ret,
-            "sharpe": sharpe,
-            "beta": beta,
-            "alpha": alpha,
-            "mean_ret": mean_daily_ret
-        })
-        
-    # Z-Score Hesaplama (Getirilere göre istatistiksel sapma)
-    rets = [r["total_ret"] for r in results]
-    mean_ret_all = np.mean(rets)
-    std_ret_all = np.std(rets) if np.std(rets) > 0 else 1.0
-    
-    for r in results:
-        z_score = (r["total_ret"] - mean_ret_all) / std_ret_all
-        r["z_score"] = z_score
-        print(f"{r['code']:<6} | %{r['total_ret']*100:<7.2f} | {r['sharpe']:<8.2f} | {r['beta']:<6.2f} | %{r['alpha']*100:<7.2f} | {r['z_score']:<8.2f}")
-        
-    print("-" * 90)
-    db.close()
-    print("🎉 Analiz Motoru başarıyla tamamlandı ve metrikler hesaplandı!")
+            if f_id not in grouped_prices:
+                continue
+                
+            f_history = grouped_prices[f_id].copy()
+            f_history['date_dt'] = pd.to_datetime(
+                f_history['date']
+            )
+            f_history = (
+                f_history[
+                    f_history['price'] > 0
+                ]
+                .groupby('date_dt')
+                .last()
+                .sort_index()
+            )
+            prices = f_history['price'].values
+            
+            if len(prices) < 30:
+                continue # Yetersiz veri geçmişi
 
-if __name__ == "__main__":
-    run_analysis_engine()
+            prices_series = f_history['price']
+            returns = prices_series.pct_change().dropna()
+
+            # --- METRİK HESAPLAMALARI (metrics.py çağrıları) ---
+            tot_return = metrics.calculate_total_return(prices)
+            ann_return = metrics.calculate_annual_return(prices)
+            volatility = metrics.calculate_volatility(returns)
+            
+            mdd, recovery_time = metrics.calculate_drawdown_metrics(prices)
+            
+            sharpe = metrics.calculate_sharpe_ratio(returns)
+            sortino = metrics.calculate_sortino_ratio(returns)
+            calmar = metrics.calculate_calmar_ratio(ann_return, mdd)
+            
+            win_rate = metrics.calculate_win_rate(returns)
+            var_95, cvar_95 = metrics.calculate_var_cvar(returns, confidence_level=0.95)
+            skewness = metrics.calculate_skewness(returns)
+            
+            # Benchmark & Alpha / Beta / Information Ratio
+            bm_returns = get_benchmark_returns(benchmark_returns, prices_series.index)
+            beta, alpha = metrics.calculate_beta_and_alpha(returns, bm_returns)
+            info_ratio = metrics.calculate_information_ratio(returns, bm_returns)
+
+            metrics_records.append((
+                int(f_id), today_str,
+                float(tot_return), float(ann_return), float(volatility),
+                float(sharpe), float(sortino), float(calmar),
+                float(mdd), int(recovery_time), float(win_rate),
+                float(var_95), float(cvar_95), float(skewness),
+                float(beta), float(alpha), float(info_ratio)
+            ))
+
+        if metrics_records:
+            cursor = conn.cursor()
+            cursor.executemany("""
+                INSERT OR REPLACE INTO fund_metrics 
+                (fund_id, date, total_return, annual_return, volatility, sharpe_ratio, sortino_ratio, 
+                 calmar_ratio, max_drawdown, recovery_time, win_rate, var_95, cvar_95, skewness, 
+                 beta, alpha, information_ratio) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, metrics_records)
+            conn.commit()
+
+        return True, f"Başarılı! {len(metrics_records)} fon için finansal metrikler hesaplandı ve kaydedildi."
+
+    except Exception as e:
+        return False, f"Analysis Engine Hatası: {str(e)}"
+    finally:
+        if close_conn:
+            conn.close()

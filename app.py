@@ -28,8 +28,10 @@ st.markdown("""
     <style>
         .main-header { font-size: 2.2rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0px; }
         .sub-header { font-size: 1.1rem; color: #64748B; margin-bottom: 20px; }
-        .card-container { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 20px; margin-bottom: 15px; }
-        .stMetric { background-color: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; }
+        .card-container { background-color: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 20px; margin-bottom: 15px; color: #f8fafc; }
+        .stMetric { background-color: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155; color: #f8fafc; }
+        div[data-testid="stMetricValue"] { color: #f8fafc !important; }
+        div[data-testid="stMetricLabel"] { color: #94a3b8 !important; }
         .badge-aplus { background-color: #DCFCE7; color: #166534; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
         .badge-a { background-color: #ECFDF5; color: #047857; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
         .badge-bplus { background-color: #FEF9C3; color: #854D0E; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
@@ -128,7 +130,7 @@ def load_universe_data():
     else:
         merged['final_score'] = 0
 
-    # Kategori İçi Sıralama ve Yüzdelik Dilim (Category Percentile) Hesaplama (Double-counting önlendi)
+    # Kategori İçi Sıralama ve Yüzdelik Dilim (Category Percentile) Hesaplama
     merged['category_rank'] = merged.groupby('category')['final_score'].rank(ascending=False, method='min')
     merged['category_total'] = merged.groupby('category')['final_score'].transform('count')
     merged['category_percentile'] = ((merged['category_total'] - merged['category_rank'] + 1) / merged['category_total']) * 100
@@ -197,43 +199,26 @@ elif menu == "⚡ Ana Dashboard":
 
     if not merged_df.empty:
         total_analyzed = len(merged_df)
-        total_categories = merged_df['category'].nunique()
-        
-        try:
-            total_price_records = pd.read_sql("SELECT COUNT(*) as cnt FROM fund_daily_prices", con=conn).iloc[0]['cnt']
-        except Exception:
-            total_price_records = 0
-            
-        avg_history_days = int(merged_df['day_count'].mean()) if total_analyzed > 0 else 0
-        premium_confidence_count = len(merged_df[merged_df['confidence_score'] >= 90])
-
         signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
+        
         guclu_al = signal_counts.get('GÜÇLÜ AL / ELİT', 0) + signal_counts.get('GÜÇLÜ AL', 0)
         al_count = signal_counts.get('AL', 0)
         iyi_count = signal_counts.get('İYİ', 0)
         izle_count = signal_counts.get('İZLE', 0)
         zayif_count = signal_counts.get('ZAYIF', 0) + signal_counts.get('TUT', 0)
 
-        # Dashboard Metrik Satırları (Genişletilmiş Kurumsal Göstergeler)
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # Dashboard Metrik Satırı
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Toplam Fon", f"{total_analyzed}")
-        col2.metric("Kategori Sayısı", f"{total_categories}")
-        col3.metric("Fiyat Kaydı", f"{total_price_records:,}".replace(",", "."))
-        col4.metric("Ortalama Geçmiş", f"{avg_history_days} Gün")
-        col5.metric("Premium Güven", f"{premium_confidence_count} Fon")
-
-        st.markdown("")
-        col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
-        col_s1.metric("Güçlü AL", f"{guclu_al}")
-        col_s2.metric("AL", f"{al_count}")
-        col_s3.metric("İYİ", f"{iyi_count}")
-        col_s4.metric("İZLE", f"{izle_count}")
-        col_s5.metric("ZAYIF", f"{zayif_count}")
+        col2.metric("Güçlü AL", f"{guclu_al}")
+        col3.metric("AL", f"{al_count}")
+        col4.metric("İYİ", f"{iyi_count}")
+        col5.metric("İZLE", f"{izle_count}")
+        col6.metric("ZAYIF", f"{zayif_count}")
 
         st.markdown("---")
         st.subheader("🏆 Her Kategorinin Lideri")
         
-        # Pandas Groupby Optimizasyonu ile Kategori Liderleri (Yüksek Performanslı)
         leaders_df = (
             merged_df
             .sort_values(by=["category_percentile", "final_score", "confidence_score"], ascending=[False, False, False])
@@ -248,9 +233,9 @@ elif menu == "⚡ Ana Dashboard":
                 with col:
                     st.markdown(f"""
                     <div class="card-container">
-                        <small style="color: #64748B;"><b>{row['category']}</b></small>
-                        <h3 style="color: #1E3A8A; margin: 5px 0;">{row['code']}</h3>
-                        <p style="font-size: 0.85rem; color: #334155; margin-bottom: 8px; height: 35px; overflow: hidden;">{row['name']}</p>
+                        <small style="color: #94A3B8;"><b>{row['category']}</b></small>
+                        <h3 style="color: #60A5FA; margin: 5px 0;">{row['code']}</h3>
+                        <p style="font-size: 0.85rem; color: #CBD5E1; margin-bottom: 8px; height: 38px; overflow: hidden;">{row['name']}</p>
                         <p style="margin: 0; font-size: 0.9rem;">Final Skor: <b>{row['final_score']:.1f}</b><br>Kategori Yüzdeliği: <b>Top %{(100 - row['category_percentile']):.1f}</b></p>
                     </div>
                     """, unsafe_allow_html=True)
@@ -380,7 +365,7 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
         st.warning("Veri bulunamadı.")
 
 # ==========================================
-# MODÜL 5: FON DETAY & GİZLİ CEVHERLER (3 Bağımsız Kurumsal Metrik)
+# MODÜL 5: FON DETAY & GİZLİ CEVHERLER
 # ==========================================
 elif menu == "📊 Fon Detay & Gizli Cevherler":
     st.title("📊 Fon Detay, Derinlemesine Analiz & Gizli Cevherler")
@@ -404,30 +389,29 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
             total = fund_detail['category_total']
             top_pct = 100 - (rank / total * 100) if total > 0 else 0
             
-            # Üç Bağımsız Kurumsal Metrik Kartı Yapısı
             st.markdown(f"""
             <div class="card-container">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <div>
-                        <small style="color: #64748B; font-size: 1rem;">{fund_detail['category']}</small>
-                        <h1 style="color: #1E3A8A; margin: 0;">{fund_detail['code']} - {fund_detail['title']}</h1>
+                        <small style="color: #94A3B8; font-size: 1rem;">{fund_detail['category']}</small>
+                        <h1 style="color: #60A5FA; margin: 0;">{fund_detail['code']} - {fund_detail['title']}</h1>
                     </div>
                     <div>{badge_html}</div>
                 </div>
-                <hr style="margin: 10px 0; border: none; border-top: 1px solid #E2E8F0;">
+                <hr style="margin: 10px 0; border: none; border-top: 1px solid #334155;">
                 <div style="display: flex; justify-content: space-around; text-align: center; padding-top: 5px;">
                     <div>
-                        <span style="font-size: 0.9rem; color: #64748B;">Final Score</span><br>
-                        <span style="font-size: 1.8rem; font-weight: 800; color: #1E3A8A;">{fund_detail['final_score']:.1f}</span>
+                        <span style="font-size: 0.9rem; color: #94A3B8;">Final Score</span><br>
+                        <span style="font-size: 1.8rem; font-weight: 800; color: #60A5FA;">{fund_detail['final_score']:.1f}</span>
                     </div>
                     <div>
-                        <span style="font-size: 0.9rem; color: #64748B;">Kategori Sırası & Dilimi</span><br>
-                        <span style="font-size: 1.8rem; font-weight: 800; color: #047857;">Top %{top_pct:.1f}</span>
-                        <div style="font-size: 0.8rem; color: #475569;">({rank}. / {total} fon)</div>
+                        <span style="font-size: 0.9rem; color: #94A3B8;">Kategori Sırası & Dilimi</span><br>
+                        <span style="font-size: 1.8rem; font-weight: 800; color: #34D399;">Top %{top_pct:.1f}</span>
+                        <div style="font-size: 0.8rem; color: #94A3B8;">({rank}. Sıra)</div>
                     </div>
                     <div>
-                        <span style="font-size: 0.9rem; color: #64748B;">Confidence (Güven)</span><br>
-                        <span style="font-size: 1.8rem; font-weight: 800; color: #854D0E;">%{fund_detail.get('confidence_score', 90):.0f}</span>
+                        <span style="font-size: 0.9rem; color: #94A3B8;">Confidence (Güven)</span><br>
+                        <span style="font-size: 1.8rem; font-weight: 800; color: #FBBF24;">%{fund_detail.get('confidence_score', 90):.0f}</span>
                     </div>
                 </div>
             </div>

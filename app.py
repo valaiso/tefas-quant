@@ -14,7 +14,7 @@ from app.services.ranking import (
     get_top_category_leaders,
     get_fund_detail_with_ranking
 )
-from scoring_engine import run_tefas_sync_and_scoring
+from scoring_engine import run_scoring_pipeline
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
 st.set_page_config(
@@ -159,7 +159,7 @@ if menu == "🔄 Fon Senkronizasyonu":
     with col1:
         if st.button("⚡ Hızlı Güncelleme (Son 30 Gün)", use_container_width=True, type="primary"):
             with st.spinner("Hızlı güncelleme çalıştırılıyor..."):
-                success, msg = run_tefas_sync_and_scoring(full_sync=False)
+                success, msg = run_scoring_pipeline(full_sync=False)
                 if success:
                     st.success(msg)
                     st.rerun()
@@ -168,7 +168,7 @@ if menu == "🔄 Fon Senkronizasyonu":
     with col2:
         if st.button("🔄 Tam Senkronizasyon (5 Yıl / 400 Fon Limitli)", use_container_width=True):
             with st.spinner("Tam senkronizasyon çalıştırılıyor (5 yıl / 400 fon)..."):
-                success, msg = run_tefas_sync_and_scoring(full_sync=True, history_years=5, fund_limit=400)
+                success, msg = run_scoring_pipeline(full_sync=True, history_years=5, fund_limit=400)
                 if success:
                     st.success(msg)
                     st.rerun()

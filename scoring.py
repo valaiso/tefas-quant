@@ -202,7 +202,7 @@ def fetch_chunk_worker(args):
         pass
     return None
 
-def run_tefas_sync_and_scoring(full_sync=False):
+def run_tefas_sync_and_scoring(full_sync=False, *args, **kwargs):
     if not TEFAS_LIB_READY:
         return False, "TEFAS kütüphanesi yüklü değil!"
     

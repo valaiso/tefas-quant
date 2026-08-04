@@ -1,10 +1,20 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import datetime
 import os
-import numpy as np
 import hashlib
-from scoring_engine import get_db_connection, run_tefas_sync_and_scoring
+import sqlite3
+
+# Modüler Servis ve Motor İçe Aktarımları
+from app.services.ranking import (
+    get_db_connection,
+    get_general_ranking,
+    get_category_ranking,
+    get_top_category_leaders,
+    get_fund_detail_with_ranking
+)
+from scoring_engine import run_tefas_sync_and_scoring
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
 st.set_page_config(
@@ -16,7 +26,16 @@ st.set_page_config(
 
 st.markdown("""
     <style>
+        .main-header { font-size: 2.2rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0px; }
+        .sub-header { font-size: 1.1rem; color: #64748B; margin-bottom: 20px; }
+        .card-container { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 20px; margin-bottom: 15px; }
         .stMetric { background-color: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; }
+        .badge-aplus { background-color: #DCFCE7; color: #166534; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+        .badge-a { background-color: #ECFDF5; color: #047857; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+        .badge-bplus { background-color: #FEF9C3; color: #854D0E; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+        .badge-b { background-color: #FEF3C7; color: #92400E; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+        .badge-c { background-color: #FFEDD5; color: #C2410C; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+        .badge-d { background-color: #FEE2E2; color: #B91C1C; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -55,7 +74,7 @@ menu = st.sidebar.radio(
 include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False)
 st.sidebar.markdown("---", unsafe_allow_html=True)
 
-# --- 3. VERİ YÜKLEME VE YENİ RANKING MEKANİZMASI ---
+# --- 3. VERİ YÜKLEME VE RANKING MEKANİZMASI ---
 def load_universe_data():
     try:
         funds_df = pd.read_sql("SELECT id, code, title AS name, category, status, is_qualified FROM funds", con=conn)
@@ -91,23 +110,13 @@ def load_universe_data():
     merged = pd.merge(merged, price_counts, on='fund_id', how='left')
     merged['day_count'] = merged['day_count'].fillna(0)
     
-    # Nitelikli yatırımcı filtrelemesi
     if not include_qualified:
         merged = merged[merged['is_qualified_clean'] == 0]
         
-    # Gerçek scoring motorundan gelen confidence kullanılır
-    merged['confidence_score'] = pd.to_numeric(
-        merged['confidence_score'],
-        errors='coerce'
-    ).fillna(0)
-    
-    # Sisteme giriş için Minimum 65 Confidence Eşiği
-    merged = merged[merged['confidence_score'] >= 65]
+    merged['confidence_score'] = pd.to_numeric(merged.get('confidence_score', 0), errors='coerce').fillna(0)
     
     if 'total_score' in merged.columns:
         merged['total_score'] = pd.to_numeric(merged['total_score'], errors='coerce').fillna(0)
-        
-        # Yeni Ranking Formülü: Score * 0.90 + Confidence * 0.10
         merged['ranking_score'] = (merged['total_score'] * 0.90) + (merged['confidence_score'] * 0.10)
     else:
         merged['ranking_score'] = 0
@@ -116,13 +125,35 @@ def load_universe_data():
 
 merged_df = load_universe_data()
 
+def get_grade_badge_html(grade):
+    grade_clean = str(grade).strip()
+    if grade_clean == 'A+':
+        return '<span class="badge-aplus">A+ | GÜÇLÜ AL / ELİT</span>'
+    elif grade_clean == 'A':
+        return '<span class="badge-a">A | AL</span>'
+    elif grade_clean == 'B+':
+        return '<span class="badge-bplus">B+ | İYİ</span>'
+    elif grade_clean == 'B':
+        return '<span class="badge-b">B | TUT</span>'
+    elif grade_clean == 'C':
+        return '<span class="badge-c">C | İZLE</span>'
+    else:
+        return '<span class="badge-d">D | ZAYIF</span>'
+
+def render_progress_bar(label, value):
+    val_clamped = max(0.0, min(100.0, float(value)))
+    filled_blocks = int(val_clamped / 10)
+    empty_blocks = 10 - filled_blocks
+    bar_str = "█" * filled_blocks + "░" * empty_blocks
+    st.markdown(f"**{label}**: `{bar_str}` **{val_clamped:.1f}**")
+
 # ==========================================
 # MODÜL: FON SENKRONİZASYONU
 # ==========================================
 if menu == "🔄 Fon Senkronizasyonu":
     st.title("🔄 Otomatik Fon Senkronizasyon Merkezi")
     st.markdown("---")
-    st.markdown("TEFAS verilerini güncelleyebilir, nitelikli fonları filtreleyebilir ve matris skorlamasını çalıştırabilirsin.")
+    st.markdown("TEFAS verilerini güncelleyebilir, 400 fon ve 5 yıllık tarihsel periyot parametreleriyle matris skorlamasını çalıştırabilirsin.")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -135,9 +166,9 @@ if menu == "🔄 Fon Senkronizasyonu":
                 else:
                     st.error(msg)
     with col2:
-        if st.button("🔄 Tam Senkronizasyon (2 Yıl / 200 Fon Limitli)", use_container_width=True):
-            with st.spinner("Tam senkronizasyon çalıştırılıyor..."):
-                success, msg = run_tefas_sync_and_scoring(full_sync=True, history_years=2, fund_limit=200)
+        if st.button("🔄 Tam Senkronizasyon (5 Yıl / 400 Fon Limitli)", use_container_width=True):
+            with st.spinner("Tam senkronizasyon çalıştırılıyor (5 yıl / 400 fon)..."):
+                success, msg = run_tefas_sync_and_scoring(full_sync=True, history_years=5, fund_limit=400)
                 if success:
                     st.success(msg)
                     st.rerun()
@@ -148,7 +179,8 @@ if menu == "🔄 Fon Senkronizasyonu":
 # MODÜL 1: ANA DASHBOARD
 # ==========================================
 elif menu == "⚡ Ana Dashboard":
-    st.title("⚡ Kurumsal Piyasa & Fon Özeti")
+    st.markdown('<p class="main-header">🏆 TEFAS Quant — Kurumsal Piyasa & Fon Özeti</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Kantitatif analiz, risk modelleri ve çok faktörlü skor motoru</p>', unsafe_allow_html=True)
     st.markdown("---")
 
     if not merged_df.empty:
@@ -181,7 +213,7 @@ elif menu == "⚡ Ana Dashboard":
             badge = "⭐ Premium" if conf_val >= 85 else ("🛡️ Yüksek Güven" if conf_val >= 65 else "⚠️ Sınırda")
             col_c.markdown(f"Ranking: **{rank_val:.1f}** | Güven: **%{conf_val:.0f}** ({badge})")
     else:
-        st.info("⚠️ Gerekli güven eşiğini geçen veri bulunamadı veya veritabanı boş. Lütfen sol menüden senkronizasyon yapın.")
+        st.info("⚠️ Gerekli veritabanı verisi bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
 
 # ==========================================
 # MODÜL 1.5: FON KEŞİF MERKEZİ
@@ -266,77 +298,145 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
         st.warning("Veri bulunamadı.")
 
 # ==========================================
-# MODÜL 5: FON DETAY & GİZLİ CEVHERLER (İÇSEL DEĞER)
+# MODÜL 5: FON DETAY & GİZLİ CEVHERLER (DEEP DIVE + İÇSEL DEĞER)
 # ==========================================
 elif menu == "📊 Fon Detay & Gizli Cevherler":
-    st.title("📊 Fon İçsel Değer ve Gizli Cevherler Analizi")
+    st.title("📊 Fon Detay, Derinlemesine Analiz & Gizli Cevherler")
     st.markdown("---")
     
-    if not merged_df.empty:
-        all_codes = merged_df['code'].tolist()
-        chosen_fund = st.selectbox("İncelemek İstediğin Fonu Seç", all_codes)
+    funds_list_query = "SELECT id, code, title FROM funds ORDER BY code"
+    funds_df = pd.read_sql(funds_list_query, con=conn)
+    
+    if not funds_df.empty:
+        fund_options = {f"{row['code']} - {row['title']}": row['id'] for _, row in funds_df.iterrows()}
+        selected_label = st.selectbox("İncelemek İstediğiniz Fonu Seçin:", list(fund_options.keys()))
+        selected_fund_id = fund_options[selected_label]
+        selected_code = selected_label.split(" - ")[0]
         
-        fund_info = merged_df[merged_df['code'] == chosen_fund].iloc[0]
-        fund_id = int(fund_info['fund_id'])
+        fund_detail = get_fund_detail_with_ranking(selected_fund_id, conn=conn)
         
-        try:
-            holdings_df = pd.read_sql(f"""
-                SELECT s.symbol, s.name, s.sector, s.dcf_discount, s.ev_ebitda, s.pe_ratio, s.quant_score, fsh.weight
-                FROM fund_stock_holdings fsh
-                JOIN stocks s ON fsh.stock_id = s.id
-                WHERE fsh.fund_id = {fund_id}
-            """, con=conn)
-        except Exception:
-            holdings_df = pd.DataFrame()
+        if fund_detail:
+            badge_html = get_grade_badge_html(fund_detail['letter_grade'])
             
-        if holdings_df.empty:
-            seed_str = hashlib.md5(chosen_fund.encode()).hexdigest()
-            fund_seed = int(seed_str, 16) % 10000
+            rank = fund_detail['category_rank']
+            total = fund_detail['category_total']
+            top_pct = 100 - (rank / total * 100) if total > 0 else 0
             
-            rng = np.random.default_rng(fund_seed)
-            comp_names = [f"{chosen_fund} Varlık A", f"{chosen_fund} Varlık B", f"{chosen_fund} Varlık C", f"{chosen_fund} Varlık D"]
-            raw_w = rng.uniform(0.1, 0.3, size=4)
-            raw_w = raw_w / raw_w.sum() * 0.60
+            st.markdown(f"""
+            <div class="card-container" style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <small style="color: #64748B; font-size: 1rem;">{fund_detail['category']}</small>
+                    <h1 style="color: #1E3A8A; margin: 0;">{fund_detail['code']} - {fund_detail['title']}</h1>
+                    <p style="margin: 5px 0 0 0; color: #475569;">Kategori Sıralaması: <b>{rank} / {total}</b> (Kategori İçinde En İyi %{top_pct:.1f} dilimi)</p>
+                </div>
+                <div style="text-align: right;">
+                    <span style="font-size: 3rem; font-weight: 900; color: #0F172A;">{fund_detail['final_score']:.1f}</span><br>
+                    {badge_html}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
             
-            mock_holdings = [
-                {"symbol": comp_names[0], "name": comp_names[0], "sector": "Teknoloji", "weight": raw_w[0], "dcf_discount": float(rng.uniform(15, 55)), "quant_score": int(rng.uniform(75, 95))},
-                {"symbol": comp_names[1], "name": comp_names[1], "sector": "Sanayi", "weight": raw_w[1], "dcf_discount": float(rng.uniform(5, 35)), "quant_score": int(rng.uniform(70, 90))},
-                {"symbol": comp_names[2], "name": comp_names[2], "sector": "Finans", "weight": raw_w[2], "dcf_discount": float(rng.uniform(-10, 25)), "quant_score": int(rng.uniform(60, 85))},
-                {"symbol": comp_names[3], "name": comp_names[3], "sector": "Perakende", "weight": raw_w[3], "dcf_discount": float(rng.uniform(-15, 15)), "quant_score": int(rng.uniform(55, 80))},
-                {"symbol": "NAKIT", "name": "Nakit / Kısa Vadeli Likit", "sector": "Likit", "weight": 0.40, "dcf_discount": 10.0, "quant_score": 90}
-            ]
-            holdings_df = pd.DataFrame(mock_holdings)
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 📊 Skor Alt Kırılımları (Breakdown)")
+                breakdown = fund_detail.get('breakdown', {})
+                render_progress_bar("Performans Skoru", breakdown.get('performance', 0))
+                render_progress_bar("Risk Skoru", breakdown.get('risk', 0))
+                render_progress_bar("Tutarlılık (Consistency)", breakdown.get('consistency', 0))
+                render_progress_bar("Stabilite (Stability)", breakdown.get('stability', 0))
+                
+            with col2:
+                st.markdown("#### 🤖 TEFAS Quant Otomatik Analiz Yorumu")
+                score = fund_detail['final_score']
+                if score >= 90:
+                    yorum = "✔ Bu fon; üstün risk/getiri oranı, yüksek Sharpe ve düşük maksimum düşüş (drawdown) özellikleri ile elit seviyededir.\n\n**En büyük avantajı:** Piyasayı hem getiri hem istikrar açısından domine etmesi."
+                elif score >= 80:
+                    yorum = "✔ Bu fon; güçlü performans ve istikrarlı yapısıyla dikkat çekmektedir. Portföylerde güvenle değerlendirilebilir."
+                elif score >= 70:
+                    yorum = "✔ Bu fon orta segmenttedir. İstikrarlı getiri sağlasa da volatilite ve risk metrikleri yakından izlenmelidir."
+                else:
+                    yorum = "⚠ Bu fon zayıf kategoridedir. Getiri/risk dengesi ve stabilite skorları sektör ortalamasının altındadır."
+                
+                st.info(yorum)
+            
+            # Risk Engine Metrikleri
+            metrics_query = "SELECT * FROM fund_metrics WHERE fund_id = ?"
+            m_df = pd.read_sql(metrics_query, con=conn, params=(selected_fund_id,))
+            if not m_df.empty:
+                m_row = m_df.iloc[0]
+                st.markdown("---")
+                st.markdown("#### 📈 Profesyonel Risk ve Performans Metrikleri")
+                
+                m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
+                m_col1.metric("Sharpe Oranı", f"{m_row.get('sharpe_ratio', 0):.2f}" if pd.notnull(m_row.get('sharpe_ratio')) else "N/A")
+                m_col2.metric("Sortino Oranı", f"{m_row.get('sortino_ratio', 0):.2f}" if pd.notnull(m_row.get('sortino_ratio')) else "N/A")
+                m_col3.metric("Info. Ratio", f"{m_row.get('information_ratio', 0):.2f}" if pd.notnull(m_row.get('information_ratio')) else "N/A")
+                m_col4.metric("Calmar Oranı", f"{m_row.get('calmar_ratio', 0):.2f}" if pd.notnull(m_row.get('calmar_ratio')) else "N/A")
+                m_col5.metric("Alpha", f"{m_row.get('alpha', 0):.2f}" if pd.notnull(m_row.get('alpha')) else "N/A")
 
-        weighted_potential = sum(holdings_df['dcf_discount'] * holdings_df['weight'])
-        avg_quant = sum(holdings_df['quant_score'] * holdings_df['weight'])
-        conf_score_val = fund_info.get('confidence_score', 80.0)
-        
-        fair_value_score = (
-            (min(max(weighted_potential, 0), 50) / 50 * 40) + 
-            (avg_quant / 100 * 40) + 
-            (conf_score_val / 100 * 20)
-        )
+                m_col6, m_col7, m_col8, m_col9, m_col10 = st.columns(5)
+                m_col6.metric("Beta", f"{m_row.get('beta', 0):.2f}" if pd.notnull(m_row.get('beta')) else "N/A")
+                m_col7.metric("Volatilite", f"%{m_row.get('volatility', 0)*100:.2f}" if pd.notnull(m_row.get('volatility')) else "N/A")
+                m_col8.metric("Maks. Drawdown", f"%{m_row.get('max_drawdown', 0)*100:.2f}" if pd.notnull(m_row.get('max_drawdown')) else "N/A")
+                m_col9.metric("VaR (95)", f"%{m_row.get('var_95', 0)*100:.2f}" if pd.notnull(m_row.get('var_95')) else "N/A")
+                m_col10.metric("CVaR (95)", f"%{m_row.get('cvar_95', 0)*100:.2f}" if pd.notnull(m_row.get('cvar_95')) else "N/A")
 
-        col_1, col_2, col_3, col_4 = st.columns(4)
-        col_1.metric("Fon Fair Value Skoru", f"{fair_value_score:.1f} / 100")
-        col_2.metric("Ağırlıklı İskonto (DCF)", f"%{weighted_potential:+.1f}")
-        col_3.metric("Ranking Puanı", f"{fund_info['ranking_score']:.1f}")
-        col_4.metric("Güven Seviyesi", f"%{fund_info['confidence_score']:.0f}")
-        
-        st.markdown("---")
-        st.subheader(f"📊 {chosen_fund} - Portföy İçsel Değer Dağılımı")
-        
-        display_holdings = holdings_df[['symbol', 'name', 'sector', 'weight', 'dcf_discount', 'quant_score']].copy()
-        display_holdings['weight'] = (display_holdings['weight'] * 100).round(1).astype(str) + '%'
-        display_holdings['dcf_discount'] = display_holdings['dcf_discount'].round(1).astype(str) + '%'
-        display_holdings.columns = ['Sembol / Kod', 'Varlık Adı', 'Sektör', 'Ağırlık', 'DCF İskontosu', 'Quant Skoru']
-        
-        st.dataframe(display_holdings, use_container_width=True)
+            # Gizli Cevherler & İçsel Değer (DCF) Bölümü
+            st.markdown("---")
+            st.markdown(f"#### 💎 {selected_code} - Portföy İçsel Değer & Gizli Cevher Analizi")
+            
+            try:
+                holdings_df = pd.read_sql(f"""
+                    SELECT s.symbol, s.name, s.sector, s.dcf_discount, s.ev_ebitda, s.pe_ratio, s.quant_score, fsh.weight
+                    FROM fund_stock_holdings fsh
+                    JOIN stocks s ON fsh.stock_id = s.id
+                    WHERE fsh.fund_id = {selected_fund_id}
+                """, con=conn)
+            except Exception:
+                holdings_df = pd.DataFrame()
+                
+            if holdings_df.empty:
+                seed_str = hashlib.md5(selected_code.encode()).hexdigest()
+                fund_seed = int(seed_str, 16) % 10000
+                rng = np.random.default_rng(fund_seed)
+                comp_names = [f"{selected_code} Varlık A", f"{selected_code} Varlık B", f"{selected_code} Varlık C", f"{selected_code} Varlık D"]
+                raw_w = rng.uniform(0.1, 0.3, size=4)
+                raw_w = raw_w / raw_w.sum() * 0.60
+                
+                mock_holdings = [
+                    {"symbol": comp_names[0], "name": comp_names[0], "sector": "Teknoloji", "weight": raw_w[0], "dcf_discount": float(rng.uniform(15, 55)), "quant_score": int(rng.uniform(75, 95))},
+                    {"symbol": comp_names[1], "name": comp_names[1], "sector": "Sanayi", "weight": raw_w[1], "dcf_discount": float(rng.uniform(5, 35)), "quant_score": int(rng.uniform(70, 90))},
+                    {"symbol": comp_names[2], "name": comp_names[2], "sector": "Finans", "weight": raw_w[2], "dcf_discount": float(rng.uniform(-10, 25)), "quant_score": int(rng.uniform(60, 85))},
+                    {"symbol": comp_names[3], "name": comp_names[3], "sector": "Perakende", "weight": raw_w[3], "dcf_discount": float(rng.uniform(-15, 15)), "quant_score": int(rng.uniform(55, 80))},
+                    {"symbol": "NAKIT", "name": "Nakit / Kısa Vadeli Likit", "sector": "Likit", "weight": 0.40, "dcf_discount": 10.0, "quant_score": 90}
+                ]
+                holdings_df = pd.DataFrame(mock_holdings)
 
-        st.markdown("---")
-        st.info(f"**{chosen_fund}** fonunun portföyünde yer alan varlıkların DCF iskonto oranları ve Quant skorları ağırlıklandırılmıştır. Bu yapı, fon içerisindeki gizli cevherleri ve iskontolu şirketleri ortaya çıkarır.")
+            weighted_potential = sum(holdings_df['dcf_discount'] * holdings_df['weight'])
+            avg_quant = sum(holdings_df['quant_score'] * holdings_df['weight'])
+            
+            fair_value_score = (
+                (min(max(weighted_potential, 0), 50) / 50 * 40) + 
+                (avg_quant / 100 * 40) + 
+                (75.0 / 100 * 20)
+            )
+
+            h_col1, h_col2, h_col3 = st.columns(3)
+            h_col1.metric("Fon Fair Value Skoru", f"{fair_value_score:.1f} / 100")
+            h_col2.metric("Ağırlıklı İskonto (DCF)", f"%{weighted_potential:+.1f}")
+            h_col3.metric("Ağırlıklı Quant Skoru", f"{avg_quant:.1f}")
+            
+            display_holdings = holdings_df[['symbol', 'name', 'sector', 'weight', 'dcf_discount', 'quant_score']].copy()
+            display_holdings['weight'] = (display_holdings['weight'] * 100).round(1).astype(str) + '%'
+            display_holdings['dcf_discount'] = display_holdings['dcf_discount'].round(1).astype(str) + '%'
+            display_holdings.columns = ['Sembol / Kod', 'Varlık Adı', 'Sektör', 'Ağırlık', 'DCF İskontosu', 'Quant Skoru']
+            
+            st.dataframe(display_holdings, use_container_width=True)
+        else:
+            st.warning("Seçilen fon için skor verisi bulunamadı.")
     else:
-        st.warning("Veritabanı boş.")
+        st.warning("Veritabanında kayıtlı fon bulunamadı.")
 
 # ==========================================
 # MODÜL 6: FON KARŞILAŞTIRMA
@@ -364,7 +464,7 @@ elif menu == "⚖️ Fon Karşılaştırma":
         st.warning("Yeterli veri bulunmuyor.")
 
 # ==========================================
-# MODÜL 7: BACKTEST PERFORMANSI (GERÇEK ZAMAN SERİSİ MOTORU)
+# MODÜL 7: BACKTEST PERFORMANSI
 # ==========================================
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Backtest Performans Simülasyonu")
@@ -374,14 +474,7 @@ elif menu == "🚀 Backtest Performansı":
     col_b1, col_b2 = st.columns(2)
     b_period_label = col_b1.selectbox(
         "Simülasyon Süresi",
-        [
-            "1 Ay",
-            "3 Ay",
-            "6 Ay",
-            "1 Yıl",
-            "3 Yıl",
-            "5 Yıl"
-        ]
+        ["1 Ay", "3 Ay", "6 Ay", "1 Yıl", "3 Yıl", "5 Yıl"]
     )
     b_strat = col_b2.selectbox("Strateji Kuralı", ["Güçlü AL ve AL / İzle Sinyalleri"])
     
@@ -437,3 +530,5 @@ elif menu == "🚀 Backtest Performansı":
                         st.warning("Seçilen periyot için rapor oluşturulamadı.")
             except Exception as e:
                 st.error(f"Backtest çalıştırılırken hata oluştu: {e}")
+
+conn.close()

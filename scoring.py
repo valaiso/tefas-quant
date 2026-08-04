@@ -142,7 +142,13 @@ def calculate_confidence_and_score(p_history):
         return 0.0, 50.0, "Yeni Fon (Kuluçkada)", "Zayıf"
 
     prices = p_history['price'].values
-    
+    prices = prices[prices > 0]
+
+    if len(prices) < 2:
+        return 0.0, 0.0, "Yeni Fon (Kuluçkada)", "Zayıf"
+
+    day_count = len(prices)
+
     r_30 = (prices[-1] / prices[-30] - 1) * 100 if day_count >= 30 else (prices[-1] / prices[0] - 1) * 100
     r_90 = (prices[-1] / prices[-90] - 1) * 100 if day_count >= 90 else r_30
     r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_90

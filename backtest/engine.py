@@ -43,11 +43,18 @@ class VectorizedBacktestEngine:
             exit_target['target_idx'] = exit_target['row_idx'] - days  # entry_idx ile eşleşmesi için
             
             trade_merged = pd.merge(
-                entry_merged, 
-                exit_target[['fund_id', 'target_idx', 'date', 'price']], 
-                left_on=['fund_id', 'entry_idx'], 
-                right_on=['fund_id', 'target_idx'], 
-                suffixes=('_entry', '_exit')
+                entry_merged,
+                exit_target[['fund_id', 'target_idx', 'date', 'price']],
+                left_on=['fund_id', 'entry_idx'],
+                right_on=['fund_id', 'target_idx'],
+                how='inner'
+            )
+            trade_merged = trade_merged.rename(
+                columns={
+                    'price': 'price_exit',
+                    'date_x': 'date_entry',
+                    'date_y': 'date_exit'
+                }
             )
             
             if trade_merged.empty:
@@ -62,7 +69,9 @@ class VectorizedBacktestEngine:
                 continue
 
             # Gerçek getiri hesabı: (Çıkış Fiyatı - Giriş Fiyatı) / Giriş Fiyatı
-            trade_merged['return'] = (trade_merged['price_exit'] - trade_merged['entry_price']) / trade_merged['entry_price']
+            trade_merged['return'] = (
+                trade_merged['price_exit'] - trade_merged['entry_price']
+            ) / trade_merged['entry_price']
             trades_clean = trade_merged[['fund_id', 'date_entry', 'date_exit', 'entry_price', 'price_exit', 'return']].dropna()
             
             if trades_clean.empty:

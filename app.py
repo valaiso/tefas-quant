@@ -52,7 +52,7 @@ st.sidebar.markdown(
 include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False)
 st.sidebar.markdown("", unsafe_allow_html=True)
 
-# --- 3. VERİ YÜKLEME ---
+# --- 3. VERİ YÜKLEME VE AKILLI FİLTRELEME ---
 def load_universe_data():
     try:
         funds_df = pd.read_sql("SELECT id, code, title AS name, category, status, is_qualified FROM funds", con=conn)
@@ -73,6 +73,19 @@ def load_universe_data():
     merged = pd.merge(latest_scores, funds_df, left_on='fund_id', right_on='id', how='inner')
     merged['category'] = merged['category'].fillna('Diğer')
     
+    # Nitelikli fon sütununu veri tipinden bağımsız (int, str, bool) güvenli hale getir
+    def parse_qualified(val):
+        if pd.isna(val):
+            return 0
+        if isinstance(val, bool):
+            return 1 if val else 0
+        val_str = str(val).strip().lower()
+        if val_str in ['true', '1', 'yes', 'y', 'evet']:
+            return 1
+        return 0
+
+    merged['is_qualified_clean'] = merged['is_qualified'].apply(parse_qualified)
+    
     price_counts = pd.read_sql("SELECT fund_id, COUNT(date) as day_count FROM fund_daily_prices GROUP BY fund_id", con=conn)
     if not price_counts.empty:
         price_counts['fund_id'] = pd.to_numeric(price_counts['fund_id'], errors='coerce').astype('int64')
@@ -80,8 +93,9 @@ def load_universe_data():
     merged = pd.merge(merged, price_counts, on='fund_id', how='left')
     merged['day_count'] = merged['day_count'].fillna(0)
     
+    # Tik işaretli değilse nitelikli fonları (1 olanları) listeden tamamen düş
     if not include_qualified:
-        merged = merged[merged['is_qualified'] == 0]
+        merged = merged[merged['is_qualified_clean'] == 0]
         
     return merged
 

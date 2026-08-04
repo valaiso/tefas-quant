@@ -8,7 +8,6 @@ import random
 import streamlit as st
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# YENİ HESAPLAMA MOTORUMUZU İÇERİ AKTARIYORUZ
 import scoring 
 
 try:
@@ -22,14 +21,25 @@ def get_db_connection():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     db_path = os.path.join(base_dir, "tefas.db")
     conn = sqlite3.connect(db_path, check_same_thread=False)
-    # Tablo oluşturma kodları aynı (funds, fund_daily_prices, fund_scores, vb.)
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS funds (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE, title TEXT, category TEXT, status TEXT DEFAULT 'ACTIVE', is_qualified INTEGER DEFAULT 0, history_completed INTEGER DEFAULT 0)")
     cursor.execute("CREATE TABLE IF NOT EXISTS fund_daily_prices (fund_id INTEGER, date TEXT, price REAL, PRIMARY KEY (fund_id, date))")
-    cursor.execute("CREATE TABLE IF NOT EXISTS fund_scores (fund_id INTEGER, date TEXT, absolute_score REAL, final_score REAL, confidence_score REAL, category_percentile REAL, signal TEXT, letter_grade TEXT, breakdown_json TEXT, PRIMARY KEY (fund_id, date))")
+    cursor.execute("CREATE TABLE IF NOT EXISTS fund_scores (fund_id INTEGER, date TEXT, absolute_score REAL, final_score REAL, confidence_score REAL, category_percentile REAL, signal TEXT, letter_grade TEXT, breakdown_json TEXT, raw_score REAL, confidence_factor REAL, PRIMARY KEY (fund_id, date))")
     cursor.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)")
     
-    migrations = [("funds", "is_qualified INTEGER DEFAULT 0"), ("funds", "history_completed INTEGER DEFAULT 0"), ("fund_scores", "absolute_score REAL"), ("fund_scores", "final_score REAL"), ("fund_scores", "category_percentile REAL"), ("fund_scores", "letter_grade TEXT"), ("fund_scores", "signal TEXT"), ("fund_scores", "confidence_score REAL"), ("fund_scores", "breakdown_json TEXT")]
+    migrations = [
+        ("funds", "is_qualified INTEGER DEFAULT 0"), 
+        ("funds", "history_completed INTEGER DEFAULT 0"), 
+        ("fund_scores", "absolute_score REAL"), 
+        ("fund_scores", "final_score REAL"), 
+        ("fund_scores", "category_percentile REAL"), 
+        ("fund_scores", "letter_grade TEXT"), 
+        ("fund_scores", "signal TEXT"), 
+        ("fund_scores", "confidence_score REAL"), 
+        ("fund_scores", "breakdown_json TEXT"),
+        ("fund_scores", "raw_score REAL"),
+        ("fund_scores", "confidence_factor REAL")
+    ]
     for table, col_def in migrations:
         try: cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
         except sqlite3.OperationalError: pass
@@ -87,7 +97,6 @@ def run_batch_scoring_engine(conn):
         first_date = p_history['date'].iloc[0]
         last_date = p_history['date'].iloc[-1]
         
-        # İş kuralını scoring.py'den çağırıyoruz
         conf = scoring.calculate_confidence(prices, first_date, last_date)
 
         raw_data.append({
@@ -112,7 +121,6 @@ def run_batch_scoring_engine(conn):
 
     df_scored = pd.concat(composite_dfs)
     
-    # Absolute Score Hesaplaması
     print(df_scored[['perf_percentile','risk_percentile','qual_percentile','cash_percentile','cost_percentile']].isna().sum())
     df_scored['absolute_score'] = scoring.calculate_absolute_score(
         df_scored['perf_percentile'], df_scored['risk_percentile'],
@@ -121,31 +129,32 @@ def run_batch_scoring_engine(conn):
 
     final_scores = []
     for _, row in df_scored.iterrows():
-        # Sürekli Ceza Hesaplamaları
-        tot_pen, mdd_pen, vol_pen, conf_pen = scoring.calculate_continuous_penalty(
-            row['mdd'], row['volatility'], row['confidence']
+        tot_pen, mdd_pen, vol_pen = scoring.calculate_continuous_penalty(
+            row['mdd'], row['volatility']
         )
         
-        # Final Score
-        final_sc = scoring.calculate_final_score(row['absolute_score'], tot_pen)
+        final_sc, raw_score, conf_factor = scoring.calculate_final_score(
+            row['absolute_score'], tot_pen, row['confidence']
+        )
         
-        # Explainability JSON
         breakdown_json = scoring.explain_score(
             row['perf_percentile']*0.40, row['risk_percentile']*0.30, row['qual_percentile']*0.10, 
             row['cash_percentile']*0.10, row['cost_percentile']*0.10, row['absolute_score'], 
-            mdd_pen, vol_pen, conf_pen, tot_pen, final_sc
+            mdd_pen, vol_pen, raw_score, row['confidence'], conf_factor, final_sc
         )
         
         final_scores.append({
             'fund_id': row['fund_id'],
             'final_score': final_sc,
+            'raw_score': raw_score,
+            'confidence_factor': conf_factor,
             'breakdown_json': breakdown_json
         })
 
     df_final = pd.DataFrame(final_scores)
     df_scored = pd.merge(df_scored, df_final, on='fund_id')
 
-    # 3. KATEGORİ İÇİ PERCENTILE (Tüm skorlar bulunduktan sonra)
+    # 3. KATEGORİ İÇİ PERCENTILE
     df_scored['final_percentile'] = scoring.calculate_category_percentile(df_scored)
 
     # 4. VERİTABANI KAYITLARI
@@ -157,19 +166,20 @@ def run_batch_scoring_engine(conn):
         
         db_records.append((
             int(row['fund_id']), today_str, float(row['absolute_score']), float(row['final_score']),
-            float(row['confidence']), float(row['final_percentile']), signal, grade, row['breakdown_json']
+            float(row['confidence']), float(row['final_percentile']), signal, grade, row['breakdown_json'],
+            float(row['raw_score']), float(row['confidence_factor'])
         ))
 
     cursor = conn.cursor()
     cursor.executemany("""
         INSERT OR REPLACE INTO fund_scores 
-        (fund_id, date, absolute_score, final_score, confidence_score, category_percentile, signal, letter_grade, breakdown_json) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (fund_id, date, absolute_score, final_score, confidence_score, category_percentile, signal, letter_grade, breakdown_json, raw_score, confidence_factor) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, db_records)
     conn.commit()
 
 
-# TEFAS API Crawler Fonksiyonları (Öncekiyle Tamamen Aynı)
+# TEFAS API Crawler Fonksiyonları
 def safe_fetch(start_date, end_date, max_retries=3):
     for attempt in range(max_retries):
         try:
@@ -191,15 +201,10 @@ def fetch_chunk_worker(args):
 def run_tefas_sync_and_scoring(full_sync=False, *args, **kwargs):
     if not TEFAS_LIB_READY: return False, "TEFAS kütüphanesi yüklü değil!"
     
-    # ... Streamlit UI kodları ...
     conn = get_db_connection()
     try:
-        # DB Veri çekme ve senkronizasyon operasyonları (Önceki kodunuz ile birebir aynı)
-        # Sadece puanlama çalıştırma kısmı aşağıdaki gibi sadeleşmiş oldu:
-        
         run_batch_scoring_engine(conn)
-        
-        return True, "Başarılı! V2 Quant Motoru iki katmanlı mimaride çalıştırıldı."
+        return True, "Başarılı! Multiplier Mimarili ve Raw Score Kolonlu V2 Quant Motoru çalıştırıldı."
     except Exception as e:
         return False, f"Hata: {str(e)}"
     finally:

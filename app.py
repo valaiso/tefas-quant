@@ -4,7 +4,7 @@ import datetime
 import os
 import numpy as np
 import hashlib
-from scoring import get_db_connection, run_tefas_sync_and_scoring
+from scoring_engine import get_db_connection, run_tefas_sync_and_scoring
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
 st.set_page_config(

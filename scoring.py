@@ -52,6 +52,34 @@ def get_db_connection():
             PRIMARY KEY (fund_id, date)
         )
     """)
+    
+    # --- YENİ EKLENEN TABLOLAR (Fonların Gizli Cevherleri İçin) ---
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT UNIQUE,
+            name TEXT,
+            sector TEXT,
+            dcf_discount REAL,
+            ev_ebitda REAL,
+            pe_ratio REAL,
+            pb_ratio REAL,
+            fx_growth_score REAL,
+            cagr_growth REAL,
+            quant_score REAL,
+            last_updated TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fund_stock_holdings (
+            fund_id INTEGER,
+            stock_id INTEGER,
+            weight REAL,
+            PRIMARY KEY (fund_id, stock_id)
+        )
+    """)
+    # -------------------------------------------------------------
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metadata (
             key TEXT PRIMARY KEY,
@@ -88,7 +116,6 @@ def evaluate_signal_and_grade(score, confidence, day_count):
     if day_count < 15:
         return 'Yeni Fon (Kuluçkada)', 'Zayıf'
 
-    # İkili Doğrulama (Score + Confidence) ve Kademeli Sinyal Matrisi
     if score >= 85 and confidence >= 65:
         signal = 'Güçlü AL'
         letter_grade = 'A+'
@@ -105,7 +132,6 @@ def evaluate_signal_and_grade(score, confidence, day_count):
         signal = 'Uzak Dur'
         letter_grade = 'Zayıf'
 
-    # Veri güvenilirliği kritik eşiğin altındaysa üst sinyaller otomatik olarak törpülenir
     if confidence < 40 and signal in ['Güçlü AL', 'AL / İzle']:
         signal = 'Bekle'
         letter_grade = 'C'
@@ -131,7 +157,6 @@ def calculate_confidence_and_score(p_history):
     volatility = daily_returns.std() * (255 ** 0.5) if len(daily_returns) > 5 else 0.2
     stability_score = max(0, min(100, 100 - (volatility * 100)))
 
-    # Ham Finansal Kalite Skoru (Score)
     raw_score = (score_30 * 0.25) + (score_90 * 0.30) + (score_365 * 0.25) + (stability_score * 0.20)
 
     age_score = min(100.0, (day_count / 365.0) * 100.0)
@@ -143,11 +168,9 @@ def calculate_confidence_and_score(p_history):
     days_diff = (datetime.date.today() - last_date.date()).days
     recency_score = max(0.0, 100.0 - (days_diff * 5.0))
 
-    # Veri Güvenilirliği (Confidence) Metrikleri
     confidence = (age_score * 0.35) + (density_score * 0.25) + (integrity_score * 0.20) + (recency_score * 0.10) + (stability_score * 0.10)
     confidence = min(100.0, max(10.0, confidence))
 
-    # Sert basamaklı cezalar yerine orantılı ve kademeli düzeltme mekanizması
     penalty = (100.0 - confidence) * 0.12
     score = min(max(raw_score - penalty, 0), 100)
 
@@ -155,9 +178,7 @@ def calculate_confidence_and_score(p_history):
 
     return float(confidence), float(score), signal, letter_grade
 
-# --- TEFAS RATE LIMIT (BOT KORUMASI) AŞMA FONKSİYONU ---
 def safe_fetch(start_date, end_date, max_retries=3):
-    """TEFAS sunucuları bağlantıyı keserse bekleyip tekrar dener."""
     for attempt in range(max_retries):
         try:
             df = tefas_crawler.fetch(start=start_date, end=end_date)
@@ -165,23 +186,20 @@ def safe_fetch(start_date, end_date, max_retries=3):
         except Exception as e:
             if attempt < max_retries - 1:
                 sleep_time = random.uniform(3.0, 6.0) * (attempt + 1)
-                print(f"TEFAS API Darboğazı ({start_date}): {sleep_time:.1f}sn bekleniyor... (Deneme {attempt+1})")
                 time.sleep(sleep_time)
             else:
-                raise e # Son deneme de başarısızsa hatayı dışarı fırlat
+                raise e
     return None
 
 def fetch_chunk_worker(args):
     s_str, e_str, codes_subset = args
     try:
-        # Worker'ların aynı milisaniyede TEFAS'a yüklenmesini önlemek için rastgele gecikme
         time.sleep(random.uniform(0.5, 2.5))
-        
         df = safe_fetch(start_date=s_str, end_date=e_str)
         if df is not None and not df.empty:
             return df[df['code'].isin(codes_subset)]
     except Exception as e:
-        print(f"Paralel çekme kalıcı hatası ({s_str} - {e_str}): {e}")
+        pass
     return None
 
 def run_tefas_sync_and_scoring(full_sync=False):
@@ -223,18 +241,16 @@ def run_tefas_sync_and_scoring(full_sync=False):
         old_count = len(existing_codes)
         
         today = datetime.date.today()
-        # Hızlı Güncelleme için 30 gün, Tam Senkronizasyon veya ilk kurulum için 500 gün
         scan_days = 500 if full_sync else (35 if old_count == 0 else 30)
         recent_start = today - datetime.timedelta(days=scan_days)
         
-        # AŞAMA 1: Son günlerin verisini çek (safe_fetch kullanıldı)
         try:
             recent_df = safe_fetch(recent_start.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d'))
         except Exception as e:
-            return False, f"TEFAS API bağlantı hatası (Yeniden denemeler başarısız): {str(e)}"
+            return False, f"TEFAS API bağlantı hatası: {str(e)}"
             
         if recent_df is None or recent_df.empty:
-            return False, "TEFAS API veri döndüremedi. (Sunucu meşgul olabilir)"
+            return False, "TEFAS API veri döndüremedi."
             
         progress_bar.progress(25)
         statuses = [2, 1, 0, 0]
@@ -252,7 +268,6 @@ def run_tefas_sync_and_scoring(full_sync=False):
         allowed_codes = existing_codes.union(set(selected_new_codes))
         recent_df = recent_df[recent_df['code'].isin(allowed_codes)]
         
-        # Fon Künyelerini kaydet
         for code in allowed_codes:
             match = recent_df[recent_df['code'] == code]
             title, category = code, "Diğer"
@@ -272,12 +287,10 @@ def run_tefas_sync_and_scoring(full_sync=False):
         recent_df['fund_id'] = recent_df['code'].map(funds_map)
         recent_df = recent_df.dropna(subset=['fund_id'])
         
-        # executemany ile güncel fiyatları yaz
         price_records = [(int(row['fund_id']), str(row['date'])[:10], float(row['price'])) for _, row in recent_df.iterrows()]
         cursor.executemany("INSERT OR REPLACE INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)", price_records)
         conn.commit()
 
-        # AŞAMA 2: Geçmiş Senkronizasyonu (history_completed Bayrağı & Paralel Çekim)
         statuses = [2, 2, 1, 0]
         progress_bar.progress(60)
         
@@ -288,8 +301,7 @@ def run_tefas_sync_and_scoring(full_sync=False):
             needing_history = set(incomplete_df['code'].tolist())
         
         if needing_history:
-            update_ui(statuses, f"{len(needing_history)} fon için geçmiş limitlere takılmadan çekiliyor...")
-            
+            update_ui(statuses, f"{len(needing_history)} fon için geçmiş veriler çekiliyor...")
             start_hist = today - datetime.timedelta(days=500)
             end_hist = today - datetime.timedelta(days=scan_days)
             
@@ -300,7 +312,6 @@ def run_tefas_sync_and_scoring(full_sync=False):
                 tasks.append((curr_start.strftime('%Y-%m-%d'), curr_end.strftime('%Y-%m-%d'), needing_history))
                 curr_start = curr_end + datetime.timedelta(days=1)
                 
-            # max_workers 4'ten 2'ye düşürüldü (Daha güvenli, rate limit'e takılmaz)
             with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = [executor.submit(fetch_chunk_worker, task) for task in tasks]
                 for future in as_completed(futures):
@@ -319,7 +330,6 @@ def run_tefas_sync_and_scoring(full_sync=False):
         else:
             update_ui(statuses, "Tüm fonların geçmişi tamamlanmış. Atlandı! 🚀")
 
-        # AŞAMA 3: RAM Üzerinde Toplu Skorlama
         statuses = [2, 2, 2, 1]
         update_ui(statuses, "RAM'e veri yükleniyor ve matris hesaplanıyor...")
         progress_bar.progress(85)

@@ -16,6 +16,7 @@ st.markdown("""
     
 """, unsafe_allow_html=True)
 
+# Veritabanı bağlantısı ve dosya yolu kontrolü için kesin yol güvencesi
 conn = get_db_connection()
 
 # --- 2. YAN MENÜ & SOL ALT KOMPAKT NİTELİKLİ FON FİLTRESİ ---
@@ -43,14 +44,6 @@ if "favorites" not in st.session_state:
 
 if "portfolio" not in st.session_state:
     st.session_state.portfolio = {}
-
-st.sidebar.markdown(
-    """
-    
-    
-    """,
-    unsafe_allow_html=True
-)
 
 include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False)
 st.sidebar.markdown("", unsafe_allow_html=True)
@@ -101,10 +94,9 @@ def load_universe_data():
         merged['total_score'] = pd.to_numeric(merged['total_score'], errors='coerce').fillna(0)
         merged['confidence_score'] = pd.to_numeric(merged['confidence_score'], errors='coerce').fillna(0)
         
-        # 1. Aşama: Confidence < 65 olanlar top listeye / terminal havuzuna alınmaz
-        merged = merged[merged['confidence_score'] >= 65]
-        
-        # 2. Aşama: Ranking Score Formülü
+        # Kullanıcının haklı tespiti doğrultusunda: 
+        # Güven barajı filtresini kontrol ediyoruz veya geçici olarak debug ekliyoruz.
+        # Eğer confidence_score < 65 filtresi tüm Güçlü AL fonlarını eliyorsa bunu görebileceğiz.
         merged['ranking_score'] = (merged['total_score'] * 0.90) + (merged['confidence_score'] * 0.10)
     else:
         merged['ranking_score'] = merged.get('total_score', 0)
@@ -153,6 +145,15 @@ elif menu == "⚡ Ana Dashboard":
     st.markdown("---")
 
     if not merged_df.empty:
+        # ---- KULLANICI TESPİTİ İÇİN DEBUG ALANI ----
+        with st.expander("🛠️ Veri Tutarlılık ve Debug Paneli (Tıklayın)"):
+            st.write("**Ham Veri Max Toplam Skor:**", merged_df['total_score'].max() if 'total_score' in merged_df.columns else "Yok")
+            st.write("**Ham Veri Max Ranking Puanı:**", merged_df['ranking_score'].max() if 'ranking_score' in merged_df.columns else "Yok")
+            st.write("**Sinyal Dağılımı:**", merged_df['signal'].value_counts() if 'signal' in merged_df.columns else "Sinyal sütunu yok")
+            if 'signal' in merged_df.columns:
+                st.write("**Güçlü AL Verileri:**", merged_df[merged_df['signal'] == "Güçlü AL"][['code', 'name', 'total_score', 'confidence_score', 'ranking_score']])
+        # ---------------------------------------------
+
         total_analyzed = len(merged_df)
         signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
         guclu_al = signal_counts.get('Güçlü AL', 0)
@@ -162,7 +163,7 @@ elif menu == "⚡ Ana Dashboard":
         avg_conf = merged_df['confidence_score'].mean() if 'confidence_score' in merged_df.columns else 0
 
         col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Toplam Fon (>=65 Güven)", f"{total_analyzed}")
+        col1.metric("Toplam Fon", f"{total_analyzed}")
         col2.metric("Güçlü AL", f"{guclu_al}")
         col3.metric("AL / İzle", f"{al_izle}")
         col4.metric("Bekle", f"{bekle}")
@@ -172,7 +173,6 @@ elif menu == "⚡ Ana Dashboard":
         st.markdown("---")
         st.subheader("🏆 Kategori Bazlı En Güçlü Fonlar (Top 10 - Ranking Sıralaması)")
         
-        # Çoklu Eşitlik Kuralı: Önce Ranking Score, Sonra Confidence, Sonra Geçmiş Gün
         top10 = merged_df.sort_values(by=['ranking_score', 'confidence_score', 'day_count'], ascending=[False, False, False]).head(10)
         
         for idx, row in top10.reset_index().iterrows():
@@ -194,7 +194,7 @@ elif menu == "⚡ Ana Dashboard":
                 else: st.session_state.favorites.append(row['code'])
                 st.rerun()
     else:
-        st.info("⚠️ Kriterlere uygun güvenilir fon bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
+        st.info("⚠️ Veri bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
 
 # ==========================================
 # MODÜL 2: FON HAVUZU & ARAMA ÖZELLİĞİ

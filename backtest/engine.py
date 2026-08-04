@@ -68,7 +68,9 @@ class VectorizedBacktestEngine:
                     })
 
             key_name = f"{period}_days_performance"
-            if len(trade_results) == 0:
+            
+            # EĞER GERÇEK İŞLEM ÇIKMAZSA ASLA SAHTE VERİ VERME, 0 DÖNDÜR
+            if not trade_results:
                 report[key_name] = {
                     "analyzed_signals": 0, "average_return": 0.0, "hit_ratio": 0.0,
                     "sharpe_ratio": 0.0, "max_drawdown": 0.0, "confidence_score": 0.0,

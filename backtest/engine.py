@@ -42,13 +42,21 @@ class VectorizedBacktestEngine:
             valid_results = backtest_results.dropna(subset=[f'return_{period}d'])
             if len(valid_results) == 0:
                 continue
-            hit_ratio = valid_results[f'is_hit_{period}d'].mean()
-            avg_return = valid_results[f'return_{period}d'].mean()
+            
+            hit_ratio = valid_results[f'is_hit_{period}d'].mean() * 100
+            avg_return = valid_results[f'return_{period}d'].mean() * 100
+            std_ret = valid_results[f'return_{period}d'].std()
+            
+            # Periyoda özel yıllıklandırılmış Sharpe Oranı
+            annualization_factor = np.sqrt(252 / period) if period > 0 else 1
+            sharpe = (valid_results[f'return_{period}d'].mean() / std_ret * annualization_factor) if std_ret > 0 and not pd.isna(std_ret) else 0.0
+            
             period_metrics = {
                 "analyzed_signals": len(valid_results),
-                "hit_ratio": round(hit_ratio * 100, 2),
-                "average_return": round(avg_return * 100, 2),
-                "confidence_score": round(hit_ratio * 100, 2)
+                "hit_ratio": round(hit_ratio, 1),
+                "average_return": round(avg_return, 2),
+                "sharpe_ratio": round(sharpe, 2),
+                "confidence_score": round(min(max(hit_ratio, 40), 95), 1)
             }
             if f'beat_benchmark_{period}d' in valid_results.columns:
                 period_metrics["beat_benchmark_ratio"] = round(valid_results[f'beat_benchmark_{period}d'].mean() * 100, 2)

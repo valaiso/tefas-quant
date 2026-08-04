@@ -403,23 +403,25 @@ elif menu == "🚀 Backtest Performansı":
                     prices_df['date'] = pd.to_datetime(prices_df['date']).dt.normalize()
                     scores_df['date'] = pd.to_datetime(scores_df['date']).dt.normalize()
                     
-                    engine = VectorizedBacktestEngine(holding_periods=[selected_period])
-                    bt_results = engine.run(prices_df=prices_df, signals_df=scores_df)
-                    report = engine.generate_strategy_report(bt_results)
+                    # Tüm periyotları motora veriyoruz
+                    engine = VectorizedBacktestEngine(holding_periods=[21, 63, 126])
+                    bt_results_df = engine.run(prices_df=prices_df, signals_df=scores_df)
+                    report = engine.generate_strategy_report(bt_results_df)
                     
                     if report and f"{selected_period}_days_performance" in report:
                         metrics = report[f"{selected_period}_days_performance"]
                         
-                        st.success("Backtest başarıyla tamamlandı!")
-                        m1, m2, m3 = st.columns(3)
-                        m1.metric("Ortalama Getiri", f"%{metrics.get('average_return', 0)}", f"{metrics.get('analyzed_signals', 0)} Sinyal İncelendi")
-                        m2.metric("İsabet Oranı (Hit Ratio)", f"%{metrics.get('hit_ratio', 0)}")
-                        m3.metric("Güven Skoru", f"%{metrics.get('confidence_score', 0)}")
+                        st.success(f"Backtest ({b_period_label}) başarıyla tamamlandı!")
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Ortalama Getiri", f"%{metrics.get('average_return', 0)}", f"{metrics.get('analyzed_signals', 0)} Sinyal")
+                        m2.metric("İsabet Oranı", f"%{metrics.get('hit_ratio', 0)}")
+                        m3.metric("Sharpe Oranı", f"{metrics.get('sharpe_ratio', 0)}")
+                        m4.metric("Güven Skoru", f"%{metrics.get('confidence_score', 0)}")
                         
-                        if isinstance(bt_results, pd.DataFrame) and not bt_results.empty:
+                        if isinstance(bt_results_df, pd.DataFrame) and not bt_results_df.empty:
                             st.subheader("Simülasyon Detay Çıktısı")
-                            st.dataframe(bt_results.head(50), use_container_width=True)
+                            st.dataframe(bt_results_df.head(50), use_container_width=True)
                     else:
-                        st.warning(f"Seçilen {selected_period} günlük periyot için veritabanında yeterli ileri tarihli fiyat eşleşmesi bulunamadı. Lütfen daha kısa bir periyot (Örn: 21 Gün) seçin veya 'Tam Senkronizasyon' ile geçmiş veri kapsamını genişletin.")
+                        st.warning(f"Seçilen {b_period_label} için veritabanında yeterli ileri tarihli fiyat eşleşmesi bulunamadı. Lütfen daha kısa bir periyot (Örn: 21 Gün) seçin veya geçmiş veri kapsamını genişletin.")
             except Exception as e:
                 st.error(f"Backtest çalıştırılırken hata oluştu: {e}")

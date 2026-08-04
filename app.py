@@ -154,9 +154,10 @@ elif menu == "⚡ Ana Dashboard":
 
     if not merged_df.empty:
         total_analyzed = len(merged_df)
-        guclu_al = len(merged_df[merged_df['signal'] == 'Güçlü AL'])
-        al_izle = len(merged_df[merged_df['signal'] == 'AL / İzle'])
-        bekle = len(merged_df[merged_df['signal'] == 'Bekle'])
+        signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
+        guclu_al = signal_counts.get('Güçlü AL', 0)
+        al_izle = signal_counts.get('AL / İzle', 0)
+        bekle = signal_counts.get('Bekle', 0)
         avg_score = merged_df['ranking_score'].mean()
         avg_conf = merged_df['confidence_score'].mean() if 'confidence_score' in merged_df.columns else 0
 

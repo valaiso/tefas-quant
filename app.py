@@ -367,12 +367,12 @@ elif menu == "⚖️ Fon Karşılaştırma":
         st.warning("Yeterli veri bulunmuyor.")
 
 # ==========================================
-# MODÜL 7: BACKTEST PERFORMANSI (DİNAMİK HESAPLAMA MOTORU)
+# MODÜL 7: BACKTEST PERFORMANSI (GERÇEK ZAMAN SERİSİ MOTORU)
 # ==========================================
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Backtest Performans Simülasyonu")
     st.markdown("---")
-    st.markdown("Seçilen holding periyoduna göre (`21`, `63`, `126` gün) gerçek fiyat verileri üzerinden dinamik performans ve Sharpe hesaplaması yapar.")
+    st.markdown("Bu modül, veritabanındaki gerçek günlük fiyatlar ve **Güçlü AL / AL İzle** sinyalleri üzerinden zaman serisi simülasyonu çalıştırır.")
     
     col_b1, col_b2 = st.columns(2)
     b_period_label = col_b1.selectbox("Simülasyon Süresi (Holding Period)", ["21 Gün (1 Ay)", "63 Gün (3 Ay)", "126 Gün (6 Ay)"])
@@ -385,83 +385,43 @@ elif menu == "🚀 Backtest Performansı":
     }
     selected_period = period_mapping[b_period_label]
     
-    if st.button("Gerçek Backtesti Başlat", type="primary", use_container_width=True):
-        with st.spinner("Fiyatlar ve sinyaller işleniyor, dinamik simülasyon hesaplanıyor..."):
+    if st.button("Gerçek Zaman Serisi Backtestini Başlat", type="primary", use_container_width=True):
+        with st.spinner("Veritabanından fiyatlar ve skorlar okunuyor, vektörel backtest hesaplanıyor..."):
             try:
-                prices_df = pd.read_sql("SELECT fund_id, date, price FROM fund_daily_prices ORDER BY fund_id, date", con=conn)
+                prices_df = pd.read_sql("SELECT fund_id, date, price FROM fund_daily_prices", con=conn)
                 scores_df = pd.read_sql("SELECT fund_id, date, signal FROM fund_scores", con=conn)
                 
                 if prices_df.empty or scores_df.empty:
-                    st.warning("Veritabanında yeterli fiyat veya skor verisi bulunamadı! Önce senkronizasyon yapın.")
+                    st.warning("Veritabanında yeterli fiyat veya skor verisi bulunamadı! Lütfen önce sol menüden veri senkronizasyonu çalıştırın.")
                 else:
-                    prices_df['fund_id'] = pd.to_numeric(prices_df['fund_id'], errors='coerce').astype('int64')
-                    scores_df['fund_id'] = pd.to_numeric(scores_df['fund_id'], errors='coerce').astype('int64')
-                    prices_df['date'] = pd.to_datetime(prices_df['date']).dt.normalize()
-                    scores_df['date'] = pd.to_datetime(scores_df['date']).dt.normalize()
+                    from backtest.engine import VectorizedBacktestEngine
+                    engine = VectorizedBacktestEngine(holding_periods=[21, 63, 126])
+                    report = engine.run(prices_df=prices_df, signals_df=scores_df)
                     
-                    # Filtreleme: Güçlü AL ve AL / İzle
-                    valid_signals = scores_df[scores_df['signal'].isin(['Güçlü AL', 'AL / İzle'])].copy()
-                    
-                    if valid_signals.empty:
-                        st.warning("Uygun sinyal bulunamadı.")
-                    else:
-                        merged_bt = pd.merge(valid_signals, prices_df, on=['fund_id', 'date'], how='inner')
-                        merged_bt = merged_bt.sort_values(by=['fund_id', 'date']).reset_index(drop=True)
+                    key_str = f"{selected_period}_days_performance"
+                    if report and key_str in report:
+                        metrics = report[key_str]
                         
-                        trade_results = []
-                        
-                        for _, row in merged_bt.iterrows():
-                            f_id = row['fund_id']
-                            sig_date = row['date']
-                            p_entry = row['price']
-                            
-                            if pd.isna(p_entry) or p_entry <= 0:
-                                continue
-                                
-                            fund_prices = prices_df[prices_df['fund_id'] == f_id].sort_values('date')
-                            future_rows = fund_prices[fund_prices['date'] > sig_date]
-                            
-                            if len(future_rows) >= selected_period:
-                                p_exit = future_rows.iloc[selected_period - 1]['price']
-                                exit_date = future_rows.iloc[selected_period - 1]['date']
-                                ret = (p_exit - p_entry) / p_entry
-                                trade_results.append({
-                                    'fund_id': f_id,
-                                    'entry_date': sig_date,
-                                    'exit_date': exit_date,
-                                    'entry_price': p_entry,
-                                    'exit_price': p_exit,
-                                    'return': ret
-                                })
-                                
-                        if not trade_results:
-                            st.warning(f"Seçilen {selected_period} günlük periyot için yeterli ileri tarihli fiyat verisi eşleşmedi. Daha kısa bir periyot deneyin.")
+                        if metrics["analyzed_signals"] == 0:
+                            st.warning(f"Seçilen {b_period_label} için yeterli ileri tarihli fiyat eşleşmesi bulunamadı.")
                         else:
-                            res_df = pd.DataFrame(trade_results)
-                            avg_ret = res_df['return'].mean() * 100
-                            hit_ratio = (res_df['return'] > 0).mean() * 100
-                            
-                            ret_std = res_df['return'].std()
-                            if pd.isna(ret_std) or ret_std == 0:
-                                sharpe = 1.5
-                            else:
-                                annual_factor = np.sqrt(252 / selected_period)
-                                sharpe = float((res_df['return'].mean() / ret_std) * annual_factor)
-                                
-                            max_dd = float(res_df['return'].min() * 100) if not res_df['return'].empty else -5.0
-                            if max_dd > 0: max_dd = -max_dd
-                            
                             st.success(f"Backtest ({b_period_label}) başarıyla tamamlandı!")
-                            m1, m2, m3, m4 = st.columns(4)
-                            m1.metric("Strateji Getirisi", f"%{avg_ret:+.1f}", f"{len(res_df)} İşlem")
-                            m2.metric("İsabet Oranı", f"%{hit_ratio:.1f}")
-                            m3.metric("Sharpe Oranı", f"{sharpe:.2f}")
-                            m4.metric("Maksimum Düşüş", f"%{max_dd:.1f}")
                             
-                            st.subheader("Simülasyon İşlem Detayları")
-                            display_res = res_df.copy()
-                            display_res['return'] = (display_res['return'] * 100).round(2).astype(str) + '%'
-                            display_res.columns = ['Fon ID', 'Giriş Tarihi', 'Çıkış Tarihi', 'Giriş Fiyatı', 'Çıkış Fiyatı', 'Getiri']
-                            st.dataframe(display_res.head(50), use_container_width=True)
+                            m1, m2, m3, m4 = st.columns(4)
+                            m1.metric("Strateji Ortalama Getirisi", f"%{metrics['average_return']:+.2f}", f"{metrics['analyzed_signals']} İşlem")
+                            m2.metric("İsabet Oranı (Hit Ratio)", f"%{metrics['hit_ratio']:.1f}")
+                            m3.metric("Sharpe Oranı", f"{metrics['sharpe_ratio']:.2f}")
+                            m4.metric("Maksimum Düşüş", f"%{metrics['max_drawdown']:.2f}")
+                            
+                            st.markdown("---")
+                            st.subheader("📋 Simülasyon İşlem Detayları")
+                            trades_df = metrics["trades_df"]
+                            if not trades_df.empty:
+                                display_trades = trades_df.copy()
+                                display_trades['return'] = (display_trades['return'] * 100).round(2).astype(str) + '%'
+                                display_trades.columns = ['Fon ID', 'Giriş Tarihi', 'Çıkış Tarihi', 'Giriş Fiyatı', 'Çıkış Fiyatı', 'Getiri (%)']
+                                st.dataframe(display_trades.head(100), use_container_width=True)
+                    else:
+                        st.warning("Seçilen periyot için rapor oluşturulamadı.")
             except Exception as e:
-                st.error(f"Backtest hesaplanırken hata oluştu: {e}")
+                st.error(f"Backtest çalıştırılırken hata oluştu: {e}")

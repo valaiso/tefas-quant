@@ -115,9 +115,28 @@ def load_universe_data():
         
     merged['confidence_score'] = pd.to_numeric(merged.get('confidence_score', 0), errors='coerce').fillna(0)
     
-    if 'total_score' in merged.columns:
-        merged['total_score'] = pd.to_numeric(merged['total_score'], errors='coerce').fillna(0)
-        merged['ranking_score'] = (merged['total_score'] * 0.90) + (merged['confidence_score'] * 0.10)
+    if 'final_score' in merged.columns:
+        merged['final_score'] = pd.to_numeric(
+            merged['final_score'],
+            errors='coerce'
+        ).fillna(0)
+
+        merged['ranking_score'] = (
+            merged['final_score'] * 0.90
+            +
+            merged['confidence_score'] * 0.10
+        )
+    elif 'total_score' in merged.columns:
+        merged['total_score'] = pd.to_numeric(
+            merged['total_score'],
+            errors='coerce'
+        ).fillna(0)
+
+        merged['ranking_score'] = (
+            merged['total_score'] * 0.90
+            +
+            merged['confidence_score'] * 0.10
+        )
     else:
         merged['ranking_score'] = 0
         
@@ -186,7 +205,7 @@ elif menu == "⚡ Ana Dashboard":
     if not merged_df.empty:
         total_analyzed = len(merged_df)
         signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
-        guclu_al = signal_counts.get('Güçlü AL', 0)
+        guclu_al = signal_counts.get('GÜÇLÜ AL / ELİT', 0)
         al_izle = signal_counts.get('AL / İzle', 0)
         bekle = signal_counts.get('Bekle', 0)
         avg_score = merged_df['ranking_score'].mean()
@@ -194,7 +213,7 @@ elif menu == "⚡ Ana Dashboard":
 
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Toplam Fon", f"{total_analyzed}")
-        col2.metric("Güçlü AL", f"{guclu_al}")
+        col2.metric("Güçlü AL / ELİT", f"{guclu_al}")
         col3.metric("AL / İzle", f"{al_izle}")
         col4.metric("Bekle", f"{bekle}")
         col5.metric("Ort. Ranking", f"{avg_score:.1f}")
@@ -469,14 +488,14 @@ elif menu == "⚖️ Fon Karşılaştırma":
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Backtest Performans Simülasyonu")
     st.markdown("---")
-    st.markdown("Bu modül, veritabanındaki gerçek günlük fiyatlar ve **Güçlü AL / AL İzle** sinyalleri üzerinden zaman serisi simülasyonu çalıştırır.")
+    st.markdown("Bu modül, veritabanındaki gerçek günlük fiyatlar ve **GÜÇLÜ AL / ELİT ve AL / İzle** sinyalleri üzerinden zaman serisi simülasyonu çalıştırır.")
     
     col_b1, col_b2 = st.columns(2)
     b_period_label = col_b1.selectbox(
         "Simülasyon Süresi",
         ["1 Ay", "3 Ay", "6 Ay", "1 Yıl", "3 Yıl", "5 Yıl"]
     )
-    b_strat = col_b2.selectbox("Strateji Kuralı", ["Güçlü AL ve AL / İzle Sinyalleri"])
+    b_strat = col_b2.selectbox("Strateji Kuralı", ["GÜÇLÜ AL / ELİT ve AL / İzle Sinyalleri"])
     
     period_mapping = {
         "1 Ay": 21,

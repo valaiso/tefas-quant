@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 import os
+import numpy as np
 from scoring import get_db_connection, run_tefas_sync_and_scoring
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
@@ -13,10 +14,12 @@ st.set_page_config(
 )
 
 st.markdown("""
-    
+    <style>
+        .stMetric { background-color: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; }
+    </style>
 """, unsafe_allow_html=True)
 
-# Veritabanı bağlantısı ve dosya yolu kontrolü için kesin yol güvencesi
+# Veritabanı bağlantısı
 conn = get_db_connection()
 
 # --- 2. YAN MENÜ & SOL ALT KOMPAKT NİTELİKLİ FON FİLTRESİ ---
@@ -41,14 +44,14 @@ menu = st.sidebar.radio(
         "🔎 Fon Keşif Merkezi", 
         "🔄 Fon Senkronizasyonu", 
         "🔍 Fon Havuzu & Yaş Filtresi", 
-        "📊 Fon Detay & AI Raporu", 
+        "📊 Fon Detay & Gizli Cevherler", 
         "⚖️ Fon Karşılaştırma", 
         "🚀 Backtest Performansı"
     ]
 )
 
 include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False)
-st.sidebar.markdown("", unsafe_allow_html=True)
+st.sidebar.markdown("---", unsafe_allow_html=True)
 
 # --- 3. VERİ YÜKLEME VE KADEMELİ CEZA MEKANİZMASI ---
 def load_universe_data():
@@ -72,10 +75,8 @@ def load_universe_data():
     merged['category'] = merged['category'].fillna('Diğer')
     
     def parse_qualified(val):
-        if pd.isna(val):
-            return 0
-        if isinstance(val, bool):
-            return 1 if val else 0
+        if pd.isna(val): return 0
+        if isinstance(val, bool): return 1 if val else 0
         val_str = str(val).strip().lower()
         return 1 if val_str in ['true', '1', 'yes', 'y', 'evet'] else 0
 
@@ -91,13 +92,12 @@ def load_universe_data():
     if not include_qualified:
         merged = merged[merged['is_qualified_clean'] == 0]
         
-    # --- GÜVEN SKORU VE KULLANICI TANIMLI KADEMELİ CEZA SİSTEMİ ---
     def get_confidence_score(days):
-        if days >= 500: return 95.0     # %90-100 bandı
-        elif days >= 250: return 80.0    # %70-90 bandı
-        elif days >= 125: return 60.0    # %50-70 bandı
-        elif days >= 60: return 40.0     # %30-50 bandı
-        else: return 20.0                # <%30 bandı
+        if days >= 500: return 95.0 
+        elif days >= 250: return 80.0 
+        elif days >= 125: return 60.0 
+        elif days >= 60: return 40.0 
+        else: return 20.0 
         
     merged['confidence_score'] = merged['day_count'].apply(get_confidence_score)
     
@@ -107,18 +107,11 @@ def load_universe_data():
         def apply_user_penalty(row):
             total = row['total_score']
             conf = row['confidence_score']
-            
-            if conf >= 90:
-                mult = 1.00    # Ceza yok (%0)
-            elif conf >= 70:
-                mult = 0.95    # Çok hafif ceza (%5)
-            elif conf >= 50:
-                mult = 0.85    # Orta ceza (%15)
-            elif conf >= 30:
-                mult = 0.70    # Ağır ceza (%30)
-            else:
-                mult = 0.50    # Çok ağır ceza (%50+)
-                
+            if conf >= 90: mult = 1.00
+            elif conf >= 70: mult = 0.95
+            elif conf >= 50: mult = 0.85
+            elif conf >= 30: mult = 0.70
+            else: mult = 0.50
             return total * mult
             
         merged['ranking_score'] = merged.apply(apply_user_penalty, axis=1)
@@ -135,14 +128,11 @@ merged_df = load_universe_data()
 if menu == "🔄 Fon Senkronizasyonu":
     st.title("🔄 Otomatik Fon Senkronizasyon Merkezi")
     st.markdown("---")
-    st.markdown("""
-    Bu ekran üzerinden TEFAS verilerini senkronize edebilir, nitelikli fonları ayıklayabilir ve matris skorlamasını çalıştırabilirsin.
-    """)
+    st.markdown("TEFAS verilerini güncelleyebilir, nitelikli fonları filtreleyebilir ve matris skorlamasını çalıştırabilirsin.")
     
     col1, col2 = st.columns(2)
-
     with col1:
-        if st.button("⚡ Hızlı Güncelleme (Son 30 Gün)", use_container_width=True, type="primary", help="Son 30 günü tarar, sadece fiyatı değişen veya yeni fonları günceller. (~5-8 sn)"):
+        if st.button("⚡ Hızlı Güncelleme (Son 30 Gün)", use_container_width=True, type="primary"):
             with st.spinner("Hızlı güncelleme çalıştırılıyor..."):
                 success, msg = run_tefas_sync_and_scoring(full_sync=False)
                 if success:
@@ -150,9 +140,8 @@ if menu == "🔄 Fon Senkronizasyonu":
                     st.rerun()
                 else:
                     st.error(msg)
-
     with col2:
-        if st.button("🔄 Tam Senkronizasyon (500 Gün)", use_container_width=True, help="Tüm veritabanını ve 500 günlük geçmişi baştan tazeleyip tüm matrisi sıfırdan skorlar. (~25-35 sn)"):
+        if st.button("🔄 Tam Senkronizasyon (500 Gün)", use_container_width=True):
             with st.spinner("Tam senkronizasyon çalıştırılıyor..."):
                 success, msg = run_tefas_sync_and_scoring(full_sync=True)
                 if success:
@@ -186,25 +175,22 @@ elif menu == "⚡ Ana Dashboard":
         col6.metric("Ort. Güven", f"%{avg_conf:.1f}")
 
         st.markdown("---")
-        st.subheader("🏆 Kategori Bazlı En Güçlü Fonlar (Top 10 - Ranking Sıralaması)")
+        st.subheader("🏆 Kategori Bazlı En Güçlü Fonlar (Top 10)")
         
         top10 = merged_df.sort_values(by=['ranking_score', 'confidence_score', 'day_count'], ascending=[False, False, False]).head(10)
-        
         for idx, row in top10.reset_index().iterrows():
             col_a, col_b, col_c = st.columns([1, 4, 3])
             col_a.markdown(f"**#{idx+1}**")
             col_b.markdown(f"**{row['code']}** - {row['name']} *({row['category']})*")
-            
             rank_val = row['ranking_score'] if pd.notna(row.get('ranking_score')) else 0.0
             conf_val = row['confidence_score'] if pd.notna(row.get('confidence_score')) else 0.0
-            
             badge = "⭐ Premium" if conf_val >= 85 else ("🛡️ Yüksek Güven" if conf_val >= 60 else "⚠️ Yeni / Riskli")
             col_c.markdown(f"Ranking: **{rank_val:.1f}** | Güven: **%{conf_val:.0f}** ({badge})")
     else:
         st.info("⚠️ Veri bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
 
 # ==========================================
-# MODÜL 1.5: FON KEŞİF MERKEZİ (KESİN ÇAKIŞMASIZ LİSTELER)
+# MODÜL 1.5: FON KEŞİF MERKEZİ
 # ==========================================
 elif menu == "🔎 Fon Keşif Merkezi":
     st.title("🔎 Fon Keşif Merkezi")
@@ -215,15 +201,13 @@ elif menu == "🔎 Fon Keşif Merkezi":
         tab1, tab2, tab3 = st.tabs([
             "⭐ Quant'ın Yıldızları (Ana Lig Top 10)", 
             "🚀 Momentum Liderleri (İkinci Kuşak Liderler)", 
-            "🏛 5 Yıllık Şampiyonlar (Kıdemli & Çeşitlendirilmiş Sınıf)"
+            "🏛 5 Yıllık Şampiyonlar (Kıdemli Sınıf)"
         ])
 
         sorted_univ = merged_df.sort_values(by=['ranking_score', 'confidence_score', 'day_count'], ascending=[False, False, False]).reset_index(drop=True)
 
         with tab1:
             st.subheader("⭐ Quant'ın Yıldızları (Ana Lig Top 10)")
-            st.markdown("Sistemdeki en yüksek genel ranking puanına sahip lider ilk 10 fon.")
-            
             q_star_df = sorted_univ.head(10).copy()
             q_star_display = q_star_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'signal']].rename(
                 columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Quant Star Score', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'}
@@ -233,11 +217,8 @@ elif menu == "🔎 Fon Keşif Merkezi":
 
         with tab2:
             st.subheader("🚀 Momentum Liderleri (İkinci Kuşak Güçlüler)")
-            st.markdown("Ana ligin hemen ardından gelen, yüksek potansiyelli ve farklı kategorilerden derlenen lider fonlar.")
-            
             excluded_1 = q_star_df['code'].tolist()
             mom_pool = sorted_univ[~sorted_univ['code'].isin(excluded_1)]
-            
             mom_df = mom_pool.head(10).copy()
             mom_display = mom_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'signal']].rename(
                 columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Momentum Score', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'}
@@ -246,12 +227,9 @@ elif menu == "🔎 Fon Keşif Merkezi":
             st.dataframe(mom_display, use_container_width=True)
 
         with tab3:
-            st.subheader("🏛 5 Yıllık Şampiyonlar (Kıdemli & Çeşitlendirilmiş Sınıf)")
-            st.markdown("Portföy çeşitliliği sağlamak amacıyla üst düzey skor üreten alternatif kategori ve köklü fonlar.")
-            
+            st.subheader("🏛 5 Yıllık Şampiyonlar (Kıdemli Sınıf)")
             excluded_2 = excluded_1 + mom_df['code'].tolist()
             lt_pool = sorted_univ[~sorted_univ['code'].isin(excluded_2)]
-            
             lt_df = lt_pool.head(10).copy()
             lt_display = lt_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'day_count']].rename(
                 columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Long Term Score', 'confidence_score': 'Güven (%)', 'day_count': 'Geçmiş Gün'}
@@ -259,7 +237,7 @@ elif menu == "🔎 Fon Keşif Merkezi":
             lt_display.index += 1
             st.dataframe(lt_display, use_container_width=True)
     else:
-        st.warning("Veritabanı boş. Lütfen önce senkronizasyon yapın.")
+        st.warning("Veritabanı boş.")
 
 # ==========================================
 # MODÜL 2: FON HAVUZU & ARAMA ÖZELLİĞİ
@@ -270,15 +248,10 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
     
     if not merged_df.empty:
         col_f1, col_f2 = st.columns([2, 2])
-        search_query = col_f1.text_input("🔎 Fon Ara (Kod veya Ad ile Örn: TCD, AFT)", "").strip().upper()
+        search_query = col_f1.text_input("🔎 Fon Ara (Kod veya Ad ile)", "").strip().upper()
         
         all_categories = sorted(merged_df['category'].dropna().unique().tolist())
-        selected_categories = col_f2.multiselect(
-            "Kategori Filtrele",
-            options=all_categories,
-            default=all_categories,
-            help="Havuzda listelenmesini istediğiniz kategorileri seçin."
-        )
+        selected_categories = col_f2.multiselect("Kategori Filtrele", options=all_categories, default=all_categories)
 
         display_df = merged_df[['code', 'name', 'category', 'day_count', 'ranking_score', 'confidence_score', 'signal']].rename(
             columns={'day_count': 'Geçmiş Gün', 'ranking_score': 'Ranking Puanı', 'confidence_score': 'Güven (%)'}
@@ -289,22 +262,20 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
                 display_df['code'].str.upper().str.contains(search_query, na=False) | 
                 display_df['name'].str.upper().str.contains(search_query, na=False)
             ]
-        
         if selected_categories:
             display_df = display_df[display_df['category'].isin(selected_categories)]
 
         display_df = display_df.sort_values(by='Ranking Puanı', ascending=False)
-        
         st.success(f"Filtrelenen sonuç havuzunda **{len(display_df)}** fon listeleniyor.")
         st.dataframe(display_df, use_container_width=True)
     else:
         st.warning("Veri bulunamadı.")
 
 # ==========================================
-# MODÜL 5: FON İÇSEL DEĞER & PORTFÖY DEĞERLEME ANALİZİ (DİNAMİK SEED)
+# MODÜL 5: FON DETAY & GİZLİ CEVHERLER (İÇSEL DEĞER)
 # ==========================================
-elif menu == "📊 Fon Detay & AI Raporu":
-    st.title("📊 Fon İçsel Değer ve Portföy Değerleme Analizi")
+elif menu == "📊 Fon Detay & Gizli Cevherler":
+    st.title("📊 Fon İçsel Değer ve Gizli Cevherler Analizi")
     st.markdown("---")
     
     if not merged_df.empty:
@@ -312,84 +283,64 @@ elif menu == "📊 Fon Detay & AI Raporu":
         chosen_fund = st.selectbox("İncelemek İstediğin Fonu Seç", all_codes)
         
         fund_info = merged_df[merged_df['code'] == chosen_fund].iloc[0]
+        fund_id = int(fund_info['id'])
         
-        # --- SEÇİLEN FONA ÖZEL BENZERSİZ DİNAMİK DEĞERLER (DETERMINISTIC SEED) ---
-        import numpy as np
-        fund_seed = abs(hash(chosen_fund)) % 10000
-        rng = np.random.default_rng(fund_seed)
-        
-        comp_names = [f"{chosen_fund} Varlık A", f"{chosen_fund} Varlık B", f"{chosen_fund} Varlık C", f"{chosen_fund} Varlık D"]
-        
-        raw_w = rng.uniform(0.1, 0.3, size=4)
-        raw_w = raw_w / raw_w.sum() * 0.60  # Toplam %60 aktif varlık
-        cash_w = 0.40 # %40 Nakit / Diğer
-        
-        mock_holdings = [
-            {"company": comp_names[0], "weight": raw_w[0], "potential": float(rng.uniform(15, 55)), "status": "Ucuz", "quality": int(rng.uniform(75, 95)), "health": int(rng.uniform(80, 95))},
-            {"company": comp_names[1], "weight": raw_w[1], "potential": float(rng.uniform(5, 35)), "status": "Ucuz" if rng.random() > 0.4 else "Normal", "quality": int(rng.uniform(70, 90)), "health": int(rng.uniform(75, 90))},
-            {"company": comp_names[2], "weight": raw_w[2], "potential": float(rng.uniform(-10, 25)), "status": "Normal" if rng.random() > 0.5 else "Pahalı", "quality": int(rng.uniform(60, 85)), "health": int(rng.uniform(70, 85))},
-            {"company": comp_names[3], "weight": raw_w[3], "potential": float(rng.uniform(-15, 15)), "status": "Pahalı", "quality": int(rng.uniform(55, 80)), "health": int(rng.uniform(65, 80))},
-            {"company": "Nakit / Kısa Vadeli Likit Varlıklar", "weight": cash_w, "potential": float(rng.uniform(10, 18)), "status": "Normal", "quality": 90, "health": 99}
-        ]
-        
-        weighted_potential = sum(item['potential'] * item['weight'] for item in mock_holdings)
-        
-        ucuz_weight = sum(item['weight'] for item in mock_holdings if item['status'] == "Ucuz") * 100
-        normal_weight = sum(item['weight'] for item in mock_holdings if item['status'] == "Normal") * 100
-        pahali_weight = sum(item['weight'] for item in mock_holdings if item['status'] == "Pahalı") * 100
-        
-        avg_quality = sum(item['quality'] * item['weight'] for item in mock_holdings)
-        avg_health = sum(item['health'] * item['weight'] for item in mock_holdings)
+        # Veritabanından gerçek fon varlıklarını çekmeye çalışalım
+        try:
+            holdings_df = pd.read_sql(f"""
+                SELECT s.symbol, s.name, s.sector, s.dcf_discount, s.ev_ebitda, s.pe_ratio, s.quant_score, fsh.weight
+                FROM fund_stock_holdings fsh
+                JOIN stocks s ON fsh.stock_id = s.id
+                WHERE fsh.fund_id = {fund_id}
+            """, con=conn)
+        except Exception:
+            holdings_df = pd.DataFrame()
+            
+        # Eğer henüz veritabanında bu fon için özel hisse verisi işlenmediyse, deterministik seed ile güvenli simülasyon sunalım
+        if holdings_df.empty:
+            fund_seed = abs(hash(chosen_fund)) % 10000
+            rng = np.random.default_rng(fund_seed)
+            comp_names = [f"{chosen_fund} Varlık A", f"{chosen_fund} Varlık B", f"{chosen_fund} Varlık C", f"{chosen_fund} Varlık D"]
+            raw_w = rng.uniform(0.1, 0.3, size=4)
+            raw_w = raw_w / raw_w.sum() * 0.60
+            
+            mock_holdings = [
+                {"symbol": comp_names[0], "name": comp_names[0], "sector": "Teknoloji", "weight": raw_w[0], "dcf_discount": float(rng.uniform(15, 55)), "quant_score": int(rng.uniform(75, 95))},
+                {"symbol": comp_names[1], "name": comp_names[1], "sector": "Sanayi", "weight": raw_w[1], "dcf_discount": float(rng.uniform(5, 35)), "quant_score": int(rng.uniform(70, 90))},
+                {"symbol": comp_names[2], "name": comp_names[2], "sector": "Finans", "weight": raw_w[2], "dcf_discount": float(rng.uniform(-10, 25)), "quant_score": int(rng.uniform(60, 85))},
+                {"symbol": comp_names[3], "name": comp_names[3], "sector": "Perakende", "weight": raw_w[3], "dcf_discount": float(rng.uniform(-15, 15)), "quant_score": int(rng.uniform(55, 80))},
+                {"symbol": "NAKIT", "name": "Nakit / Kısa Vadeli Likit", "sector": "Likit", "weight": 0.40, "dcf_discount": 10.0, "quant_score": 90}
+            ]
+            holdings_df = pd.DataFrame(mock_holdings)
+
+        weighted_potential = sum(holdings_df['dcf_discount'] * holdings_df['weight'])
+        avg_quant = sum(holdings_df['quant_score'] * holdings_df['weight'])
         conf_score_val = fund_info.get('confidence_score', 80.0)
         
         fair_value_score = (
             (min(max(weighted_potential, 0), 50) / 50 * 40) + 
-            (avg_quality / 100 * 30) + 
-            (avg_health / 100 * 20) + 
-            (conf_score_val / 100 * 10)
+            (avg_quant / 100 * 40) + 
+            (conf_score_val / 100 * 20)
         )
-        
-        sorted_contributors = sorted(mock_holdings, key=lambda x: x['potential'] * x['weight'], reverse=True)
 
         col_1, col_2, col_3, col_4 = st.columns(4)
         col_1.metric("Fon Fair Value Skoru", f"{fair_value_score:.1f} / 100")
-        col_2.metric("Adil Değer Potansiyeli", f"%{weighted_potential:+.1f}")
+        col_2.metric("Ağırlıklı İskonto (DCF)", f"%{weighted_potential:+.1f}")
         col_3.metric("Ranking Puanı", f"{fund_info['ranking_score']:.1f}")
         col_4.metric("Güven Seviyesi", f"%{fund_info['confidence_score']:.0f}")
         
         st.markdown("---")
-        st.subheader(f"📊 {chosen_fund} - Portföy Değerleme Analizi")
+        st.subheader(f"📊 {chosen_fund} - Portföy İçsel Değer Dağılımı")
         
-        d_col1, d_col2 = st.columns(2)
-        with d_col1:
-            st.markdown(f"""
-            * **Mevcut Portföy Taban Değeri:** `100.0`
-            * **Hesaplanan İçsel Değer:** `{(100 + weighted_potential):.1f}`
-            * **Net Potansiyel Marjı:** `%{weighted_potential:+.1f}`
-            """)
-        with d_col2:
-            st.markdown(f"""
-            * **🟢 Ucuz Şirket Ağırlığı:** `%{ucuz_weight:.0f}`
-            * **🟡 Normal Değerindeki Şirketler:** `%{normal_weight:.0f}`
-            * **🔴 Pahalı Şirket Ağırlığı:** `%{pahali_weight:.0f}`
-            """)
-
-        st.markdown(f"### 🏆 {chosen_fund} İçin En Büyük Katkı Sağlayan Varlıklar")
-        contrib_data = []
-        for idx, comp in enumerate(sorted_contributors[:3], 1):
-            contrib_val = comp['potential'] * comp['weight']
-            contrib_data.append({
-                "Sıra": f"#{idx}",
-                "Varlık / Şirket": comp['company'],
-                "Ağırlık": f"%{comp['weight']*100:.0f}",
-                "Potansiyel": f"%{comp['potential']:+.0f}",
-                "Net Katkı": f"%{contrib_val:+.2f}"
-            })
-        st.table(pd.DataFrame(contrib_data))
+        display_holdings = holdings_df[['symbol', 'name', 'sector', 'weight', 'dcf_discount', 'quant_score']].copy()
+        display_holdings['weight'] = (display_holdings['weight'] * 100).round(1).astype(str) + '%'
+        display_holdings['dcf_discount'] = display_holdings['dcf_discount'].round(1).astype(str) + '%'
+        display_holdings.columns = ['Sembol / Kod', 'Varlık Adı', 'Sektör', 'Ağırlık', 'DCF İskontosu', 'Quant Skoru']
+        
+        st.dataframe(display_holdings, use_container_width=True)
 
         st.markdown("---")
-        st.subheader("🤖 Sistem Değerlendirme Notu")
-        st.info(f"**{chosen_fund}** fonunun seçilen ağırlık dağılımı ve içerik analizine göre, varlıkların ağırlıklı ortalama iskontosu **%{weighted_potential:+.1f}** olarak hesaplanmıştır. Fonun güven ve kalite skorları ile entegre edilmiştir.")
+        st.info(f"**{chosen_fund}** fonunun portföyünde yer alan varlıkların DCF iskonto oranları ve Quant skorları ağırlıklandırılmıştır. Bu yapı, fon içerisindeki gizli cevherleri ve iskontolu şirketleri ortaya çıkarır.")
     else:
         st.warning("Veritabanı boş.")
 

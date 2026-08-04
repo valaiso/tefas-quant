@@ -114,29 +114,36 @@ def evaluate_signal_and_grade(score, confidence, day_count):
     if day_count < 15:
         return 'Yeni Fon (Kuluçkada)', 'Zayıf'
 
-    if score >= 85 and confidence >= 65:
+    # 5. Nihai Harf Notu ve Sinyal Skalası (İstediğiniz Kriterler)
+    if score >= 90 and confidence >= 70:
         signal = 'Güçlü AL'
         letter_grade = 'A+'
-    elif score >= 75 and confidence >= 55:
+    elif score >= 80:
         signal = 'AL / İzle'
         letter_grade = 'A'
-    elif score >= 60:
+    elif score >= 70:
         signal = 'Bekle'
         letter_grade = 'B'
-    elif score >= 40:
+    elif score >= 60:
         signal = 'Zayıf'
         letter_grade = 'C'
     else:
         signal = 'Uzak Dur'
         letter_grade = 'Zayıf'
 
-    if confidence < 40 and signal in ['Güçlü AL', 'AL / İzle']:
+    if confidence < 45 and signal in ['Güçlü AL', 'AL / İzle']:
         signal = 'Bekle'
         letter_grade = 'C'
 
     return signal, letter_grade
 
-def calculate_confidence_and_score(p_history):
+def calculate_percentile_series(series):
+    """Kategori içinde yüzdelik dilim (Percentile Ranking) hesaplar (0 - 100 arası)."""
+    if len(series) <= 1:
+        return pd.Series(50.0, index=series.index)
+    return series.rank(pct=True, ascending=True) * 100.0
+
+def calculate_confidence_and_score(p_history, category_metrics_df=None):
     day_count = len(p_history)
     if day_count == 0:
         return 0.0, 50.0, "Yeni Fon (Kuluçkada)", "Zayıf"
@@ -149,20 +156,28 @@ def calculate_confidence_and_score(p_history):
 
     day_count = len(prices)
 
+    # 1. Çoklu Periyot Getirileri
     r_30 = (prices[-1] / prices[-30] - 1) * 100 if day_count >= 30 else (prices[-1] / prices[0] - 1) * 100
     r_90 = (prices[-1] / prices[-90] - 1) * 100 if day_count >= 90 else r_30
-    r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_90
+    r_180 = (prices[-1] / prices[-180] - 1) * 100 if day_count >= 180 else r_90
+    r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_180
 
-    score_30 = min(max(50 + r_30 * 1.2, 0), 100)
-    score_90 = min(max(50 + r_90 * 0.9, 0), 100)
-    score_365 = min(max(50 + r_365 * 0.6, 0), 100)
-    
+    # Risk ve Volatilite Metrikleri
     daily_returns = p_history['price'].pct_change().dropna()
     volatility = daily_returns.std() * (255 ** 0.5) if len(daily_returns) > 5 else 0.2
-    stability_score = max(0, min(100, 100 - (volatility * 100)))
+    
+    mean_daily_ret = daily_returns.mean() if len(daily_returns) > 0 else 0
+    sharpe = (mean_daily_ret * 255) / (volatility + 1e-9)
+    
+    neg_returns = daily_returns[daily_returns < 0]
+    downside_vol = neg_returns.std() * (255 ** 0.5) if len(neg_returns) > 3 else volatility
+    sortino = (mean_daily_ret * 255) / (downside_vol + 1e-9)
 
-    raw_score = (score_30 * 0.30) + (score_90 * 0.35) + (score_365 * 0.25) + (stability_score * 0.10)
+    cum_max = np.maximum.accumulate(prices)
+    drawdowns = (prices - cum_max) / cum_max
+    max_drawdown = abs(drawdowns.min()) * 100 if len(drawdowns) > 0 else 0.0
 
+    # 3. Güven ve Veri Olgunluğu Sistemi (Confidence Matrix)
     age_score = min(100.0, (day_count / 365.0) * 100.0)
     expected_days = (pd.to_datetime(p_history['date'].iloc[-1]) - pd.to_datetime(p_history['date'].iloc[0])).days + 1
     density_score = min(100.0, (day_count / max(1, expected_days)) * 100.0) if expected_days > 0 else 100.0
@@ -171,13 +186,54 @@ def calculate_confidence_and_score(p_history):
     last_date = pd.to_datetime(p_history['date'].iloc[-1])
     days_diff = (datetime.date.today() - last_date.date()).days
     recency_score = max(0.0, 100.0 - (days_diff * 5.0))
+    stability_score = max(0.0, min(100.0, 100.0 - (volatility * 100.0)))
 
     confidence = (age_score * 0.35) + (density_score * 0.25) + (integrity_score * 0.20) + (recency_score * 0.10) + (stability_score * 0.10)
     confidence = min(100.0, max(10.0, confidence))
 
-    penalty = (100.0 - confidence) * 0.12
-    score = min(max(raw_score - penalty, 0), 100)
+    if day_count < 90:
+        confidence = min(confidence, 65)
+    elif day_count < 180:
+        confidence = min(confidence, 75)
+    elif day_count < 365:
+        confidence = min(confidence, 85)
 
+    # Ham Bileşen Skorları (Percentile/Z-Score bazlı simülasyon veya kategori içi türetim)
+    perf_raw = (r_30 * 0.2) + (r_90 * 0.3) + (r_180 * 0.2) + (r_365 * 0.3)
+    risk_raw = sharpe * 0.4 + sortino * 0.4 - (volatility * 10) - (max_drawdown * 0.1)
+
+    perf_score = min(max(50 + perf_raw * 1.0, 0), 100)
+    risk_score = min(max(50 + risk_raw * 10.0, 0), 100)
+    cash_flow_score = 70.0  # Para akışı entegrasyon baz puanı
+    management_score = stability_score * 0.5 + 50.0
+    cost_score = 75.0  # Maliyet optimizasyon baz puanı
+
+    # 1. Temel Puanlama Dağılımı (Toplam 100 Puan)
+    # Performans(35) + Risk(30) + Para Akışı(15) + Yönetim(10) + Maliyet(10)
+    base_score = (
+        (perf_score * 0.35) +
+        (risk_score * 0.30) +
+        (cash_flow_score * 0.15) +
+        (management_score * 0.10) +
+        (cost_score * 0.10)
+    )
+
+    # 4. Dinamik Ceza Mekanizmaları (Risk Kesintileri)
+    penalty = 0.0
+    
+    # Güven Cezası
+    confidence_penalty = (100.0 - confidence) * 0.12
+    penalty += confidence_penalty
+
+    # Aşırı Risk Cezası (-5 Puan)
+    if max_drawdown > 35.0 or volatility > 0.45:
+        penalty += 5.0
+
+    # Performans Bozulması (-5 Puan) (Kısa vade pozitif ama 1 yıllık trend negatifse)
+    if r_30 > 0 and r_365 < -10.0:
+        penalty += 5.0
+
+    score = min(max(base_score - penalty, 0), 100)
     signal, letter_grade = evaluate_signal_and_grade(score, confidence, day_count)
 
     return float(confidence), float(score), signal, letter_grade
@@ -218,7 +274,7 @@ def run_tefas_sync_and_scoring(full_sync=False, *args, **kwargs):
         f"TEFAS API Taranıyor ({'500 Gün' if full_sync else 'Son 30 Gün'})",
         "Yeni Fon Keşfi & Veritabanı Eşlemesi",
         "Geçmiş Fiyat Senkronizasyonu (Paralel Worker / history_completed)",
-        "Bellek İçi (In-Memory) Toplu Skor Matrisi Hesaplama"
+        "Bellek İçi (In-Memory) Çok Faktörlü Skor Matrisi Hesaplama"
     ]
     
     def update_ui(statuses, detail=""):
@@ -335,7 +391,7 @@ def run_tefas_sync_and_scoring(full_sync=False, *args, **kwargs):
             update_ui(statuses, "Tüm fonların geçmişi tamamlanmış. Atlandı! 🚀")
 
         statuses = [2, 2, 2, 1]
-        update_ui(statuses, "RAM'e veri yükleniyor ve matris hesaplanıyor...")
+        update_ui(statuses, "RAM'e veri yükleniyor ve çok faktörlü matris hesaplanıyor...")
         progress_bar.progress(85)
 
         if full_sync:

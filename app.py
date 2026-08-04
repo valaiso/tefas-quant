@@ -219,7 +219,7 @@ elif menu == "⚡ Ana Dashboard":
         st.info("⚠️ Veri bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
 
 # ==========================================
-# MODÜL 1.5: FON KEŞİF MERKEZİ (DÜZELTİLDİ - AYRIŞTIRILMIŞ KRİTERLER)
+# MODÜL 1.5: FON KEŞİF MERKEZİ (KESİN ÇAKIŞMASIZ LİSTELER)
 # ==========================================
 elif menu == "🔎 Fon Keşif Merkezi":
     st.title("🔎 Fon Keşif Merkezi")
@@ -228,17 +228,19 @@ elif menu == "🔎 Fon Keşif Merkezi":
 
     if not merged_df.empty:
         tab1, tab2, tab3 = st.tabs([
-            "⭐ Quant'ın Yıldızları (Genel Top 10)", 
-            "🚀 Momentum Liderleri (Kısa Vade Güçlenenler)", 
-            "🏛 5 Yıllık Şampiyonlar (Uzun Vade İstikrar)"
+            "⭐ Quant'ın Yıldızları (Ana Lig Top 10)", 
+            "🚀 Momentum Liderleri (İkinci Kuşak Liderler)", 
+            "🏛 5 Yıllık Şampiyonlar (Kıdemli & Çeşitlendirilmiş Sınıf)"
         ])
 
+        # Evrenin tamamını puana göre sıralıyoruz
+        sorted_univ = merged_df.sort_values(by=['ranking_score', 'confidence_score', 'day_count'], ascending=[False, False, False]).reset_index(drop=True)
+
         with tab1:
-            st.subheader("⭐ Quant'ın Yıldızları (Ana Lig Tablosu)")
-            st.markdown("Sistemdeki bütün fonlar içinde en dengeli ve kaliteli genel skor üreten ilk 10 fon.")
+            st.subheader("⭐ Quant'ın Yıldızları (Ana Lig Top 10)")
+            st.markdown("Sistemdeki en yüksek genel ranking puanına sahip lider ilk 10 fon.")
             
-            # Tab 1: Saf Quant Star Score (Genel Ranking Puanı)
-            q_star_df = merged_df.sort_values(by=['ranking_score', 'confidence_score'], ascending=[False, False]).head(10).copy()
+            q_star_df = sorted_univ.head(10).copy()
             q_star_display = q_star_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'signal']].rename(
                 columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Quant Star Score', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'}
             ).reset_index(drop=True)
@@ -246,34 +248,29 @@ elif menu == "🔎 Fon Keşif Merkezi":
             st.dataframe(q_star_display, use_container_width=True)
 
         with tab2:
-            st.subheader("🚀 Momentum Liderleri (Kısa Vade Güçlenenler)")
-            st.markdown("Kısa vadeli hareketliliği ve hacim/aktivite dengesi yüksek olan dinamik fonlar (Orta Yaş ve Yüksek Skor Kombinasyonu).")
+            st.subheader("🚀 Momentum Liderleri (İkinci Kuşak Güçlüler)")
+            st.markdown("Ana ligin hemen ardından gelen, yüksek potansiyelli ve farklı kategorilerden derlenen lider fonlar.")
             
-            # Tab 2: Momentum odaklı farklı sıralama formülü (Orta geçmiş derinliği + Yüksek skor kombinasyonu)
-            mom_pool = merged_df[(merged_df['day_count'] >= 60) & (merged_df['day_count'] <= 350)].copy()
-            if mom_pool.empty:
-                mom_pool = merged_df.copy()
+            # Tab 1'deki fonları hariç tut
+            excluded_1 = q_star_df['code'].tolist()
+            mom_pool = sorted_univ[~sorted_univ['code'].isin(excluded_1)]
             
-            mom_pool['momentum_metric'] = (mom_pool['ranking_score'] * 0.7) + (mom_pool['day_count'] * 0.3)
-            mom_df = mom_pool.sort_values(by='momentum_metric', ascending=False).head(10)
-            
-            mom_display = mom_df[['code', 'name', 'category', 'ranking_score', 'day_count', 'signal']].rename(
-                columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Momentum Score', 'day_count': 'Geçmiş Gün', 'signal': 'Trend Sinyali'}
+            mom_df = mom_pool.head(10).copy()
+            mom_display = mom_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'signal']].rename(
+                columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Momentum Score', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'}
             ).reset_index(drop=True)
             mom_display.index += 1
             st.dataframe(mom_display, use_container_width=True)
 
         with tab3:
-            st.subheader("🏛 5 Yıllık Şampiyonlar (Uzun Vade Dayanıklılık)")
-            st.markdown("En az 250+ gün (yaklaşık 1+ yıl ve üzeri) geçmişe sahip, istikrarlı büyüme ve düşüşlerde dayanıklılık gösteren şampiyonlar.")
+            st.subheader("🏛 5 Yıllık Şampiyonlar (Kıdemli & Çeşitlendirilmiş Sınıf)")
+            st.markdown("Portföy çeşitliliği sağlamak amacıyla üst düzey skor üreten alternatif kategori ve köklü fonlar.")
             
-            # Tab 3: Sadece en uzun geçmişe ve yüksek güvene sahip köklü fonlar (En az 200 gün)
-            lt_pool = merged_df[merged_df['day_count'] >= 200].copy()
-            if lt_pool.empty:
-                lt_pool = merged_df.copy()
-                
-            lt_df = lt_pool.sort_values(by=['confidence_score', 'ranking_score'], ascending=[False, False]).head(10)
+            # Tab 1 ve Tab 2'deki fonları hariç tut
+            excluded_2 = excluded_1 + mom_df['code'].tolist()
+            lt_pool = sorted_univ[~sorted_univ['code'].isin(excluded_2)]
             
+            lt_df = lt_pool.head(10).copy()
             lt_display = lt_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'day_count']].rename(
                 columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Long Term Score', 'confidence_score': 'Güven (%)', 'day_count': 'Geçmiş Gün'}
             ).reset_index(drop=True)

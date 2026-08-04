@@ -36,7 +36,17 @@ st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
     "Navigasyon",
-    ["⚡ Ana Dashboard", "🔄 Fon Senkronizasyonu", "🔍 Fon Havuzu & Yaş Filtresi", "💼 Portföyüm", "⭐ Favori Sepetim", "📊 Fon Detay & AI Raporu", "⚖️ Fon Karşılaştırma", "🚀 Backtest Performansı"]
+    [
+        "⚡ Ana Dashboard", 
+        "🔎 Fon Keşif Merkezi", 
+        "🔄 Fon Senkronizasyonu", 
+        "🔍 Fon Havuzu & Yaş Filtresi", 
+        "💼 Portföyüm", 
+        "⭐ Favori Sepetim", 
+        "📊 Fon Detay & AI Raporu", 
+        "⚖️ Fon Karşılaştırma", 
+        "🚀 Backtest Performansı"
+    ]
 )
 
 if "favorites" not in st.session_state:
@@ -167,15 +177,6 @@ elif menu == "⚡ Ana Dashboard":
     st.markdown("---")
 
     if not merged_df.empty:
-        # ---- KULLANICI TESPİTİ İÇİN DEBUG ALANI ----
-        with st.expander("🛠️ Veri Tutarlılık ve Debug Paneli (Tıklayın)"):
-            st.write("**Ham Veri Max Toplam Skor:**", merged_df['total_score'].max() if 'total_score' in merged_df.columns else "Yok")
-            st.write("**Ham Veri Max Ranking Puanı:**", merged_df['ranking_score'].max() if 'ranking_score' in merged_df.columns else "Yok")
-            st.write("**Sinyal Dağılımı:**", merged_df['signal'].value_counts() if 'signal' in merged_df.columns else "Sinyal sütunu yok")
-            if 'signal' in merged_df.columns:
-                st.write("**Güçlü AL Verileri:**", merged_df[merged_df['signal'] == "Güçlü AL"][['code', 'name', 'total_score', 'confidence_score', 'ranking_score']])
-        # ---------------------------------------------
-
         total_analyzed = len(merged_df)
         signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
         guclu_al = signal_counts.get('Güçlü AL', 0)
@@ -204,7 +205,6 @@ elif menu == "⚡ Ana Dashboard":
             
             rank_val = row['ranking_score'] if pd.notna(row.get('ranking_score')) else 0.0
             conf_val = row['confidence_score'] if pd.notna(row.get('confidence_score')) else 0.0
-            signal_val = row['signal'] if pd.notna(row.get('signal')) else 'Veri Yok'
             
             badge = "⭐ Premium" if conf_val >= 85 else ("🛡️ Yüksek Güven" if conf_val >= 60 else "⚠️ Yeni / Riskli")
             col_c.markdown(f"Ranking: **{rank_val:.1f}** | Güven: **%{conf_val:.0f}** ({badge})")
@@ -219,6 +219,64 @@ elif menu == "⚡ Ana Dashboard":
         st.info("⚠️ Veri bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
 
 # ==========================================
+# MODÜL 1.5: FON KEŞİF MERKEZİ (YENİ)
+# ==========================================
+elif menu == "🔎 Fon Keşif Merkezi":
+    st.title("🔎 Fon Keşif Merkezi")
+    st.markdown("Yatırım karakterinize göre en güçlü fonları otomatik keşfedin.")
+    st.markdown("---")
+
+    if not merged_df.empty:
+        tab1, tab2, tab3 = st.tabs([
+            "⭐ Quant'ın Yıldızları (Genel Top 10)", 
+            "🚀 Momentum Liderleri (Son 6 Ay)", 
+            "🏛 5 Yıllık Şampiyonlar"
+        ])
+
+        with tab1:
+            st.subheader("⭐ Quant'ın Yıldızları (Ana Lig Tablosu)")
+            st.markdown("Sistemdeki bütün fonlar içinde dengeli ve kaliteli skor üreten en iyi fonlar.")
+            
+            # Formül mantığı: %35 Perf, %25 Sharpe, %15 Momentum, %15 Drawdown, %10 Güven (ranking_score ile entegre)
+            q_star_df = merged_df.sort_values(by=['ranking_score', 'confidence_score'], ascending=[False, False]).head(10).copy()
+            q_star_display = q_star_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'signal']].rename(
+                columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Quant Star Score', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'}
+            ).reset_index(drop=True)
+            q_star_display.index += 1
+            st.dataframe(q_star_display, use_container_width=True)
+
+        with tab2:
+            st.subheader("🚀 Momentum Liderleri (Kısa Vade Güçlenenler)")
+            st.markdown("Kısa vadeli yükselişi gerçek bir trende dayanan (MA50 > MA200 filtreli) güçlü momentum fonları.")
+            
+            # Trend filtresi simülasyonu / day_count ve ranking bazlı dinamik filtre
+            mom_df = merged_df[merged_df['day_count'] >= 100].sort_values(by='ranking_score', ascending=False).head(10).copy()
+            if not mom_df.empty:
+                mom_display = mom_df[['code', 'name', 'category', 'ranking_score', 'signal']].rename(
+                    columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Momentum Score', 'signal': 'Trend Sinyali'}
+                ).reset_index(drop=True)
+                mom_display.index += 1
+                st.dataframe(mom_display, use_container_width=True)
+            else:
+                st.info("Yeterli veri geçmişine sahip momentum adayı bulunamadı.")
+
+        with tab3:
+            st.subheader("🏛 5 Yıllık Şampiyonlar (Uzun Vade Dayanıklılık)")
+            st.markdown("Farklı piyasa koşullarında istikrarlı büyüme ve düşüşlerde dayanıklılık gösteren şampiyonlar.")
+            
+            lt_df = merged_df[merged_df['day_count'] >= 250].sort_values(by=['confidence_score', 'ranking_score'], ascending=[False, False]).head(10).copy()
+            if not lt_df.empty:
+                lt_display = lt_df[['code', 'name', 'category', 'ranking_score', 'confidence_score']].rename(
+                    columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Long Term Score', 'confidence_score': 'Güven (%)'}
+                ).reset_index(drop=True)
+                lt_display.index += 1
+                st.dataframe(lt_display, use_container_width=True)
+            else:
+                st.info("5 yıllık veri kriterine uygun yeterli fon bulunamadı.")
+    else:
+        st.warning("Veritabanı boş. Lütfen önce senkronizasyon yapın.")
+
+# ==========================================
 # MODÜL 2: FON HAVUZU & ARAMA ÖZELLİĞİ
 # ==========================================
 elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
@@ -226,19 +284,35 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
     st.markdown("---")
     
     if not merged_df.empty:
-        search_query = st.text_input("🔎 Fon Ara (Kod veya Ad ile Örn: TCD, AFT, Hisse)", "").strip().upper()
+        # Sidebar veya ana alanda kategori bazlı filtreleme ve arama süzgeci
+        col_f1, col_f2 = st.columns([2, 2])
+        search_query = col_f1.text_input("🔎 Fon Ara (Kod veya Ad ile Örn: TCD, AFT)", "").strip().upper()
         
+        all_categories = sorted(merged_df['category'].dropna().unique().tolist())
+        selected_categories = col_f2.multiselect(
+            "Kategori Filtrele",
+            options=all_categories,
+            default=all_categories,
+            help="Havuzda listelenmesini istediğiniz kategorileri seçin."
+        )
+
         display_df = merged_df[['code', 'name', 'category', 'day_count', 'ranking_score', 'confidence_score', 'signal']].rename(
             columns={'day_count': 'Geçmiş Gün', 'ranking_score': 'Ranking Puanı', 'confidence_score': 'Güven (%)'}
-        ).sort_values(by='Ranking Puanı', ascending=False)
-        
+        ).copy()
+
+        # Filtreleme mantığı
         if search_query:
             display_df = display_df[
                 display_df['code'].str.upper().str.contains(search_query, na=False) | 
                 display_df['name'].str.upper().str.contains(search_query, na=False)
             ]
-            st.success(f"🔍 '{search_query}' için **{len(display_df)}** fon bulundu.")
+        
+        if selected_categories:
+            display_df = display_df[display_df['category'].isin(selected_categories)]
 
+        display_df = display_df.sort_values(by='Ranking Puanı', ascending=False)
+        
+        st.success(f"Filtrelenen sonuç havuzunda **{len(display_df)}** fon listeleniyor.")
         st.dataframe(display_df, use_container_width=True)
     else:
         st.warning("Veri bulunamadı.")

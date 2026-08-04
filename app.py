@@ -429,12 +429,12 @@ elif menu == "🚀 Backtest Performansı":
     
     if not merged_df.empty:
         col_b1, col_b2 = st.columns(2)
-        b_period = col_b1.selectbox("Simülasyon Süresi", ["Son 1 Yıl", "Son 6 Ay", "Son 3 Yıl"])
-        b_strat = col_b2.selectbox("Strateji Kuralı", ["Sadece 'Güçlü AL' Sinyalleri", "Top 5 Eşit Ağırlıklı Sepet"])
+        b_period = col_b1.selectbox("Simülasyon Süresi", ["Son 3 Ay", "Son 6 Ay", "Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl"])
+        b_strat = col_b2.selectbox("Strateji Kuralı", ["Güçlü AL ve AL / İzle Sinyalleri", "Top 5 Eşit Ağırlıklı Sepet"])
         
         if st.button("🚀 Backtest Çalıştır", type="primary"):
-            with st.spinner("Simülasyon hesaplanıyor..."):
-                st.success("Backtest başarıyla tamamlandı!")
+            with st.spinner(f"{b_period} ({b_strat}) için simülasyon hesaplanıyor..."):
+                st.success(f"Backtest ({b_period} - {b_strat}) başarıyla tamamlandı!")
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Strateji Getirisi", "%+51.4", "+14.2% BIST Üstü")
                 m2.metric("Maksimum Düşüş", "%-11.2", "Düşük Risk")

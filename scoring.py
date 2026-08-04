@@ -88,24 +88,27 @@ def evaluate_signal_and_grade(score, confidence, day_count):
     if day_count < 15:
         return 'Yeni Fon (Kuluçkada)', 'Zayıf'
 
-    if score >= 90: signal = 'Güçlü AL'
-    elif score >= 75: signal = 'AL / İzle'
-    elif score >= 60: signal = 'Bekle'
-    elif score >= 40: signal = 'Zayıf'
-    else: signal = 'Uzak Dur'
-
-    if score >= 90: letter_grade = 'A+'
-    elif score >= 80: letter_grade = 'A'
-    elif score >= 70: letter_grade = 'B'
-    elif score >= 60: letter_grade = 'C'
-    else: letter_grade = 'Zayıf'
-
-    if confidence < 25:
+    # İkili Doğrulama (Score + Confidence) ve Kademeli Sinyal Matrisi
+    if score >= 85 and confidence >= 65:
+        signal = 'Güçlü AL'
+        letter_grade = 'A+'
+    elif score >= 75 and confidence >= 55:
+        signal = 'AL / İzle'
+        letter_grade = 'A'
+    elif score >= 60:
+        signal = 'Bekle'
+        letter_grade = 'B'
+    elif score >= 40:
+        signal = 'Zayıf'
+        letter_grade = 'C'
+    else:
         signal = 'Uzak Dur'
         letter_grade = 'Zayıf'
-    elif confidence < 50:
-        if signal in ['Güçlü AL', 'AL / İzle']:
-            signal = 'Bekle'
+
+    # Veri güvenilirliği kritik eşiğin altındaysa üst sinyaller otomatik olarak törpülenir
+    if confidence < 40 and signal in ['Güçlü AL', 'AL / İzle']:
+        signal = 'Bekle'
+        letter_grade = 'C'
 
     return signal, letter_grade
 
@@ -120,14 +123,15 @@ def calculate_confidence_and_score(p_history):
     r_90 = (prices[-1] / prices[-90] - 1) * 100 if day_count >= 90 else r_30
     r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_90
 
-    score_30 = min(max(50 + r_30 * 1.5, 0), 100)
-    score_90 = min(max(50 + r_90 * 1.0, 0), 100)
-    score_365 = min(max(50 + r_365 * 0.5, 0), 100)
+    score_30 = min(max(50 + r_30 * 1.2, 0), 100)
+    score_90 = min(max(50 + r_90 * 0.9, 0), 100)
+    score_365 = min(max(50 + r_365 * 0.6, 0), 100)
     
     daily_returns = p_history['price'].pct_change().dropna()
     volatility = daily_returns.std() * (255 ** 0.5) if len(daily_returns) > 5 else 0.2
     stability_score = max(0, min(100, 100 - (volatility * 100)))
 
+    # Ham Finansal Kalite Skoru (Score)
     raw_score = (score_30 * 0.25) + (score_90 * 0.30) + (score_365 * 0.25) + (stability_score * 0.20)
 
     age_score = min(100.0, (day_count / 365.0) * 100.0)
@@ -139,25 +143,13 @@ def calculate_confidence_and_score(p_history):
     days_diff = (datetime.date.today() - last_date.date()).days
     recency_score = max(0.0, 100.0 - (days_diff * 5.0))
 
-    # Piyasa belirsizliği ve veri gürültüsü nedeniyle güven asla %100 olamaz (Tavan: %95)
-    raw_conf = (age_score * 0.35) + (density_score * 0.25) + (integrity_score * 0.20) + (recency_score * 0.10) + (stability_score * 0.10)
-    confidence = min(95.0, max(10.0, raw_conf * 0.95))
+    # Veri Güvenilirliği (Confidence) Metrikleri
+    confidence = (age_score * 0.35) + (density_score * 0.25) + (integrity_score * 0.20) + (recency_score * 0.10) + (stability_score * 0.10)
+    confidence = min(100.0, max(10.0, confidence))
 
-    def get_penalty(conf):
-        if conf >= 95: return 0
-        elif conf >= 90: return -1
-        elif conf >= 80: return -2
-        elif conf >= 70: return -3
-        elif conf >= 60: return -5
-        elif conf >= 50: return -7
-        elif conf >= 40: return -10
-        elif conf >= 30: return -13
-        elif conf >= 20: return -17
-        elif conf >= 10: return -22
-        else: return -30
-
-    penalty = get_penalty(confidence)
-    score = min(max(raw_score + penalty, 0), 100)
+    # Sert basamaklı cezalar yerine orantılı ve kademeli düzeltme mekanizması
+    penalty = (100.0 - confidence) * 0.12
+    score = min(max(raw_score - penalty, 0), 100)
 
     signal, letter_grade = evaluate_signal_and_grade(score, confidence, day_count)
 

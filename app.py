@@ -219,7 +219,7 @@ elif menu == "⚡ Ana Dashboard":
         st.info("⚠️ Veri bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
 
 # ==========================================
-# MODÜL 1.5: FON KEŞİF MERKEZİ (YENİ)
+# MODÜL 1.5: FON KEŞİF MERKEZİ (DÜZELTİLDİ - AYRIŞTIRILMIŞ KRİTERLER)
 # ==========================================
 elif menu == "🔎 Fon Keşif Merkezi":
     st.title("🔎 Fon Keşif Merkezi")
@@ -229,15 +229,15 @@ elif menu == "🔎 Fon Keşif Merkezi":
     if not merged_df.empty:
         tab1, tab2, tab3 = st.tabs([
             "⭐ Quant'ın Yıldızları (Genel Top 10)", 
-            "🚀 Momentum Liderleri (Son 6 Ay)", 
-            "🏛 5 Yıllık Şampiyonlar"
+            "🚀 Momentum Liderleri (Kısa Vade Güçlenenler)", 
+            "🏛 5 Yıllık Şampiyonlar (Uzun Vade İstikrar)"
         ])
 
         with tab1:
             st.subheader("⭐ Quant'ın Yıldızları (Ana Lig Tablosu)")
-            st.markdown("Sistemdeki bütün fonlar içinde dengeli ve kaliteli skor üreten en iyi fonlar.")
+            st.markdown("Sistemdeki bütün fonlar içinde en dengeli ve kaliteli genel skor üreten ilk 10 fon.")
             
-            # Formül mantığı: %35 Perf, %25 Sharpe, %15 Momentum, %15 Drawdown, %10 Güven (ranking_score ile entegre)
+            # Tab 1: Saf Quant Star Score (Genel Ranking Puanı)
             q_star_df = merged_df.sort_values(by=['ranking_score', 'confidence_score'], ascending=[False, False]).head(10).copy()
             q_star_display = q_star_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'signal']].rename(
                 columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Quant Star Score', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'}
@@ -247,32 +247,38 @@ elif menu == "🔎 Fon Keşif Merkezi":
 
         with tab2:
             st.subheader("🚀 Momentum Liderleri (Kısa Vade Güçlenenler)")
-            st.markdown("Kısa vadeli yükselişi gerçek bir trende dayanan (MA50 > MA200 filtreli) güçlü momentum fonları.")
+            st.markdown("Kısa vadeli hareketliliği ve hacim/aktivite dengesi yüksek olan dinamik fonlar (Orta Yaş ve Yüksek Skor Kombinasyonu).")
             
-            # Trend filtresi simülasyonu / day_count ve ranking bazlı dinamik filtre
-            mom_df = merged_df[merged_df['day_count'] >= 100].sort_values(by='ranking_score', ascending=False).head(10).copy()
-            if not mom_df.empty:
-                mom_display = mom_df[['code', 'name', 'category', 'ranking_score', 'signal']].rename(
-                    columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Momentum Score', 'signal': 'Trend Sinyali'}
-                ).reset_index(drop=True)
-                mom_display.index += 1
-                st.dataframe(mom_display, use_container_width=True)
-            else:
-                st.info("Yeterli veri geçmişine sahip momentum adayı bulunamadı.")
+            # Tab 2: Momentum odaklı farklı sıralama formülü (Orta geçmiş derinliği + Yüksek skor kombinasyonu)
+            mom_pool = merged_df[(merged_df['day_count'] >= 60) & (merged_df['day_count'] <= 350)].copy()
+            if mom_pool.empty:
+                mom_pool = merged_df.copy()
+            
+            mom_pool['momentum_metric'] = (mom_pool['ranking_score'] * 0.7) + (mom_pool['day_count'] * 0.3)
+            mom_df = mom_pool.sort_values(by='momentum_metric', ascending=False).head(10)
+            
+            mom_display = mom_df[['code', 'name', 'category', 'ranking_score', 'day_count', 'signal']].rename(
+                columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Momentum Score', 'day_count': 'Geçmiş Gün', 'signal': 'Trend Sinyali'}
+            ).reset_index(drop=True)
+            mom_display.index += 1
+            st.dataframe(mom_display, use_container_width=True)
 
         with tab3:
             st.subheader("🏛 5 Yıllık Şampiyonlar (Uzun Vade Dayanıklılık)")
-            st.markdown("Farklı piyasa koşullarında istikrarlı büyüme ve düşüşlerde dayanıklılık gösteren şampiyonlar.")
+            st.markdown("En az 250+ gün (yaklaşık 1+ yıl ve üzeri) geçmişe sahip, istikrarlı büyüme ve düşüşlerde dayanıklılık gösteren şampiyonlar.")
             
-            lt_df = merged_df[merged_df['day_count'] >= 250].sort_values(by=['confidence_score', 'ranking_score'], ascending=[False, False]).head(10).copy()
-            if not lt_df.empty:
-                lt_display = lt_df[['code', 'name', 'category', 'ranking_score', 'confidence_score']].rename(
-                    columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Long Term Score', 'confidence_score': 'Güven (%)'}
-                ).reset_index(drop=True)
-                lt_display.index += 1
-                st.dataframe(lt_display, use_container_width=True)
-            else:
-                st.info("5 yıllık veri kriterine uygun yeterli fon bulunamadı.")
+            # Tab 3: Sadece en uzun geçmişe ve yüksek güvene sahip köklü fonlar (En az 200 gün)
+            lt_pool = merged_df[merged_df['day_count'] >= 200].copy()
+            if lt_pool.empty:
+                lt_pool = merged_df.copy()
+                
+            lt_df = lt_pool.sort_values(by=['confidence_score', 'ranking_score'], ascending=[False, False]).head(10)
+            
+            lt_display = lt_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'day_count']].rename(
+                columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Long Term Score', 'confidence_score': 'Güven (%)', 'day_count': 'Geçmiş Gün'}
+            ).reset_index(drop=True)
+            lt_display.index += 1
+            st.dataframe(lt_display, use_container_width=True)
     else:
         st.warning("Veritabanı boş. Lütfen önce senkronizasyon yapın.")
 
@@ -284,7 +290,6 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
     st.markdown("---")
     
     if not merged_df.empty:
-        # Sidebar veya ana alanda kategori bazlı filtreleme ve arama süzgeci
         col_f1, col_f2 = st.columns([2, 2])
         search_query = col_f1.text_input("🔎 Fon Ara (Kod veya Ad ile Örn: TCD, AFT)", "").strip().upper()
         
@@ -300,7 +305,6 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
             columns={'day_count': 'Geçmiş Gün', 'ranking_score': 'Ranking Puanı', 'confidence_score': 'Güven (%)'}
         ).copy()
 
-        # Filtreleme mantığı
         if search_query:
             display_df = display_df[
                 display_df['code'].str.upper().str.contains(search_query, na=False) | 

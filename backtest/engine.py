@@ -25,7 +25,7 @@ class VectorizedBacktestEngine:
         for period in self.holding_periods:
             bt_df[f'return_{period}d'] = (bt_df[f'exit_price_{period}d'] - bt_df['entry_price']) / bt_df['entry_price']
             bt_df[f'is_hit_{period}d'] = np.where(
-                (bt_df['signal'] == 'BUY') & (bt_df[f'return_{period}d'] > 0), 1, 0
+                (bt_df['signal'].isin(['Güçlü AL', 'AL / İzle'])) & (bt_df[f'return_{period}d'] > 0), 1, 0
             )
 
             if benchmark_df is not None:

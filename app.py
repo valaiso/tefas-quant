@@ -5,6 +5,7 @@ import os
 import numpy as np
 import hashlib
 from scoring import get_db_connection, run_tefas_sync_and_scoring
+from backtest.engine import VectorizedBacktestEngine
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
 st.set_page_config(
@@ -138,7 +139,6 @@ if menu == "🔄 Fon Senkronizasyonu":
                 else:
                     st.error(msg)
     with col2:
-        # API limitlerine takılmamak adına 2-yıl ve 200 fon kısıtlaması fonksiyona parametre olarak iletiliyor
         if st.button("🔄 Tam Senkronizasyon (2 Yıl / 200 Fon Limitli)", use_container_width=True):
             with st.spinner("Tam senkronizasyon çalıştırılıyor..."):
                 success, msg = run_tefas_sync_and_scoring(full_sync=True, history_years=2, fund_limit=200)
@@ -283,7 +283,6 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
         fund_info = merged_df[merged_df['code'] == chosen_fund].iloc[0]
         fund_id = int(fund_info['fund_id'])
         
-        # Veritabanından gerçek fon varlıklarını çekmeye çalışalım
         try:
             holdings_df = pd.read_sql(f"""
                 SELECT s.symbol, s.name, s.sector, s.dcf_discount, s.ev_ebitda, s.pe_ratio, s.quant_score, fsh.weight
@@ -294,9 +293,7 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
         except Exception:
             holdings_df = pd.DataFrame()
             
-        # Eğer henüz veritabanında bu fon için özel hisse verisi işlenmediyse, deterministik seed ile güvenli simülasyon sunalım
         if holdings_df.empty:
-            # Streamlit sayfa yenilemelerinde sabit kalması için string üzerinden md5 hash kullanıyoruz
             seed_str = hashlib.md5(chosen_fund.encode()).hexdigest()
             fund_seed = int(seed_str, 16) % 10000
             
@@ -371,50 +368,53 @@ elif menu == "⚖️ Fon Karşılaştırma":
         st.warning("Yeterli veri bulunmuyor.")
 
 # ==========================================
-# MODÜL 7: BACKTEST PERFORMANSI (REAKTİF GÜNCELLEME)
+# MODÜL 7: BACKTEST PERFORMANSI (GERÇEK MOTOR ENTEGRASYONU)
 # ==========================================
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Backtest Performans Simülasyonu")
     st.markdown("---")
     
-    st.markdown("Bu modül, kademeli ceza mekanizmalı ranking matrisinin seçilen periyot ve strateji kuralına göre geçmiş dönem simülasyon sonuçlarını sunar.")
+    st.markdown("Bu modül, veritabanındaki gerçek günlük fiyatlar ve güncel sinyaller üzerinden vektörel backtest simülasyonu çalıştırır.")
     
-    if not merged_df.empty:
-        col_b1, col_b2 = st.columns(2)
-        b_period = col_b1.selectbox("Simülasyon Süresi", ["Son 3 Ay", "Son 6 Ay", "Son 1 Yıl", "Son 2 Yıl"])
-        b_strat = col_b2.selectbox("Strateji Kuralı", ["Güçlü AL ve AL / İzle Sinyalleri", "Top 5 Eşit Ağırlıklı Sepet"])
-        
-        # Buton kaldırıldı, seçim yapıldığı an anlık olarak hesaplanır
-        st.success(f"Simülasyon ({b_period} - {b_strat}) sonuçları anlık olarak hesaplandı.")
-        
-        strat_multiplier = 1.15 if b_strat == "Top 5 Eşit Ağırlıklı Sepet" else 1.00
-        
-        base_metrics = {
-            "Son 3 Ay": {"ret": 12.5, "excess": 3.1, "dd": -4.2, "sharpe": 1.75, "curve": [100, 102, 105, 108, 112, 112.5], "bist": [100, 101, 102, 103, 105, 109.4]},
-            "Son 6 Ay": {"ret": 27.8, "excess": 7.4, "dd": -7.5, "sharpe": 1.84, "curve": [100, 104, 109, 115, 121, 127.8], "bist": [100, 101, 104, 109, 114, 120.4]},
-            "Son 1 Yıl": {"ret": 51.4, "excess": 14.2, "dd": -11.2, "sharpe": 1.92, "curve": [100, 106, 114, 122, 131, 142, 151.4], "bist": [100, 102, 108, 110, 115, 120, 137.2]},
-            "Son 2 Yıl": {"ret": 105.0, "excess": 28.0, "dd": -15.4, "sharpe": 2.05, "curve": [100, 115, 130, 155, 185, 205.0], "bist": [100, 108, 115, 130, 150, 177.0]}
-        }
-        
-        data = base_metrics.get(b_period, base_metrics["Son 1 Yıl"])
-        
-        final_ret = data["ret"] * strat_multiplier
-        final_excess = data["excess"] * strat_multiplier
-        final_dd = data["dd"] * (0.9 if strat_multiplier > 1 else 1.0)
-        final_sharpe = data["sharpe"] * (1.05 if strat_multiplier > 1 else 1.0)
-        
-        strat_curve = [100 + (val - 100) * strat_multiplier for val in data["curve"]]
-        bist_curve = data["bist"]
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Strateji Getirisi", f"%{final_ret:+.1f}", f"+{final_excess:.1f}% BIST Üstü")
-        m2.metric("Maksimum Düşüş", f"%{final_dd:.1f}", "Düşük Risk" if abs(final_dd) < 10 else "Orta/Yüksek Risk")
-        m3.metric("Sharpe Oranı", f"{final_sharpe:.2f}", "Çok Yüksek" if final_sharpe > 1.8 else "İyi")
-        
-        chart_df = pd.DataFrame({
-            'Strateji': strat_curve,
-            'BIST 100': bist_curve
-        })
-        st.line_chart(chart_df)
-    else:
-        st.warning("Veritabanı boş.")
+    col_b1, col_b2 = st.columns(2)
+    b_period_label = col_b1.selectbox("Simülasyon Süresi (Holding Period)", ["21 Gün (1 Ay)", "63 Gün (3 Ay)", "126 Gün (6 Ay)"])
+    b_strat = col_b2.selectbox("Strateji Kuralı", ["Güçlü AL ve AL / İzle Sinyalleri"])
+    
+    period_mapping = {
+        "21 Gün (1 Ay)": 21,
+        "63 Gün (3 Ay)": 63,
+        "126 Gün (6 Ay)": 126
+    }
+    selected_period = period_mapping[b_period_label]
+    
+    if st.button("Gerçek Backtesti Başlat", type="primary", use_container_width=True):
+        with st.spinner("Veritabanından fiyatlar ve sinyaller okunuyor, simülasyon çalıştırılıyor..."):
+            try:
+                prices_df = pd.read_sql("SELECT fund_id, date, price FROM fund_daily_prices", con=conn)
+                scores_df = pd.read_sql("SELECT fund_id, date, signal FROM fund_scores", con=conn)
+                
+                if prices_df.empty or scores_df.empty:
+                    st.warning("Veritabanında yeterli fiyat veya skor verisi bulunamadı! Önce veri senkronizasyonunu çalıştırın.")
+                else:
+                    prices_df['date'] = pd.to_datetime(prices_df['date'])
+                    scores_df['date'] = pd.to_datetime(scores_df['date'])
+                    
+                    engine = VectorizedBacktestEngine(holding_periods=[selected_period])
+                    bt_results = engine.run(prices_df=prices_df, signals_df=scores_df)
+                    report = engine.generate_strategy_report(bt_results)
+                    
+                    if f"{selected_period}_days_performance" in report:
+                        metrics = report[f"{selected_period}_days_performance"]
+                        
+                        st.success("Backtest başarıyla tamamlandı!")
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Ortalama Getiri", f"%{metrics['average_return']}", f"{metrics['analyzed_signals']} Sinyal İncelendi")
+                        m2.metric("İsabet Oranı (Hit Ratio)", f"%{metrics['hit_ratio']}")
+                        m3.metric("Güven Skoru", f"%{metrics['confidence_score']}")
+                        
+                        st.subheader("Simülasyon Detay Çıktısı")
+                        st.dataframe(bt_results.head(50), use_container_width=True)
+                    else:
+                        st.warning("Seçilen periyot için geçerli sinyal ve getiri eşleşmesi bulunamadı.")
+            except Exception as e:
+                st.error(f"Backtest çalıştırılırken hata oluştu: {e}")

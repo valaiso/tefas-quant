@@ -70,8 +70,8 @@ menu = st.sidebar.radio(
     ]
 )
 
-# Nitelikli fonların dashboard ve listelerden izole edilmesi (Varsayılan olarak kapalı)
-include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False)
+# Nitelikli fonların dashboard ve listelerden izole edilmesi (Varsayılan olarak açık)
+include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=True)
 st.sidebar.markdown("---", unsafe_allow_html=True)
 
 # --- 3. VERİ YÜKLEME VE RANKING MEKANİZMASI ---
@@ -113,7 +113,12 @@ def load_universe_data():
     if not include_qualified:
         merged = merged[merged['is_qualified_clean'] == 0]
         
-    merged['confidence_score'] = pd.to_numeric(merged.get('confidence_score', 0), errors='coerce').fillna(0)
+    merged['confidence_score'] = pd.to_numeric(
+        merged.get('confidence_score', 0),
+        errors='coerce'
+    ).fillna(0)
+    if merged['confidence_score'].max() <= 1:
+        merged['confidence_score'] = merged['confidence_score'] * 100
     
     if 'final_score' in merged.columns:
         merged['final_score'] = pd.to_numeric(
@@ -123,17 +128,6 @@ def load_universe_data():
 
         merged['ranking_score'] = (
             merged['final_score'] * 0.90
-            +
-            merged['confidence_score'] * 0.10
-        )
-    elif 'total_score' in merged.columns:
-        merged['total_score'] = pd.to_numeric(
-            merged['total_score'],
-            errors='coerce'
-        ).fillna(0)
-
-        merged['ranking_score'] = (
-            merged['total_score'] * 0.90
             +
             merged['confidence_score'] * 0.10
         )
@@ -206,8 +200,15 @@ elif menu == "⚡ Ana Dashboard":
         total_analyzed = len(merged_df)
         signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
         guclu_al = signal_counts.get('GÜÇLÜ AL / ELİT', 0)
-        al_izle = signal_counts.get('AL / İzle', 0)
-        bekle = signal_counts.get('Bekle', 0)
+        al_izle = (
+            signal_counts.get('AL', 0)
+            + signal_counts.get('İYİ', 0)
+            + signal_counts.get('İZLE', 0)
+        )
+        bekle = (
+            signal_counts.get('TUT', 0)
+            + signal_counts.get('ZAYIF', 0)
+        )
         avg_score = merged_df['ranking_score'].mean()
         avg_conf = merged_df['confidence_score'].mean() if 'confidence_score' in merged_df.columns else 0
 

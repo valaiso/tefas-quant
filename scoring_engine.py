@@ -113,6 +113,7 @@ def run_batch_scoring_engine(conn):
     df_scored = pd.concat(composite_dfs)
     
     # Absolute Score Hesaplaması
+    print(df_scored[['perf_percentile','risk_percentile','qual_percentile','cash_percentile','cost_percentile']].isna().sum())
     df_scored['absolute_score'] = scoring.calculate_absolute_score(
         df_scored['perf_percentile'], df_scored['risk_percentile'],
         df_scored['qual_percentile'], df_scored['cash_percentile'], df_scored['cost_percentile']

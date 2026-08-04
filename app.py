@@ -74,7 +74,7 @@ menu = st.sidebar.radio(
 include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=True)
 st.sidebar.markdown("---", unsafe_allow_html=True)
 
-# --- 3. VERİ YÜKLEME VE RANKING MEKANİZMASI ---
+# --- 3. VERİ YÜKLEME VE KATEGORİ İÇİ YÜZDELİK SKORLAMA MEKANİZMASI ---
 def load_universe_data():
     try:
         funds_df = pd.read_sql("SELECT id, code, title AS name, category, status, is_qualified FROM funds", con=conn)
@@ -125,15 +125,14 @@ def load_universe_data():
             merged['final_score'],
             errors='coerce'
         ).fillna(0)
-
-        merged['ranking_score'] = (
-            merged['final_score'] * 0.90
-            +
-            merged['confidence_score'] * 0.10
-        )
     else:
-        merged['ranking_score'] = 0
-        
+        merged['final_score'] = 0
+
+    # Kategori İçi Sıralama ve Yüzdelik Dilim (Category Percentile) Hesaplama (Double-counting önlendi)
+    merged['category_rank'] = merged.groupby('category')['final_score'].rank(ascending=False, method='min')
+    merged['category_total'] = merged.groupby('category')['final_score'].transform('count')
+    merged['category_percentile'] = ((merged['category_total'] - merged['category_rank'] + 1) / merged['category_total']) * 100
+
     return merged
 
 merged_df = load_universe_data()
@@ -193,45 +192,90 @@ if menu == "🔄 Fon Senkronizasyonu":
 # ==========================================
 elif menu == "⚡ Ana Dashboard":
     st.markdown('<p class="main-header">🏆 TEFAS Quant — Kurumsal Piyasa & Fon Özeti</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Kantitatif analiz, risk modelleri ve çok faktörlü skor motoru</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Kantitatif analiz, risk modelleri ve kategori bazlı yüzdelik skor motoru</p>', unsafe_allow_html=True)
     st.markdown("---")
 
     if not merged_df.empty:
         total_analyzed = len(merged_df)
-        signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
-        guclu_al = signal_counts.get('GÜÇLÜ AL / ELİT', 0)
-        al_izle = (
-            signal_counts.get('AL', 0)
-            + signal_counts.get('İYİ', 0)
-            + signal_counts.get('İZLE', 0)
-        )
-        bekle = (
-            signal_counts.get('TUT', 0)
-            + signal_counts.get('ZAYIF', 0)
-        )
-        avg_score = merged_df['ranking_score'].mean()
-        avg_conf = merged_df['confidence_score'].mean() if 'confidence_score' in merged_df.columns else 0
+        total_categories = merged_df['category'].nunique()
+        
+        try:
+            total_price_records = pd.read_sql("SELECT COUNT(*) as cnt FROM fund_daily_prices", con=conn).iloc[0]['cnt']
+        except Exception:
+            total_price_records = 0
+            
+        avg_history_days = int(merged_df['day_count'].mean()) if total_analyzed > 0 else 0
+        premium_confidence_count = len(merged_df[merged_df['confidence_score'] >= 90])
 
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
+        guclu_al = signal_counts.get('GÜÇLÜ AL / ELİT', 0) + signal_counts.get('GÜÇLÜ AL', 0)
+        al_count = signal_counts.get('AL', 0)
+        iyi_count = signal_counts.get('İYİ', 0)
+        izle_count = signal_counts.get('İZLE', 0)
+        zayif_count = signal_counts.get('ZAYIF', 0) + signal_counts.get('TUT', 0)
+
+        # Dashboard Metrik Satırları (Genişletilmiş Kurumsal Göstergeler)
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Toplam Fon", f"{total_analyzed}")
-        col2.metric("Güçlü AL / ELİT", f"{guclu_al}")
-        col3.metric("AL / İzle", f"{al_izle}")
-        col4.metric("Bekle", f"{bekle}")
-        col5.metric("Ort. Ranking", f"{avg_score:.1f}")
-        col6.metric("Ort. Güven", f"%{avg_conf:.1f}")
+        col2.metric("Kategori Sayısı", f"{total_categories}")
+        col3.metric("Fiyat Kaydı", f"{total_price_records:,}".replace(",", "."))
+        col4.metric("Ortalama Geçmiş", f"{avg_history_days} Gün")
+        col5.metric("Premium Güven", f"{premium_confidence_count} Fon")
+
+        st.markdown("")
+        col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
+        col_s1.metric("Güçlü AL", f"{guclu_al}")
+        col_s2.metric("AL", f"{al_count}")
+        col_s3.metric("İYİ", f"{iyi_count}")
+        col_s4.metric("İZLE", f"{izle_count}")
+        col_s5.metric("ZAYIF", f"{zayif_count}")
 
         st.markdown("---")
-        st.subheader("🏆 Kategori Bazlı En Güçlü Fonlar (Top 10)")
+        st.subheader("🏆 Her Kategorinin Lideri")
         
-        top10 = merged_df.sort_values(by=['ranking_score', 'confidence_score', 'day_count'], ascending=[False, False, False]).head(10)
-        for idx, row in top10.reset_index().iterrows():
-            col_a, col_b, col_c = st.columns([1, 4, 3])
-            col_a.markdown(f"**#{idx+1}**")
-            col_b.markdown(f"**{row['code']}** - {row['name']} *({row['category']})*")
-            rank_val = row['ranking_score'] if pd.notna(row.get('ranking_score')) else 0.0
-            conf_val = row['confidence_score'] if pd.notna(row.get('confidence_score')) else 0.0
-            badge = "⭐ Premium" if conf_val >= 85 else ("🛡️ Yüksek Güven" if conf_val >= 65 else "⚠️ Sınırda")
-            col_c.markdown(f"Ranking: **{rank_val:.1f}** | Güven: **%{conf_val:.0f}** ({badge})")
+        # Pandas Groupby Optimizasyonu ile Kategori Liderleri (Yüksek Performanslı)
+        leaders_df = (
+            merged_df
+            .sort_values(by=["category_percentile", "final_score", "confidence_score"], ascending=[False, False, False])
+            .groupby("category", as_index=False)
+            .head(1)
+        )
+        
+        if not leaders_df.empty:
+            cols = st.columns(min(len(leaders_df), 4) if len(leaders_df) > 0 else 1)
+            for idx, row in leaders_df.reset_index().iterrows():
+                col = cols[idx % len(cols)]
+                with col:
+                    st.markdown(f"""
+                    <div class="card-container">
+                        <small style="color: #64748B;"><b>{row['category']}</b></small>
+                        <h3 style="color: #1E3A8A; margin: 5px 0;">{row['code']}</h3>
+                        <p style="font-size: 0.85rem; color: #334155; margin-bottom: 8px; height: 35px; overflow: hidden;">{row['name']}</p>
+                        <p style="margin: 0; font-size: 0.9rem;">Final Skor: <b>{row['final_score']:.1f}</b><br>Kategori Yüzdeliği: <b>Top %{(100 - row['category_percentile']):.1f}</b></p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.subheader("🔥 Genel Top 20 (Kategori Yüzdeliği Destekli)")
+        
+        top20_df = merged_df.sort_values(
+            by=["category_percentile", "final_score", "confidence_score"],
+            ascending=[False, False, False]
+        ).head(20).copy()
+
+        top20_display = top20_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
+            columns={
+                'code': 'Fon Kodu', 
+                'name': 'Fon Adı', 
+                'category': 'Kategori', 
+                'final_score': 'Final Skor', 
+                'category_percentile': 'Kategori Yüzdeliği (%)', 
+                'confidence_score': 'Güven (%)', 
+                'signal': 'Sinyal'
+            }
+        ).reset_index(drop=True)
+        top20_display.index += 1
+        st.dataframe(top20_display, use_container_width=True)
     else:
         st.info("⚠️ Gerekli veritabanı verisi bulunamadı. Lütfen sol menüden senkronizasyon yapın.")
 
@@ -240,7 +284,7 @@ elif menu == "⚡ Ana Dashboard":
 # ==========================================
 elif menu == "🔎 Fon Keşif Merkezi":
     st.title("🔎 Fon Keşif Merkezi")
-    st.markdown("Yatırım karakterinize göre en güçlü fonları otomatik keşfedin.")
+    st.markdown("Yatırım karakterinize göre en güçlü fonları kategori içi yüzdelik dilimleriyle otomatik keşfedin.")
     st.markdown("---")
 
     if not merged_df.empty:
@@ -250,13 +294,20 @@ elif menu == "🔎 Fon Keşif Merkezi":
             "🏛 5 Yıllık Şampiyonlar (Kıdemli Sınıf)"
         ])
 
-        sorted_univ = merged_df.sort_values(by=['ranking_score', 'confidence_score', 'day_count'], ascending=[False, False, False]).reset_index(drop=True)
+        sorted_univ = merged_df.sort_values(
+            by=["category_percentile", "final_score", "confidence_score"],
+            ascending=[False, False, False]
+        ).reset_index(drop=True)
 
         with tab1:
             st.subheader("⭐ Quant'ın Yıldızları (Ana Lig Top 10)")
             q_star_df = sorted_univ.head(10).copy()
-            q_star_display = q_star_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'signal']].rename(
-                columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Quant Star Score', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'}
+            q_star_display = q_star_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
+                columns={
+                    'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
+                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Yüzdeliği (%)', 
+                    'confidence_score': 'Güven (%)', 'signal': 'Sinyal'
+                }
             ).reset_index(drop=True)
             q_star_display.index += 1
             st.dataframe(q_star_display, use_container_width=True)
@@ -266,8 +317,12 @@ elif menu == "🔎 Fon Keşif Merkezi":
             excluded_1 = q_star_df['code'].tolist()
             mom_pool = sorted_univ[~sorted_univ['code'].isin(excluded_1)]
             mom_df = mom_pool.head(10).copy()
-            mom_display = mom_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'signal']].rename(
-                columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Momentum Score', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'}
+            mom_display = mom_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
+                columns={
+                    'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
+                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Yüzdeliği (%)', 
+                    'confidence_score': 'Güven (%)', 'signal': 'Sinyal'
+                }
             ).reset_index(drop=True)
             mom_display.index += 1
             st.dataframe(mom_display, use_container_width=True)
@@ -277,8 +332,12 @@ elif menu == "🔎 Fon Keşif Merkezi":
             excluded_2 = excluded_1 + mom_df['code'].tolist()
             lt_pool = sorted_univ[~sorted_univ['code'].isin(excluded_2)]
             lt_df = lt_pool.head(10).copy()
-            lt_display = lt_df[['code', 'name', 'category', 'ranking_score', 'confidence_score', 'day_count']].rename(
-                columns={'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 'ranking_score': 'Long Term Score', 'confidence_score': 'Güven (%)', 'day_count': 'Geçmiş Gün'}
+            lt_display = lt_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'day_count']].rename(
+                columns={
+                    'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
+                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Yüzdeliği (%)', 
+                    'day_count': 'Geçmiş Gün'
+                }
             ).reset_index(drop=True)
             lt_display.index += 1
             st.dataframe(lt_display, use_container_width=True)
@@ -299,8 +358,11 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
         all_categories = sorted(merged_df['category'].dropna().unique().tolist())
         selected_categories = col_f2.multiselect("Kategori Filtrele", options=all_categories, default=all_categories)
 
-        display_df = merged_df[['code', 'name', 'category', 'day_count', 'ranking_score', 'confidence_score', 'signal']].rename(
-            columns={'day_count': 'Geçmiş Gün', 'ranking_score': 'Ranking Puanı', 'confidence_score': 'Güven (%)'}
+        display_df = merged_df[['code', 'name', 'category', 'day_count', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
+            columns={
+                'day_count': 'Geçmiş Gün', 'final_score': 'Final Skor', 
+                'category_percentile': 'Kategori Yüzdeliği (%)', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'
+            }
         ).copy()
 
         if search_query:
@@ -311,14 +373,14 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
         if selected_categories:
             display_df = display_df[display_df['category'].isin(selected_categories)]
 
-        display_df = display_df.sort_values(by='Ranking Puanı', ascending=False)
+        display_df = display_df.sort_values(by=['Kategori Yüzdeliği (%)', 'Final Skor'], ascending=[False, False])
         st.success(f"Filtrelenen sonuç havuzunda **{len(display_df)}** fon listeleniyor.")
         st.dataframe(display_df, use_container_width=True)
     else:
         st.warning("Veri bulunamadı.")
 
 # ==========================================
-# MODÜL 5: FON DETAY & GİZLİ CEVHERLER (DEEP DIVE + İÇSEL DEĞER)
+# MODÜL 5: FON DETAY & GİZLİ CEVHERLER (3 Bağımsız Kurumsal Metrik)
 # ==========================================
 elif menu == "📊 Fon Detay & Gizli Cevherler":
     st.title("📊 Fon Detay, Derinlemesine Analiz & Gizli Cevherler")
@@ -342,16 +404,31 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
             total = fund_detail['category_total']
             top_pct = 100 - (rank / total * 100) if total > 0 else 0
             
+            # Üç Bağımsız Kurumsal Metrik Kartı Yapısı
             st.markdown(f"""
-            <div class="card-container" style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <small style="color: #64748B; font-size: 1rem;">{fund_detail['category']}</small>
-                    <h1 style="color: #1E3A8A; margin: 0;">{fund_detail['code']} - {fund_detail['title']}</h1>
-                    <p style="margin: 5px 0 0 0; color: #475569;">Kategori Sıralaması: <b>{rank} / {total}</b> (Kategori İçinde En İyi %{top_pct:.1f} dilimi)</p>
+            <div class="card-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <div>
+                        <small style="color: #64748B; font-size: 1rem;">{fund_detail['category']}</small>
+                        <h1 style="color: #1E3A8A; margin: 0;">{fund_detail['code']} - {fund_detail['title']}</h1>
+                    </div>
+                    <div>{badge_html}</div>
                 </div>
-                <div style="text-align: right;">
-                    <span style="font-size: 3rem; font-weight: 900; color: #0F172A;">{fund_detail['final_score']:.1f}</span><br>
-                    {badge_html}
+                <hr style="margin: 10px 0; border: none; border-top: 1px solid #E2E8F0;">
+                <div style="display: flex; justify-content: space-around; text-align: center; padding-top: 5px;">
+                    <div>
+                        <span style="font-size: 0.9rem; color: #64748B;">Final Score</span><br>
+                        <span style="font-size: 1.8rem; font-weight: 800; color: #1E3A8A;">{fund_detail['final_score']:.1f}</span>
+                    </div>
+                    <div>
+                        <span style="font-size: 0.9rem; color: #64748B;">Kategori Sırası & Dilimi</span><br>
+                        <span style="font-size: 1.8rem; font-weight: 800; color: #047857;">Top %{top_pct:.1f}</span>
+                        <div style="font-size: 0.8rem; color: #475569;">({rank}. / {total} fon)</div>
+                    </div>
+                    <div>
+                        <span style="font-size: 0.9rem; color: #64748B;">Confidence (Güven)</span><br>
+                        <span style="font-size: 1.8rem; font-weight: 800; color: #854D0E;">%{fund_detail.get('confidence_score', 90):.0f}</span>
+                    </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -475,9 +552,9 @@ elif menu == "⚖️ Fon Karşılaştırma":
         row_b = merged_df[merged_df['code'] == fund_b].iloc[0]
         
         comp_data = {
-            "Metrik": ["Fon Adı", "Kategori", "Ranking Puanı", "Güven Skoru (%)", "Piyasa Sinyali", "Geçmiş Gün Sayısı"],
-            f"{fund_a}": [row_a['name'], row_a['category'], f"{row_a['ranking_score']:.1f}", f"%{row_a['confidence_score']:.0f}", row_a['signal'], row_a['day_count']],
-            f"{fund_b}": [row_b['name'], row_b['category'], f"{row_b['ranking_score']:.1f}", f"%{row_b['confidence_score']:.0f}", row_b['signal'], row_b['day_count']]
+            "Metrik": ["Fon Adı", "Kategori", "Final Skor", "Kategori Yüzdeliği (%)", "Güven Skoru (%)", "Piyasa Sinyali", "Geçmiş Gün Sayısı"],
+            f"{fund_a}": [row_a['name'], row_a['category'], f"{row_a['final_score']:.1f}", f"%{row_a['category_percentile']:.1f}", f"%{row_a['confidence_score']:.0f}", row_a['signal'], row_a['day_count']],
+            f"{fund_b}": [row_b['name'], row_b['category'], f"{row_b['final_score']:.1f}", f"%{row_b['category_percentile']:.1f}", f"%{row_b['confidence_score']:.0f}", row_b['signal'], row_b['day_count']]
         }
         st.table(pd.DataFrame(comp_data))
     else:
@@ -489,7 +566,7 @@ elif menu == "⚖️ Fon Karşılaştırma":
 elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Backtest Performans Simülasyonu")
     st.markdown("---")
-    st.markdown("Bu modül, veritabanındaki gerçek günlük fiyatlar ve **GÜÇLÜ AL / ELİT ve AL / İzle** sinyalleri üzerinden zaman serisi simülasyonu çalıştırır.")
+    st.markdown("Bu modül, veritabanındaki gerçek günlük fiyatlar ve sinyaller üzerinden zaman serisi simülasyonu çalıştırır.")
     
     col_b1, col_b2 = st.columns(2)
     b_period_label = col_b1.selectbox(

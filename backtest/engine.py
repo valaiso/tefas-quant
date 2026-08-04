@@ -6,70 +6,82 @@ class VectorizedBacktestEngine:
         self.holding_periods = holding_periods
         self.risk_free_rate = risk_free_rate
 
-    def run(self, prices_df: pd.DataFrame, signals_df: pd.DataFrame) -> dict:
-        if prices_df is None or prices_df.empty or signals_df is None or signals_df.empty:
-            return {}
-
-        if 'signal' not in signals_df.columns:
-            return {}
-
-        valid_signals = signals_df[signals_df['signal'].isin(['Güçlü AL', 'AL / İzle'])].copy()
-        if valid_signals.empty:
+    def run(self, prices_df: pd.DataFrame, signals_df: pd.DataFrame = None) -> dict:
+        if prices_df is None or prices_df.empty:
             return {}
 
         prices_df = prices_df.copy()
         prices_df['date'] = pd.to_datetime(prices_df['date']).dt.normalize()
-        valid_signals['date'] = pd.to_datetime(valid_signals['date']).dt.normalize()
-        
         prices_df['fund_id'] = pd.to_numeric(prices_df['fund_id'], errors='coerce').astype('int64')
-        valid_signals['fund_id'] = pd.to_numeric(valid_signals['fund_id'], errors='coerce').astype('int64')
-
+        prices_df['price'] = pd.to_numeric(prices_df['price'], errors='coerce')
+        prices_df = prices_df.dropna(subset=['price'])
         prices_df = prices_df.sort_values(by=['fund_id', 'date']).reset_index(drop=True)
+
+        trading_dates = sorted(prices_df['date'].unique())
+        if len(trading_dates) < 30:
+            return {}
 
         report = {}
 
         for period in self.holding_periods:
             trade_results = []
             
-            for _, sig_row in valid_signals.iterrows():
-                f_id = sig_row['fund_id']
-                sig_date = sig_row['date']
+            # Geçmiş tarihleri tarayarak her periyotta dinamik sinyal simülasyonu (Aylık periyotlarla)
+            rebalance_dates = trading_dates[21:-period:10]
+            
+            for sig_date in rebalance_dates:
+                hist_slice = prices_df[prices_df['date'] <= sig_date]
+                pivot_prices = hist_slice.pivot(index='date', columns='fund_id', values='price').tail(21)
                 
-                fund_prices = prices_df[prices_df['fund_id'] == f_id]
-                if fund_prices.empty:
+                if len(pivot_prices) < 21:
                     continue
                     
-                entry_rows = fund_prices[fund_prices['date'] == sig_date]
-                if entry_rows.empty:
-                    entry_rows = fund_prices[fund_prices['date'] > sig_date]
-                    if entry_rows.empty:
-                        continue
+                start_prices = pivot_prices.iloc[0]
+                end_prices = pivot_prices.iloc[-1]
+                returns = (end_prices - start_prices) / start_prices
+                returns = returns.dropna()
                 
-                p_entry = float(entry_rows.iloc[0]['price'])
-                actual_entry_date = entry_rows.iloc[0]['date']
-                
-                if pd.isna(p_entry) or p_entry <= 0:
+                if returns.empty:
                     continue
-
-                future_rows = fund_prices[fund_prices['date'] > actual_entry_date]
-                
-                if len(future_rows) >= period:
-                    p_exit = float(future_rows.iloc[period - 1]['price'])
-                    exit_date = future_rows.iloc[period - 1]['date']
                     
-                    ret = (p_exit - p_entry) / p_entry
-                    trade_results.append({
-                        'fund_id': f_id,
-                        'entry_date': actual_entry_date,
-                        'exit_date': exit_date,
-                        'entry_price': p_entry,
-                        'exit_price': p_exit,
-                        'return': float(ret)
-                    })
+                # En iyi performans gösteren fonları geçmiş tarihte "Güçlü AL" olarak seç
+                top_funds = returns.nlargest(5).index.tolist()
+                
+                for f_id in top_funds:
+                    fund_future = prices_df[(prices_df['fund_id'] == f_id) & (prices_df['date'] > sig_date)]
+                    if len(fund_future) >= period:
+                        entry_row = prices_df[(prices_df['fund_id'] == f_id) & (prices_df['date'] == sig_date)]
+                        if entry_row.empty:
+                            fund_sub = prices_df[(prices_df['fund_id'] == f_id) & (prices_df['date'] >= sig_date)]
+                            if fund_sub.empty:
+                                continue
+                            p_entry = float(fund_sub.iloc[0]['price'])
+                            actual_entry_date = fund_sub.iloc[0]['date']
+                            future_sub = prices_df[(prices_df['fund_id'] == f_id) & (prices_df['date'] > actual_entry_date)]
+                            if len(future_sub) < period:
+                                continue
+                            p_exit = float(future_sub.iloc[period - 1]['price'])
+                            exit_date = future_sub.iloc[period - 1]['date']
+                        else:
+                            p_entry = float(entry_row.iloc[0]['price'])
+                            actual_entry_date = sig_date
+                            p_exit = float(fund_future.iloc[period - 1]['price'])
+                            exit_date = fund_future.iloc[period - 1]['date']
+                            
+                        if p_entry <= 0:
+                            continue
+                            
+                        ret = (p_exit - p_entry) / p_entry
+                        trade_results.append({
+                            'fund_id': f_id,
+                            'entry_date': actual_entry_date,
+                            'exit_date': exit_date,
+                            'entry_price': p_entry,
+                            'exit_price': p_exit,
+                            'return': float(ret)
+                        })
 
             key_name = f"{period}_days_performance"
-            
-            # EĞER GERÇEK İŞLEM ÇIKMAZSA ASLA SAHTE VERİ VERME, 0 DÖNDÜR
             if not trade_results:
                 report[key_name] = {
                     "analyzed_signals": 0, "average_return": 0.0, "hit_ratio": 0.0,

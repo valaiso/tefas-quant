@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import os
 import numpy as np
+import hashlib
 from scoring import get_db_connection, run_tefas_sync_and_scoring
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
@@ -137,10 +138,10 @@ if menu == "🔄 Fon Senkronizasyonu":
                 else:
                     st.error(msg)
     with col2:
-        # API limitlerine takılmamak adına 2-yıl ve 200 fon kısıtlamasına uyumlu buton güncellemesi
+        # API limitlerine takılmamak adına 2-yıl ve 200 fon kısıtlaması fonksiyona parametre olarak iletiliyor
         if st.button("🔄 Tam Senkronizasyon (2 Yıl / 200 Fon Limitli)", use_container_width=True):
             with st.spinner("Tam senkronizasyon çalıştırılıyor..."):
-                success, msg = run_tefas_sync_and_scoring(full_sync=True)
+                success, msg = run_tefas_sync_and_scoring(full_sync=True, history_years=2, fund_limit=200)
                 if success:
                     st.success(msg)
                     st.rerun()
@@ -295,7 +296,10 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
             
         # Eğer henüz veritabanında bu fon için özel hisse verisi işlenmediyse, deterministik seed ile güvenli simülasyon sunalım
         if holdings_df.empty:
-            fund_seed = abs(hash(chosen_fund)) % 10000
+            # Streamlit sayfa yenilemelerinde sabit kalması için string üzerinden md5 hash kullanıyoruz
+            seed_str = hashlib.md5(chosen_fund.encode()).hexdigest()
+            fund_seed = int(seed_str, 16) % 10000
+            
             rng = np.random.default_rng(fund_seed)
             comp_names = [f"{chosen_fund} Varlık A", f"{chosen_fund} Varlık B", f"{chosen_fund} Varlık C", f"{chosen_fund} Varlık D"]
             raw_w = rng.uniform(0.1, 0.3, size=4)

@@ -139,8 +139,9 @@ def calculate_confidence_and_score(p_history):
     days_diff = (datetime.date.today() - last_date.date()).days
     recency_score = max(0.0, 100.0 - (days_diff * 5.0))
 
-    confidence = (age_score * 0.40) + (density_score * 0.30) + (integrity_score * 0.20) + (recency_score * 0.10)
-    confidence = min(100.0, max(0.0, confidence))
+    # Piyasa belirsizliği ve veri gürültüsü nedeniyle güven asla %100 olamaz (Tavan: %95)
+    raw_conf = (age_score * 0.35) + (density_score * 0.25) + (integrity_score * 0.20) + (recency_score * 0.10) + (stability_score * 0.10)
+    confidence = min(95.0, max(10.0, raw_conf * 0.95))
 
     def get_penalty(conf):
         if conf >= 95: return 0

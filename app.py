@@ -48,7 +48,7 @@ if "portfolio" not in st.session_state:
 include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=False)
 st.sidebar.markdown("", unsafe_allow_html=True)
 
-# --- 3. VERİ YÜKLEME VE NİHAİ QUANT RANKING & GÜVEN BARAJI ---
+# --- 3. VERİ YÜKLEME VE KADEMELİ CEZA MEKANİZMASI ---
 def load_universe_data():
     try:
         funds_df = pd.read_sql("SELECT id, code, title AS name, category, status, is_qualified FROM funds", con=conn)
@@ -89,15 +89,37 @@ def load_universe_data():
     if not include_qualified:
         merged = merged[merged['is_qualified_clean'] == 0]
         
-    # --- NİHAİ QUANT FİLTRESİ VE RANKING FORMÜLÜ ---
-    if 'confidence_score' in merged.columns and 'total_score' in merged.columns:
-        merged['total_score'] = pd.to_numeric(merged['total_score'], errors='coerce').fillna(0)
-        merged['confidence_score'] = pd.to_numeric(merged['confidence_score'], errors='coerce').fillna(0)
+    # --- GÜVEN SKORU VE KULLANICI TANIMLI KADEMELİ CEZA SİSTEMİ ---
+    def get_confidence_score(days):
+        if days >= 500: return 95.0      # %90-100 bandı
+        elif days >= 250: return 80.0    # %70-90 bandı
+        elif days >= 125: return 60.0    # %50-70 bandı
+        elif days >= 60: return 40.0     # %30-50 bandı
+        else: return 20.0                # <%30 bandı
         
-        # Kullanıcının haklı tespiti doğrultusunda: 
-        # Güven barajı filtresini kontrol ediyoruz veya geçici olarak debug ekliyoruz.
-        # Eğer confidence_score < 65 filtresi tüm Güçlü AL fonlarını eliyorsa bunu görebileceğiz.
-        merged['ranking_score'] = (merged['total_score'] * 0.90) + (merged['confidence_score'] * 0.10)
+    merged['confidence_score'] = merged['day_count'].apply(get_confidence_score)
+    
+    if 'total_score' in merged.columns:
+        merged['total_score'] = pd.to_numeric(merged['total_score'], errors='coerce').fillna(0)
+        
+        def apply_user_penalty(row):
+            total = row['total_score']
+            conf = row['confidence_score']
+            
+            if conf >= 90:
+                mult = 1.00    # Ceza yok (%0)
+            elif conf >= 70:
+                mult = 0.95    # Çok hafif ceza (%5)
+            elif conf >= 50:
+                mult = 0.85    # Orta ceza (%15)
+            elif conf >= 30:
+                mult = 0.70    # Ağır ceza (%30)
+            else:
+                mult = 0.50    # Çok ağır ceza (%50+)
+                
+            return total * mult
+            
+        merged['ranking_score'] = merged.apply(apply_user_penalty, axis=1)
     else:
         merged['ranking_score'] = merged.get('total_score', 0)
         
@@ -184,7 +206,7 @@ elif menu == "⚡ Ana Dashboard":
             conf_val = row['confidence_score'] if pd.notna(row.get('confidence_score')) else 0.0
             signal_val = row['signal'] if pd.notna(row.get('signal')) else 'Veri Yok'
             
-            badge = "⭐ Premium" if conf_val >= 90 else ("🛡️ Yüksek Güven" if conf_val >= 75 else "✅ Standart")
+            badge = "⭐ Premium" if conf_val >= 85 else ("🛡️ Yüksek Güven" if conf_val >= 60 else "⚠️ Yeni / Riskli")
             col_c.markdown(f"Ranking: **{rank_val:.1f}** | Güven: **%{conf_val:.0f}** ({badge})")
             
             is_fav = row['code'] in st.session_state.favorites
@@ -312,14 +334,14 @@ elif menu == "📊 Fon Detay & AI Raporu":
         signal = fund_info['signal']
         name = fund_info['name']
         
-        if conf_s >= 90:
-            tier_msg = "💎 Premium / İstisnai Güven seviyesinde."
-        elif conf_s >= 75:
-            tier_msg = "🛡️ Yüksek Güvenilirlik katmanında."
+        if conf_s >= 85:
+            tier_msg = "💎 Yüksek tarihsel derinliğe sahip güvenilir fon."
+        elif conf_s >= 60:
+            tier_msg = "🛡️ Kabul edilebilir geçmiş derinliğinde fon."
         else:
-            tier_msg = "✅ Kabul edilebilir orta-üst güven bandında."
+            tier_msg = "⚠️ Geçmişi kısa, dikkatli olunması gereken yeni fon."
             
-        st.info(f"**{chosen_fund} ({name})**, {tier_msg} Pazar koşullarında üretilen **{signal}** sinyali ve **{rank_s:.1f}** ranking puanıyla güçlü bir portföy adayıdır.")
+        st.info(f"**{chosen_fund} ({name})**, {tier_msg} Pazar koşullarında üretilen **{signal}** sinyali ve **{rank_s:.1f}** ceza uygulanmış ranking puanıyla değerlendirilmektedir.")
         
         is_fav = chosen_fund in st.session_state.favorites
         if st.button("⭐ Favorilere Ekle / Çıkar" if not is_fav else "⭐ Favorilerden Çıkar"):
@@ -361,7 +383,7 @@ elif menu == "🚀 Backtest Performansı":
     st.title("🚀 Strateji Backtest Performans Simülasyonu")
     st.markdown("---")
     
-    st.markdown("Bu modül, Confidence >= 65 barajını geçen fonların geçmiş dönem simülasyon sonuçlarını sunar.")
+    st.markdown("Bu modül, kademeli ceza mekanizmalı ranking matrisinin geçmiş dönem simülasyon sonuçlarını sunar.")
     
     if not merged_df.empty:
         col_b1, col_b2 = st.columns(2)

@@ -1,92 +1,124 @@
-import pandas as pd
-import sqlite3
+import warnings
+from datetime import date
 import numpy as np
+import pandas as pd
+from database.database import SessionLocal
+from database.models import Fund, FundDailyPrice, FundScore
+
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+
+
+def assign_letter_grade(score):
+  if score >= 80:
+    return 'A'
+  elif score >= 65:
+    return 'B'
+  elif score >= 50:
+    return 'C'
+  elif score >= 35:
+    return 'D'
+  else:
+    return 'F'
+
 
 def run():
-    print("-> Veritabanına bağlanılıyor ve fiyat verileri çekiliyor...")
-    conn = sqlite3.connect("tefas.db")
-    prices_df = pd.read_sql("SELECT fund_id, date, price FROM fund_daily_prices", con=conn)
-    
-    if prices_df.empty:
-        print("❌ Fiyat verisi bulunamadı!")
-        conn.close()
-        return
+  db = SessionLocal()
+  try:
+    funds = db.query(Fund).all()
+    if not funds:
+      return
 
-    print(f"-> {len(prices_df)} satır veri işleniyor. Puanlama matrisi hesaplanıyor...")
+    scores_data = []
 
-    # Tarih formatını güvenceye al ve sırala
-    prices_df['date'] = pd.to_datetime(prices_df['date'])
-    prices_df = prices_df.sort_values('date')
+    for fund in funds:
+      prices = (
+          db.query(FundDailyPrice)
+          .filter(FundDailyPrice.fund_id == fund.id)
+          .order_by(FundDailyPrice.date.asc())
+          .all()
+      )
 
-    # Matrisi Pivot Tabloya Çevir
-    pivot_prices = prices_df.pivot(index='date', columns='fund_id', values='price')
-    pivot_prices = pivot_prices.ffill().bfill() # Eksik günleri doldur
+      if len(prices) < 5:
+        continue
 
-    n_days = len(pivot_prices)
-    print(f"-> Toplam işlem günü (tarih derinliği): {n_days}")
+      df = pd.DataFrame([{"date": p.date, "price": p.price} for p in prices])
+      df["date"] = pd.to_datetime(df["date"])
+      df = df.sort_values("date").reset_index(drop=True)
 
-    # Dinamik periyotlama (Veri azsa sistem çökmesin, mevcut güne göre uyarlansın)
-    p_1m = min(21, max(1, n_days - 1))
-    p_3m = min(63, max(1, n_days - 1))
+      current_price = float(df["price"].iloc[-1])
+      price_1m = (
+          float(df["price"].iloc[-22])
+          if len(df) >= 22
+          else float(df["price"].iloc[0])
+      )
+      price_start = float(df["price"].iloc[0])
 
-    # Momentum ve Risk Hesapları
-    ret_1m = pivot_prices.pct_change(p_1m)
-    ret_3m = pivot_prices.pct_change(p_3m)
-    
-    daily_ret = pivot_prices.pct_change()
-    vol_1m = daily_ret.rolling(p_1m).std()
+      return_1m = (
+          ((current_price - price_1m) / price_1m * 100) if price_1m > 0 else 0.0
+      )
+      return_total = (
+          ((current_price - price_start) / price_start * 100)
+          if price_start > 0
+          else 0.0
+      )
 
-    # Kategori İçi Yüzdelik Sıralama (NaN değerler ortalama %50 ile doldurulur)
-    score_1m = ret_1m.rank(axis=1, pct=True).fillna(0.5) * 100
-    score_3m = ret_3m.rank(axis=1, pct=True).fillna(0.5) * 100
-    score_vol = (1.0 - vol_1m.rank(axis=1, pct=True).fillna(0.5)) * 100 
+      df["daily_return"] = df["price"].pct_change()
+      volatility = float(df["daily_return"].std() * np.sqrt(252) * 100)
+      if np.isnan(volatility):
+        volatility = 0.0
 
-    # Ağırlıklı Toplam Skor (%40 1A, %40 3A, %20 Düşük Risk)
-    total_score = (score_1m * 0.4) + (score_3m * 0.4) + (score_vol * 0.2)
+      history_days = len(prices)
+      confidence_score = min(float(history_days / 252.0) * 100.0, 100.0)
 
-    # Veritabanı formatına dönüştür
-    total_score_long = total_score.reset_index().melt(id_vars='date', var_name='fund_id', value_name='total_score')
-    total_score_long = total_score_long.dropna(subset=['total_score'])
+      scores_data.append({
+          "fund_id": fund.id,
+          "current_price": current_price,
+          "return_1m": return_1m,
+          "return_total": return_total,
+          "volatility": volatility,
+          "confidence_score": confidence_score,
+          "history_days": history_days,
+          "date": df["date"].iloc[-1].date(),
+      })
 
-    # --- NİHAİ SİNYAL MOTORU (Mutlak Puan Aralıkları) ---
-    def assign_rating_signal(score):
-        if score >= 90:
-            return 'Güçlü AL'
-        elif score >= 75:
-            return 'AL / İzle'
-        elif score >= 60:
-            return 'Bekle'
-        elif score >= 40:
-            return 'Zayıf'
-        else:
-            return 'Uzak Dur'
+    if not scores_data:
+      return
 
-    total_score_long['signal'] = total_score_long['total_score'].apply(assign_rating_signal)
-    total_score_long['date'] = pd.to_datetime(total_score_long['date']).dt.strftime('%Y-%m-%d')
-    
-    final_scores = total_score_long[['fund_id', 'date', 'total_score', 'signal']].copy()
-    
-    print(f"-> Toplam {len(final_scores)} adet skor ve sinyal hesaplandı.")
-    print("-> Sinyaller veritabanına işleniyor...")
+    res_df = pd.DataFrame(scores_data)
 
-    # Tabloyu sıfırdan tertemiz oluştur
-    cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS fund_scores")
-    cursor.execute("""
-        CREATE TABLE fund_scores (
-            fund_id TEXT,
-            date TEXT,
-            total_score REAL,
-            signal TEXT
-        )
-    """)
-    conn.commit()
+    res_df["score_1m"] = res_df["return_1m"].rank(pct=True) * 50
+    res_df["score_total"] = res_df["return_total"].rank(pct=True) * 50
+    res_df["total_score"] = res_df["score_1m"] + res_df["score_total"]
 
-    # Kaydet
-    final_scores.to_sql("fund_scores", con=conn, if_exists="append", index=False)
-    conn.close()
-    
-    print("🎉 İşlem Tamamlandı! Tüm fonlar adil bir şekilde puanlandı ve kaydedildi.")
+    vol_penalty = np.maximum(0, res_df["volatility"] - 40.0) * 0.15
+    res_df["total_score"] = (res_df["total_score"] - vol_penalty).clip(0, 100)
+    res_df["letter_grade"] = res_df["total_score"].apply(assign_letter_grade)
+
+    res_df["signal"] = res_df["total_score"].apply(
+        lambda x: "BUY" if x >= 70 else "HOLD"
+    )
+
+    db.query(FundScore).delete()
+
+    for _, row in res_df.iterrows():
+      score_record = FundScore(
+          fund_id=int(row["fund_id"]),
+          date=row["date"],
+          total_score=float(row["total_score"]),
+          confidence_score=float(row["confidence_score"]),
+          letter_grade=str(row["letter_grade"]),
+          signal=str(row["signal"]),
+      )
+      db.add(score_record)
+
+    db.commit()
+
+  except Exception as e:
+    db.rollback()
+    print(f"Hata: {e}")
+  finally:
+    db.close()
+
 
 if __name__ == "__main__":
-    run()
+  run()

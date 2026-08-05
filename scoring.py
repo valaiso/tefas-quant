@@ -8,8 +8,7 @@ import random
 import streamlit as st
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from app.services.scoring_engine import QuantitativeFundScorer
-from app.services.ranking import calculate_category_percentiles 
+from app.services import scoring_engine 
 
 try:
     from tefas import Crawler
@@ -17,6 +16,7 @@ try:
     TEFAS_LIB_READY = True
 except ImportError:
     TEFAS_LIB_READY = False
+
 
 def get_db_connection():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -42,8 +42,10 @@ def get_db_connection():
         ("fund_scores", "confidence_factor REAL")
     ]
     for table, col_def in migrations:
-        try: cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
-        except sqlite3.OperationalError: pass
+        try: 
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+        except sqlite3.OperationalError: 
+            pass
         
     conn.commit()
     return conn
@@ -98,7 +100,7 @@ def run_batch_scoring_engine(conn):
         first_date = p_history['date'].iloc[0]
         last_date = p_history['date'].iloc[-1]
         
-        conf = scoring.calculate_confidence(prices, first_date, last_date)
+        conf = scoring_engine.calculate_confidence(prices, first_date, last_date)
 
         raw_data.append({
             'fund_id': f_id, 'category': category,
@@ -113,31 +115,31 @@ def run_batch_scoring_engine(conn):
     # 2. VEKTÖREL HESAPLAMALAR (Kategori bazlı)
     composite_dfs = []
     for cat, group in df.groupby('category'):
-        group['perf_percentile'] = scoring.calculate_performance_composite(group)
-        group['risk_percentile'] = scoring.calculate_risk_composite(group)
-        group['qual_percentile'] = scoring.calculate_quality_composite(group)
-        group['cash_percentile'] = scoring.calculate_cashflow_composite(group)
-        group['cost_percentile'] = scoring.calculate_cost_composite(group)
+        group['perf_percentile'] = scoring_engine.calculate_performance_composite(group)
+        group['risk_percentile'] = scoring_engine.calculate_risk_composite(group)
+        group['qual_percentile'] = scoring_engine.calculate_quality_composite(group)
+        group['cash_percentile'] = scoring_engine.calculate_cashflow_composite(group)
+        group['cost_percentile'] = scoring_engine.calculate_cost_composite(group)
         composite_dfs.append(group)
 
     df_scored = pd.concat(composite_dfs)
     
-    df_scored['absolute_score'] = scoring.calculate_absolute_score(
+    df_scored['absolute_score'] = scoring_engine.calculate_absolute_score(
         df_scored['perf_percentile'], df_scored['risk_percentile'],
         df_scored['qual_percentile'], df_scored['cash_percentile'], df_scored['cost_percentile']
     )
 
     final_scores = []
     for _, row in df_scored.iterrows():
-        tot_pen, mdd_pen, vol_pen = scoring.calculate_continuous_penalty(
+        tot_pen, mdd_pen, vol_pen = scoring_engine.calculate_continuous_penalty(
             row['mdd'], row['volatility']
         )
         
-        final_sc, raw_score, conf_factor = scoring.calculate_final_score(
+        final_sc, raw_score, conf_factor = scoring_engine.calculate_final_score(
             row['absolute_score'], tot_pen, row['confidence']
         )
         
-        breakdown_json = scoring.explain_score(
+        breakdown_json = scoring_engine.explain_score(
             row['perf_percentile']*0.40, row['risk_percentile']*0.30, row['qual_percentile']*0.15, 
             row['cash_percentile']*0.05, row['cost_percentile']*0.10, row['absolute_score'], 
             mdd_pen, vol_pen, raw_score, row['confidence'], conf_factor, final_sc
@@ -155,7 +157,7 @@ def run_batch_scoring_engine(conn):
     df_scored = pd.merge(df_scored, df_final, on='fund_id')
 
     # 3. KATEGORİ İÇİ PERCENTILE
-    df_scored['final_percentile'] = scoring.calculate_category_percentile(df_scored)
+    df_scored['final_percentile'] = scoring_engine.calculate_category_percentile(df_scored)
 
     # 4. VERİTABANI KAYITLARI
     today_str = datetime.date.today().strftime('%Y-%m-%d')
@@ -163,9 +165,9 @@ def run_batch_scoring_engine(conn):
 
     for _, row in df_scored.iterrows():
         # V3.1 Çok Kriterli Rating Mekanizması
-        grade, signal = scoring.calculate_rating(
+        # Not: Çift sayımı önlemek için "final_percentile" metriği final değerlendirmeden çıkarıldı
+        grade, signal = scoring_engine.calculate_rating(
             row['final_score'],
-            row['final_percentile'],
             row['confidence']
         )
         
@@ -212,5 +214,15 @@ def run_tefas_sync_and_scoring(full_sync=False, *args, **kwargs):
         return True, "Başarılı! Kurumsal Standartlarda V3.1 Kantitatif Motoru çalıştırıldı."
     except Exception as e:
         return False, f"Hata: {str(e)}"
+    finally:
+        conn.close()
+
+if __name__ == "__main__":
+    conn = get_db_connection()
+    try:
+        run_batch_scoring_engine(conn)
+        print("SCORING TAMAMLANDI")
+    except Exception as e:
+        print(f"HATA: {e}")
     finally:
         conn.close()

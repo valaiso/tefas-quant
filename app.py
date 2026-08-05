@@ -14,7 +14,7 @@ from app.services.ranking import (
     get_top_category_leaders,
     get_fund_detail_with_ranking
 )
-from app.services.scoring_engine import run_scoring_pipeline
+from scoring import run_scoring_pipeline
 
 # --- 1. SAYFA YAPILANDIRMASI & TEMA ---
 st.set_page_config(

@@ -63,13 +63,64 @@ def calculate_quality_composite(df):
 
 def calculate_cashflow_composite(df):
     """
-    Şimdilik yatırımcı akışı verisi olmadığı için nötr kalite
+    Fon akış ve yatırımcı ilgisi skoru.
+
+    Ağırlıklar:
+    - Yatırımcı büyümesi %40
+    - Fon büyüklüğü büyümesi %30
+    - Net para akışı %20
+    - Mevcut yatırımcı tabanı %10
+
+    Veri yoksa nötr 50 döner.
     """
 
-    return pd.Series(
-        50.0,
-        index=df.index
-    )
+    score_parts = []
+
+    if "investor_growth_1m" in df.columns:
+        investor_growth = _percentile(
+            df["investor_growth_1m"].fillna(0),
+            True
+        )
+    else:
+        investor_growth = pd.Series(50, index=df.index)
+
+    score_parts.append(investor_growth * 0.40)
+
+
+    if "fund_size_growth_1m" in df.columns:
+        size_growth = _percentile(
+            df["fund_size_growth_1m"].fillna(0),
+            True
+        )
+    else:
+        size_growth = pd.Series(50, index=df.index)
+
+    score_parts.append(size_growth * 0.30)
+
+
+    if "cash_flow" in df.columns:
+        cash_flow = _percentile(
+            df["cash_flow"].fillna(0),
+            True
+        )
+    else:
+        cash_flow = pd.Series(50, index=df.index)
+
+    score_parts.append(cash_flow * 0.20)
+
+
+    if "investor_count" in df.columns:
+        investor_base = _percentile(
+            df["investor_count"].fillna(0),
+            True
+        )
+    else:
+        investor_base = pd.Series(50, index=df.index)
+
+    score_parts.append(investor_base * 0.10)
+
+
+    return sum(score_parts).round(2)
 
 
 def calculate_cost_composite(df):
@@ -85,34 +136,53 @@ def calculate_cost_composite(df):
 
 def calculate_confidence(prices, first_date, last_date):
     """
-    Veri derinliği ve güncelliğe göre güven skoru.
+    Veri derinliği, fon yaşı ve güncelliğe göre
+    güven skoru hesaplar.
     """
 
     try:
-        day_count = len(prices)
+        day_count = len(prices) if prices is not None else 0
 
+        # Fon geçmiş uzunluğu
         age_score = min(day_count / 1250 * 100, 100)
 
-        if day_count > 1000:
+        # Veri yoğunluğu
+        if day_count >= 1000:
             density_score = 100
         else:
-            density_score = day_count / 10
+            density_score = min(day_count / 10, 100)
 
-        last = pd.to_datetime(last_date)
+        # Güncellik
+        last = pd.to_datetime(last_date) if last_date else pd.Timestamp.today()
         today = pd.Timestamp.today()
 
         days_old = (today - last).days
 
         if days_old <= 2:
-            recency = 100
+            recency_score = 100
         else:
-            recency = max(100 - days_old * 5, 10)
+            recency_score = max(
+                100 - days_old * 5,
+                10
+            )
 
+        # Fon olgunluk seviyesi
+        if day_count >= 365:
+            maturity_score = 100
+        elif day_count >= 180:
+            maturity_score = 75
+        elif day_count >= 90:
+            maturity_score = 50
+        elif day_count >= 30:
+            maturity_score = 25
+        else:
+            maturity_score = 10
 
         confidence = (
             age_score * 0.35 +
-            density_score * 0.45 +
-            recency * 0.20
+            density_score * 0.25 +
+            recency_score * 0.20 +
+            maturity_score * 0.20
         )
 
         return round(float(confidence), 2)
@@ -132,17 +202,17 @@ def calculate_absolute_score(
     Ana kalite skoru.
     Ağırlıklar:
     Performans %40
-    Risk %30
+    Risk %25
     Kalite %15
-    Akış %5
+    Akış %10
     Maliyet %10
     """
 
     score = (
         perf_percentile * 0.40 +
-        risk_percentile * 0.30 +
+        risk_percentile * 0.25 +
         qual_percentile * 0.15 +
-        cash_percentile * 0.05 +
+        cash_percentile * 0.10 +
         cost_percentile * 0.10
     )
 

@@ -140,6 +140,10 @@ def load_universe_data():
     merged['category_rank'] = merged.groupby('category')['final_score'].rank(ascending=False, method='min')
     merged['category_total'] = merged.groupby('category')['final_score'].transform('count')
     merged['category_percentile'] = ((merged['category_total'] - merged['category_rank'] + 1) / merged['category_total']) * 100
+    merged['category_strength_label'] = merged.apply(
+        lambda x: f"Top %{max(1, round((x['category_rank'] / x['category_total']) * 100))}",
+        axis=1
+    )
 
     merged['institutional_rank'] = (
         merged['final_score'] * 0.70 +
@@ -267,13 +271,13 @@ elif menu == "⚡ Ana Dashboard":
             ascending=[False, False, False]
         ).head(20).copy()
 
-        top20_display = top20_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
+        top20_display = top20_df[['code', 'name', 'category', 'final_score', 'category_strength_label', 'confidence_score', 'signal']].rename(
             columns={
                 'code': 'Fon Kodu', 
                 'name': 'Fon Adı', 
                 'category': 'Kategori', 
                 'final_score': 'Final Skor', 
-                'category_percentile': 'Kategori Gücü (%)', 
+                'category_strength_label': 'Kategori Gücü', 
                 'confidence_score': 'Güven (%)', 
                 'signal': 'Sinyal'
             }

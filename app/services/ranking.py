@@ -44,12 +44,6 @@ def get_general_ranking(limit=100, conn=None):
 
     try:
 
-        date=get_latest_score_date(conn)
-
-        if not date:
-            return pd.DataFrame()
-
-
         query="""
 
         SELECT
@@ -82,7 +76,11 @@ def get_general_ranking(limit=100, conn=None):
         ON s.fund_id=f.id
 
 
-        WHERE s.date=?
+        WHERE s.date = (
+            SELECT MAX(fs.date)
+            FROM fund_scores fs
+            WHERE fs.fund_id = s.fund_id
+        )
 
 
         ORDER BY s.final_score DESC
@@ -95,7 +93,7 @@ def get_general_ranking(limit=100, conn=None):
         return pd.read_sql(
             query,
             conn,
-            params=(date,limit)
+            params=(limit,)
         )
 
 

@@ -177,6 +177,21 @@ def render_progress_bar(label, value):
     bar_str = "█" * filled_blocks + "░" * empty_blocks
     st.markdown(f"**{label}**: `{bar_str}` **{val_clamped:.1f}**")
 
+def format_category_strength(value):
+    """
+    Kategori percentile değerini Top % formatına çevirir.
+    Örn:
+    100 -> Top %1
+    95  -> Top %5
+    82  -> Top %18
+    """
+    try:
+        value = float(value)
+        top_percent = max(1, round(101 - value))
+        return f"Top %{top_percent}"
+    except:
+        return "-"
+
 # ==========================================
 # MODÜL: FON SENKRONİZASYONU
 # ==========================================
@@ -271,17 +286,19 @@ elif menu == "⚡ Ana Dashboard":
             ascending=[False, False, False]
         ).head(20).copy()
 
-        top20_display = top20_df[['code', 'name', 'category', 'final_score', 'category_strength_label', 'confidence_score', 'signal']].rename(
+        top20_display = top20_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
             columns={
                 'code': 'Fon Kodu', 
                 'name': 'Fon Adı', 
                 'category': 'Kategori', 
                 'final_score': 'Final Skor', 
-                'category_strength_label': 'Kategori Gücü', 
+                'category_percentile': 'Kategori Gücü', 
                 'confidence_score': 'Güven (%)', 
                 'signal': 'Sinyal'
             }
-        ).reset_index(drop=True)
+        )
+        top20_display['Kategori Gücü'] = top20_display['Kategori Gücü'].apply(format_category_strength)
+        top20_display = top20_display.reset_index(drop=True)
         top20_display.index += 1
         st.dataframe(top20_display, use_container_width=True)
     else:
@@ -313,10 +330,11 @@ elif menu == "🔎 Fon Keşif Merkezi":
             q_star_display = q_star_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
                 columns={
                     'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
-                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Gücü (%)', 
+                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Gücü', 
                     'confidence_score': 'Güven (%)', 'signal': 'Sinyal'
                 }
             ).reset_index(drop=True)
+            q_star_display['Kategori Gücü'] = q_star_display['Kategori Gücü'].apply(format_category_strength)
             q_star_display.index += 1
             st.dataframe(q_star_display, use_container_width=True)
 
@@ -328,10 +346,11 @@ elif menu == "🔎 Fon Keşif Merkezi":
             mom_display = mom_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
                 columns={
                     'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
-                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Gücü (%)', 
+                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Gücü', 
                     'confidence_score': 'Güven (%)', 'signal': 'Sinyal'
                 }
             ).reset_index(drop=True)
+            mom_display['Kategori Gücü'] = mom_display['Kategori Gücü'].apply(format_category_strength)
             mom_display.index += 1
             st.dataframe(mom_display, use_container_width=True)
 
@@ -343,10 +362,11 @@ elif menu == "🔎 Fon Keşif Merkezi":
             lt_display = lt_df[['code', 'name', 'category', 'final_score', 'category_percentile', 'day_count']].rename(
                 columns={
                     'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
-                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Gücü (%)', 
+                    'final_score': 'Final Skor', 'category_percentile': 'Kategori Gücü', 
                     'day_count': 'Geçmiş Gün'
                 }
             ).reset_index(drop=True)
+            lt_display['Kategori Gücü'] = lt_display['Kategori Gücü'].apply(format_category_strength)
             lt_display.index += 1
             st.dataframe(lt_display, use_container_width=True)
     else:
@@ -368,10 +388,15 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
 
         display_df = merged_df[['code', 'name', 'category', 'day_count', 'final_score', 'category_percentile', 'confidence_score', 'signal']].rename(
             columns={
-                'day_count': 'Geçmiş Gün', 'final_score': 'Final Skor', 
-                'category_percentile': 'Kategori Gücü (%)', 'confidence_score': 'Güven (%)', 'signal': 'Sinyal'
+                'day_count': 'Geçmiş Gün',
+                'final_score': 'Final Skor',
+                'category_percentile': 'Kategori Gücü',
+                'confidence_score': 'Güven (%)',
+                'signal': 'Sinyal'
             }
         ).copy()
+
+        display_df['Kategori Gücü'] = display_df['Kategori Gücü'].apply(format_category_strength)
 
         if search_query:
             display_df = display_df[
@@ -381,7 +406,7 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
         if selected_categories:
             display_df = display_df[display_df['category'].isin(selected_categories)]
 
-        display_df = display_df.sort_values(by=['Kategori Gücü (%)', 'Final Skor'], ascending=[False, False])
+        display_df = display_df.sort_values(by=['Kategori Gücü', 'Final Skor'], ascending=[True, False])
         st.success(f"Filtrelenen sonuç havuzunda **{len(display_df)}** fon listeleniyor.")
         st.dataframe(display_df, use_container_width=True)
     else:

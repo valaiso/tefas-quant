@@ -115,12 +115,18 @@ def load_universe_data():
     if not include_qualified:
         merged = merged[merged['is_qualified_clean'] == 0]
         
-    merged['confidence_score'] = pd.to_numeric(
-        merged.get('confidence_score', 0),
-        errors='coerce'
-    ).fillna(0)
-    if merged['confidence_score'].max() <= 1:
-        merged['confidence_score'] = merged['confidence_score'] * 100
+    if 'confidence_score' in merged.columns:
+        merged['confidence_score'] = pd.to_numeric(
+            merged['confidence_score'],
+            errors='coerce'
+        ).fillna(0)
+    else:
+        merged['confidence_score'] = 0
+
+    merged.loc[
+        merged['confidence_score'] <= 1,
+        'confidence_score'
+    ] *= 100
     
     if 'final_score' in merged.columns:
         merged['final_score'] = pd.to_numeric(
@@ -134,6 +140,12 @@ def load_universe_data():
     merged['category_rank'] = merged.groupby('category')['final_score'].rank(ascending=False, method='min')
     merged['category_total'] = merged.groupby('category')['final_score'].transform('count')
     merged['category_percentile'] = ((merged['category_total'] - merged['category_rank'] + 1) / merged['category_total']) * 100
+
+    merged['institutional_rank'] = (
+        merged['final_score'] * 0.70 +
+        merged['confidence_score'] * 0.20 +
+        merged['category_percentile'] * 0.10
+    )
 
     return merged
 
@@ -389,9 +401,12 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
         if fund_detail:
             badge_html = get_grade_badge_html(fund_detail['letter_grade'])
             
-            rank = int(fund_detail.get('category_rank', 1) or 1)
-            total = int(fund_detail.get('category_total', 1) or 1)
-            top_pct = (1 - ((rank - 1) / total)) * 100 if total > 0 else 0
+            rank = int(float(fund_detail.get('category_rank', 1) or 1))
+            total = int(float(fund_detail.get('category_total', 1) or 1))
+            if total > 0:
+                top_pct = max(1, ((total - rank + 1) / total) * 100)
+            else:
+                top_pct = 0
             
             st.markdown(f"""
             <div class="card-container">
@@ -541,8 +556,8 @@ elif menu == "⚖️ Fon Karşılaştırma":
         
         comp_data = {
             "Metrik": ["Fon Adı", "Kategori", "Final Skor", "Kategori Gücü (%)", "Güven Skoru (%)", "Piyasa Sinyali", "Geçmiş Gün Sayısı"],
-            f"{fund_a}": [row_a['name'], row_a['category'], f"{row_a['final_score']:.1f}", f"%{row_a['category_percentile']:.1f}", f"%{row_a['confidence_score']:.0f}", row_a['signal'], row_a['day_count']],
-            f"{fund_b}": [row_b['name'], row_b['category'], f"{row_b['final_score']:.1f}", f"%{row_b['category_percentile']:.1f}", f"%{row_b['confidence_score']:.0f}", row_b['signal'], row_b['day_count']]
+            f"{fund_a}": [row_a['name'], row_a['category'], f"{row_a['final_score']:.1f}", f"%{row_a['category_percentile']:.1f}", f"%{max(row_a['confidence_score'], 0.1):.1f}", row_a['signal'], row_a['day_count']],
+            f"{fund_b}": [row_b['name'], row_b['category'], f"{row_b['final_score']:.1f}", f"%{row_b['category_percentile']:.1f}", f"%{max(row_b['confidence_score'], 0.1):.1f}", row_b['signal'], row_b['day_count']]
         }
         st.table(pd.DataFrame(comp_data))
     else:

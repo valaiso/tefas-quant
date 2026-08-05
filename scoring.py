@@ -25,14 +25,29 @@ def get_db_connection():
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS funds (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE, title TEXT, category TEXT, status TEXT DEFAULT 'ACTIVE', is_qualified INTEGER DEFAULT 0, history_completed INTEGER DEFAULT 0)")
     cursor.execute("CREATE TABLE IF NOT EXISTS fund_daily_prices (fund_id INTEGER, date TEXT, price REAL, PRIMARY KEY (fund_id, date))")
-    cursor.execute("CREATE TABLE IF NOT EXISTS fund_scores (fund_id INTEGER, date TEXT, absolute_score REAL, final_score REAL, confidence_score REAL, category_percentile REAL, signal TEXT, letter_grade TEXT, breakdown_json TEXT, raw_score REAL, confidence_factor REAL, PRIMARY KEY (fund_id, date))")
+    cursor.execute("CREATE TABLE IF NOT EXISTS fund_scores (fund_id INTEGER, date TEXT, absolute_score REAL, final_score REAL, confidence_score REAL, category_rank INTEGER, category_total INTEGER, category_percentile REAL, signal TEXT, letter_grade TEXT, breakdown_json TEXT, raw_score REAL, confidence_factor REAL, PRIMARY KEY (fund_id, date))")
     cursor.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS fund_flow_metrics (
+        fund_id INTEGER,
+        date TEXT,
+        investor_count INTEGER,
+        investor_growth_1m REAL,
+        fund_size REAL,
+        fund_size_growth_1m REAL,
+        cash_flow REAL,
+        source TEXT,
+        PRIMARY KEY (fund_id, date)
+    )
+    """)
     
     migrations = [
         ("funds", "is_qualified INTEGER DEFAULT 0"), 
         ("funds", "history_completed INTEGER DEFAULT 0"), 
         ("fund_scores", "absolute_score REAL"), 
         ("fund_scores", "final_score REAL"), 
+        ("fund_scores", "category_rank INTEGER"),
+        ("fund_scores", "category_total INTEGER"),
         ("fund_scores", "category_percentile REAL"), 
         ("fund_scores", "letter_grade TEXT"), 
         ("fund_scores", "signal TEXT"), 
@@ -64,6 +79,51 @@ def run_batch_scoring_engine(conn):
     prices_df = pd.read_sql("SELECT fund_id, date, price FROM fund_daily_prices ORDER BY fund_id, date ASC", con=conn)
     if prices_df.empty: return
 
+    metrics_df = pd.read_sql("""
+    SELECT 
+    fund_id,
+    sharpe_ratio,
+    sortino_ratio,
+    volatility,
+    max_drawdown,
+    alpha,
+    information_ratio,
+    recovery_time
+    FROM fund_metrics
+    WHERE date = (SELECT MAX(date) FROM fund_metrics)
+    """, con=conn)
+
+    metric_map = metrics_df.set_index("fund_id").to_dict("index")
+
+    info_df = pd.read_sql("""
+    SELECT
+    fund_id,
+    investor_count,
+    investor_growth_1m,
+    fund_size,
+    fund_size_growth_1m,
+    cash_flow
+    FROM fund_flow_metrics
+    WHERE date = (
+        SELECT MAX(date)
+        FROM fund_flow_metrics
+    )
+    """, con=conn)
+    info_map = info_df.set_index("fund_id").to_dict("index")
+
+    flow_df = pd.read_sql("""
+    SELECT
+    fund_id,
+    investor_growth_1m,
+    cash_flow
+    FROM fund_flow_metrics
+    WHERE date = (
+        SELECT MAX(date)
+        FROM fund_flow_metrics
+    )
+    """, con=conn)
+    flow_map = flow_df.set_index("fund_id").to_dict("index")
+
     grouped = dict(tuple(prices_df.groupby('fund_id')))
     raw_data = []
 
@@ -87,15 +147,23 @@ def run_batch_scoring_engine(conn):
         daily_returns = pd.Series(prices).pct_change().dropna()
         volatility = float(daily_returns.std() * (255 ** 0.5)) if len(daily_returns) > 5 else 0.2
         mean_ret = float(daily_returns.mean()) if len(daily_returns) > 0 else 0
-        sharpe = (mean_ret * 255) / (volatility + 1e-9)
         
-        neg_ret = daily_returns[daily_returns < 0]
-        downside_vol = float(neg_ret.std() * (255 ** 0.5)) if len(neg_ret) > 3 else volatility
-        sortino = (mean_ret * 255) / (downside_vol + 1e-9)
+        # Gerçek metrikler varsa onları kullan, yoksa hesaplananları baz al
+        m = metric_map.get(f_id, {})
+        info = info_map.get(f_id, {})
+        flow = flow_map.get(f_id, {})
+        
+        sharpe = m.get('sharpe_ratio') if m.get('sharpe_ratio') is not None else ((mean_ret * 255) / (volatility + 1e-9))
+        sortino = m.get('sortino_ratio') if m.get('sortino_ratio') is not None else sharpe
+        volatility = m.get('volatility') if m.get('volatility') is not None else volatility
+        mdd = m.get('max_drawdown') if m.get('max_drawdown') is not None else 0.0
+        alpha = m.get('alpha') if m.get('alpha') is not None else 0.0
+        information_ratio = m.get('information_ratio') if m.get('information_ratio') is not None else 0.0
 
-        cum_max = np.maximum.accumulate(prices)
-        drawdowns = (prices - cum_max) / cum_max
-        mdd = float(abs(drawdowns.min()) * 100) if len(drawdowns) > 0 else 0.0
+        if m.get('max_drawdown') is None:
+            cum_max = np.maximum.accumulate(prices)
+            drawdowns = (prices - cum_max) / cum_max
+            mdd = float(abs(drawdowns.min()) * 100) if len(drawdowns) > 0 else 0.0
 
         first_date = p_history['date'].iloc[0]
         last_date = p_history['date'].iloc[-1]
@@ -103,9 +171,15 @@ def run_batch_scoring_engine(conn):
         conf = scoring_engine.calculate_confidence(prices, first_date, last_date)
 
         raw_data.append({
-            'fund_id': f_id, 'category': category,
+            'fund_id': f_id, 
+            'category': category,
+            'investor_count': info.get('investor_count', flow.get('investor_count', 0)),
+            'aum': info.get('aum', flow.get('fund_size', 0)),
+            'investor_growth_1m': flow.get('investor_growth_1m', 0),
+            'cash_flow': flow.get('cash_flow', 0),
             'r_30': r_30, 'r_90': r_90, 'r_180': r_180, 'r_365': r_365,
             'sharpe': sharpe, 'sortino': sortino, 'volatility': volatility, 'mdd': mdd,
+            'alpha': alpha, 'information_ratio': information_ratio,
             'confidence': conf, 'age_years': day_count / 365.0, 'depth_score': min(100, day_count / 3.65)
         })
 
@@ -140,8 +214,8 @@ def run_batch_scoring_engine(conn):
         )
         
         breakdown_json = scoring_engine.explain_score(
-            row['perf_percentile']*0.40, row['risk_percentile']*0.30, row['qual_percentile']*0.15, 
-            row['cash_percentile']*0.05, row['cost_percentile']*0.10, row['absolute_score'], 
+            row['perf_percentile']*0.40, row['risk_percentile']*0.25, row['qual_percentile']*0.15, 
+            row['cash_percentile']*0.10, row['cost_percentile']*0.10, row['absolute_score'], 
             mdd_pen, vol_pen, raw_score, row['confidence'], conf_factor, final_sc
         )
         
@@ -159,29 +233,53 @@ def run_batch_scoring_engine(conn):
     # 3. KATEGORİ İÇİ PERCENTILE
     df_scored['final_percentile'] = scoring_engine.calculate_category_percentile(df_scored)
 
+    # KATEGORİ İÇİ SIRALAMA BİLGİLERİ
+    df_scored['category_rank'] = (
+        df_scored.groupby('category')['final_score']
+        .rank(ascending=False, method='min')
+    )
+
+    df_scored['category_total'] = (
+        df_scored.groupby('category')['final_score']
+        .transform('count')
+    )
+
+    df_scored['category_percentile'] = (
+        (df_scored['category_total'] - df_scored['category_rank'] + 1)
+        / df_scored['category_total']
+    ) * 100
+
     # 4. VERİTABANI KAYITLARI
     today_str = datetime.date.today().strftime('%Y-%m-%d')
     db_records = []
 
     for _, row in df_scored.iterrows():
-        # V3.1 Çok Kriterli Rating Mekanizması
-        # Not: Çift sayımı önlemek için "final_percentile" metriği final değerlendirmeden çıkarıldı
         grade, signal = scoring_engine.calculate_rating(
             row['final_score'],
             row['confidence']
         )
         
         db_records.append((
-            int(row['fund_id']), today_str, float(row['absolute_score']), float(row['final_score']),
-            float(row['confidence']), float(row['final_percentile']), signal, grade, row['breakdown_json'],
-            float(row['raw_score']), float(row['confidence_factor'])
+            int(row['fund_id']),
+            today_str,
+            float(row['absolute_score']),
+            float(row['final_score']),
+            float(row['confidence']),
+            int(row['category_rank']),
+            int(row['category_total']),
+            float(row['category_percentile']),
+            signal,
+            grade,
+            row['breakdown_json'],
+            float(row['raw_score']),
+            float(row['confidence_factor'])
         ))
 
     cursor = conn.cursor()
     cursor.executemany("""
         INSERT OR REPLACE INTO fund_scores 
-        (fund_id, date, absolute_score, final_score, confidence_score, category_percentile, signal, letter_grade, breakdown_json, raw_score, confidence_factor) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (fund_id, date, absolute_score, final_score, confidence_score, category_rank, category_total, category_percentile, signal, letter_grade, breakdown_json, raw_score, confidence_factor) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, db_records)
     conn.commit()
 

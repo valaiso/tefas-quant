@@ -209,13 +209,19 @@ def run_batch_scoring_engine(conn):
             row['mdd'], row['volatility']
         )
         
+        investor_penalty = scoring_engine.calculate_investor_penalty(
+            row['investor_count']
+        )
+        tot_pen += investor_penalty
+        
         final_sc, raw_score, conf_factor = scoring_engine.calculate_final_score(
             row['absolute_score'], tot_pen, row['confidence']
         )
         
+        row['investor_penalty'] = investor_penalty
         breakdown_json = scoring_engine.explain_score(
             row['perf_percentile']*0.40, row['risk_percentile']*0.25, row['qual_percentile']*0.15, 
-            row['cash_percentile']*0.10, row['cost_percentile']*0.10, row['absolute_score'], 
+            row['cash_percentile']*0.15, row['cost_percentile']*0.05, row['absolute_score'], 
             mdd_pen, vol_pen, raw_score, row['confidence'], conf_factor, final_sc
         )
         

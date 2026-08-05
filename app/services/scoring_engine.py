@@ -219,6 +219,31 @@ def calculate_absolute_score(
     return score.round(2)
 
 
+def calculate_investor_penalty(investor_count):
+    """
+    Düşük yatırımcı sayısı riski.
+    Küçük yatırımcı tabanı sürdürülebilirlik riski oluşturur.
+    """
+
+    try:
+        investor_count = int(investor_count)
+
+        if investor_count < 100:
+            return 15
+
+        elif investor_count < 500:
+            return 10
+
+        elif investor_count < 1000:
+            return 5
+
+        else:
+            return 0
+
+    except:
+        return 5
+
+
 def calculate_continuous_penalty(mdd, volatility):
     """
     Sürekli risk ceza motoru.

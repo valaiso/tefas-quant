@@ -217,20 +217,23 @@ elif menu == "⚡ Ana Dashboard":
         total_analyzed = len(merged_df)
         signal_counts = merged_df['signal'].value_counts() if 'signal' in merged_df.columns else pd.Series()
         
-        guclu_al = signal_counts.get('GÜÇLÜ AL / ELİT', 0) + signal_counts.get('GÜÇLÜ AL', 0)
+        guclu_al = (
+            signal_counts.get('GÜÇLÜ AL / ELİT', 0)
+            + signal_counts.get('GÜÇLÜ AL', 0)
+        )
         al_count = signal_counts.get('AL', 0)
-        iyi_count = signal_counts.get('İYİ', 0)
         izle_count = signal_counts.get('İZLE', 0)
-        zayif_count = signal_counts.get('ZAYIF', 0) + signal_counts.get('TUT', 0)
+        zayif_count = signal_counts.get('ZAYIF', 0)
+        uzak_dur_count = signal_counts.get('UZAK DUR', 0)
 
         # Dashboard Metrik Satırı
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Toplam Fon", f"{total_analyzed}")
-        col2.metric("Güçlü AL", f"{guclu_al}")
-        col3.metric("AL", f"{al_count}")
-        col4.metric("BEKLE", f"{iyi_count}")
-        col5.metric("İZLE", f"{izle_count}")
-        col6.metric("ZAYIF", f"{zayif_count}")
+        col2.metric("🟢 Güçlü AL", f"{guclu_al}")
+        col3.metric("🟢 AL", f"{al_count}")
+        col4.metric("🟡 İZLE", f"{izle_count}")
+        col5.metric("🟠 ZAYIF", f"{zayif_count}")
+        col6.metric("🔴 UZAK DUR", f"{uzak_dur_count}")
 
         st.markdown("---")
         st.subheader("🏆 Her Kategorinin Lideri")

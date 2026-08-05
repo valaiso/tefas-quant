@@ -26,7 +26,28 @@ class FundScore(Base):
     id = Column(Integer, primary_key=True, index=True)
     fund_id = Column(Integer, ForeignKey("funds.id"))
     date = Column(Date)
-    total_score = Column(Float)
+
+    performance_score = Column(Float)
+    risk_score = Column(Float)
+    consistency_score = Column(Float)
+    stability_score = Column(Float)
+
+    raw_score = Column(Float)
     confidence_score = Column(Float)
+    final_score = Column(Float)
+
+    category_rank = Column(Integer)
+    category_total = Column(Integer)
+    category_percentile = Column(Float)
+
     letter_grade = Column(String)
     signal = Column(String)
+
+    breakdown_json = Column(String)
+
+    momentum_score = Column(Float)
+    quality_score = Column(Float)
+    valuation_score = Column(Float)
+
+    absolute_score = Column(Float)
+    confidence_factor = Column(Float)

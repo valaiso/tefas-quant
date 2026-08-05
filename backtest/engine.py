@@ -47,7 +47,7 @@ class VectorizedBacktestEngine:
             )
             entry_merged = entry_merged.rename(columns={'price': 'entry_price', 'row_idx': 'entry_idx'})
             
-            # Çıkış fiyatları için hedef indeksi belirle (giriş + N gün sonrasık)
+            # Çıkış fiyatları için hedef indeksi belirle (giriş + N gün sonrasi)
             exit_target = prices_df[['fund_id', 'row_idx', 'date', 'price']].copy()
             exit_target['target_idx'] = exit_target['row_idx'] - days  # entry_idx ile eşleşmesi için
             

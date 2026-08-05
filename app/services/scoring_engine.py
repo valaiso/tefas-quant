@@ -294,16 +294,16 @@ def calculate_rating(final_score, confidence):
     if confidence < 40:
         return "C", "İZLE"
 
-    if final_score >= 85:
+    if final_score >= 80:
         return "A+", "GÜÇLÜ AL"
 
-    elif final_score >= 75:
+    elif final_score >= 70:
         return "A", "AL"
 
-    elif final_score >= 65:
+    elif final_score >= 60:
         return "B", "İZLE"
 
-    elif final_score >= 55:
+    elif final_score >= 45:
         return "C", "ZAYIF"
 
     else:

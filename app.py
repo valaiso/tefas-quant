@@ -240,7 +240,7 @@ elif menu == "⚡ Ana Dashboard":
                         <small style="color: #94A3B8;"><b>{row['category']}</b></small>
                         <h3 style="color: #60A5FA; margin: 5px 0;">{row['code']}</h3>
                         <p style="font-size: 0.85rem; color: #CBD5E1; margin-bottom: 8px; height: 38px; overflow: hidden;">{row['name']}</p>
-                        <p style="margin: 0; font-size: 0.9rem;">Final Skor: <b>{row['final_score']:.1f}</b><br>Kategori Gücü: <b>%{row['category_percentile']:.1f}</b></p>
+                        <p style="margin: 0; font-size: 0.9rem;">Final Skor: <b>{row['final_score']:.1f}</b><br>Kategori Gücü: <b>Top %{max(1, 101 - row['category_percentile']):.0f}</b></p>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -389,8 +389,8 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
         if fund_detail:
             badge_html = get_grade_badge_html(fund_detail['letter_grade'])
             
-            rank = fund_detail['category_rank']
-            total = fund_detail['category_total']
+            rank = int(fund_detail.get('category_rank', 1) or 1)
+            total = int(fund_detail.get('category_total', 1) or 1)
             top_pct = (1 - ((rank - 1) / total)) * 100 if total > 0 else 0
             
             st.markdown(f"""

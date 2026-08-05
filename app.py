@@ -98,10 +98,25 @@ def load_universe_data():
     merged['category'] = merged['category'].fillna('Diğer')
     
     def parse_qualified(val):
-        if pd.isna(val): return 0
-        if isinstance(val, bool): return 1 if val else 0
+        if pd.isna(val):
+            return 0
+
+        try:
+            if float(val) == 1:
+                return 1
+            else:
+                return 0
+        except:
+            pass
+
         val_str = str(val).strip().lower()
-        return 1 if val_str in ['true', '1', 'yes', 'y', 'evet'] else 0
+
+        return 1 if val_str in [
+            'true',
+            'yes',
+            'y',
+            'evet'
+        ] else 0
 
     merged['is_qualified_clean'] = merged['is_qualified'].apply(parse_qualified)
     
@@ -113,7 +128,9 @@ def load_universe_data():
     merged['day_count'] = merged['day_count'].fillna(0)
     
     if not include_qualified:
-        merged = merged[merged['is_qualified_clean'] == 0]
+        merged = merged[merged['is_qualified_clean'] != 1]
+    else:
+        merged = merged.copy()
         
     if 'confidence_score' in merged.columns:
         merged['confidence_score'] = pd.to_numeric(
@@ -180,10 +197,6 @@ def render_progress_bar(label, value):
 def format_category_strength(value):
     """
     Kategori percentile değerini Top % formatına çevirir.
-    Örn:
-    100 -> Top %1
-    95  -> Top %5
-    82  -> Top %18
     """
     try:
         value = float(value)

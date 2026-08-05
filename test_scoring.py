@@ -1,34 +1,83 @@
 import pandas as pd
-from app.services.scoring_engine import QuantitativeFundScorer
 
-# Örnek Test Verisi
+from app.services.scoring_engine import (
+    calculate_performance_composite,
+    calculate_risk_composite,
+    calculate_quality_composite,
+    calculate_cashflow_composite,
+    calculate_cost_composite,
+    calculate_absolute_score,
+    calculate_final_score,
+    calculate_rating
+)
+
+
 data = [
     {
-        "fund_code": "XYZ", "category": "Hisse", 
-        "return_1y": 120.0, "return_3m": 15.0, "alpha": 10.0, "information_ratio": 1.5,
-        "sharpe_ratio": 2.1, "sortino_ratio": 3.0, "volatility": 12.0, "max_drawdown": -8.0,
-        "investor_growth_1m": 5.0, "aum_growth_1m": 8.0, "fund_age_years": 5.0, "management_fee": 2.0
+        "category": "Hisse",
+        "r_365": 120,
+        "r_180": 50,
+        "r_90": 20,
+        "r_30": 10,
+        "sharpe": 2.1,
+        "sortino": 3.0,
+        "volatility": 0.12,
+        "mdd": 8,
+        "age_years": 5,
+        "depth_score": 90
     },
     {
-        "fund_code": "ABC", "category": "Hisse", 
-        "return_1y": 50.0, "return_3m": -5.0, "alpha": 2.0, "information_ratio": 0.5,
-        "sharpe_ratio": 0.8, "sortino_ratio": 1.0, "volatility": 25.0, "max_drawdown": -22.0,
-        "investor_growth_1m": 20.0, "aum_growth_1m": 2.0, "fund_age_years": 2.0, "management_fee": 3.5
+        "category": "Hisse",
+        "r_365": 50,
+        "r_180": 20,
+        "r_90": 5,
+        "r_30": -5,
+        "sharpe": 0.8,
+        "sortino": 1.0,
+        "volatility": 0.25,
+        "mdd": 22,
+        "age_years": 2,
+        "depth_score": 50
     }
 ]
 
+
 df = pd.DataFrame(data)
 
-# 1. Kategori içi sıralamayı hesapla
 
-# 2. Skorları hesapla ve ekrana yazdır
-for _, row in ranked_df.iterrows():
-    scorer = QuantitativeFundScorer(row)
-    result = scorer.calculate_scores()
-    print("\n------------------------------")
-    print(f"Fon Kodu     : {result['fund_code']}")
-    print(f"Toplam Skor  : {result['total_score']} / 100")
-    print(f"Kalite Grubu : {result['grade']}")
-    print(f"Sinyal       : {result['signal']}")
-    print(f"Uygulanan Cezalar: {result['applied_penalties']}")
+perf = calculate_performance_composite(df)
+risk = calculate_risk_composite(df)
+quality = calculate_quality_composite(df)
+cash = calculate_cashflow_composite(df)
+cost = calculate_cost_composite(df)
+
+
+absolute = calculate_absolute_score(
+    perf,
+    risk,
+    quality,
+    cash,
+    cost
+)
+
+
+for i in range(len(df)):
+
+    final_score, raw_score, confidence_factor = calculate_final_score(
+        absolute.iloc[i],
+        0,
+        80
+    )
+
+    grade, signal = calculate_rating(
+        final_score,
+        80
+    )
+
+    print("------------------------------")
+    print("Fon:", i + 1)
+    print("Absolute Score:", absolute.iloc[i])
+    print("Final Score:", final_score)
+    print("Grade:", grade)
+    print("Signal:", signal)
     print("------------------------------")

@@ -228,7 +228,7 @@ elif menu == "⚡ Ana Dashboard":
         col1.metric("Toplam Fon", f"{total_analyzed}")
         col2.metric("Güçlü AL", f"{guclu_al}")
         col3.metric("AL", f"{al_count}")
-        col4.metric("İYİ", f"{iyi_count}")
+        col4.metric("BEKLE", f"{iyi_count}")
         col5.metric("İZLE", f"{izle_count}")
         col6.metric("ZAYIF", f"{zayif_count}")
 

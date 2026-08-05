@@ -7,6 +7,10 @@ class Fund(Base):
     id = Column(Integer, primary_key=True, index=True)
     code = Column(String, unique=True, index=True)
     title = Column(String)
+    category = Column(String)
+    status = Column(String)
+    is_qualified = Column(Integer)
+    history_completed = Column(Integer)
 
 class FundDailyPrice(Base):
     __tablename__ = "fund_daily_prices"

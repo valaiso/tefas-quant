@@ -1,64 +1,310 @@
-class QuantitativeFundScorer:
-    def __init__(self, row):
-        self.row = row
-        self.penalties = []
-        self.penalty_points = 0.0
+import pandas as pd
+import numpy as np
+import json
 
-    def calculate_scores(self):
-        # 1. Performans ve Kalite Getiri (%35 Ağırlık)
-        perf_sub = (self.row['rank_return_1y'] * 0.5) + (self.row['rank_alpha'] * 0.3) + (self.row['rank_info_ratio'] * 0.2)
-        score_perf = perf_sub * 0.35
 
-        # 2. Risk Analizi (%30 Ağırlık)
-        risk_sub = (self.row['rank_sharpe'] * 0.3) + (self.row['rank_sortino'] * 0.3) + (self.row['rank_volatility'] * 0.2) + (self.row['rank_max_drawdown'] * 0.2)
-        score_risk = risk_sub * 0.30
+def _percentile(series, ascending=True):
+    """
+    Kategori içi percentile hesaplama
+    """
+    if len(series) == 0:
+        return series
 
-        # 3. Para Akışı (%15 Ağırlık)
-        flow_sub = (self.row['rank_investor_growth'] * 0.5) + (self.row['rank_aum_growth'] * 0.5)
-        score_flow = flow_sub * 0.15
+    if ascending:
+        return series.rank(pct=True) * 100
+    else:
+        return (1 - series.rank(pct=True)) * 100
 
-        # 4. Kalite ve Yönetim (%10 Ağırlık)
-        score_quality = self.row['rank_fund_age'] * 0.10
 
-        # 5. Maliyet (%10 Ağırlık)
-        score_cost = self.row['rank_management_fee'] * 0.10
+def calculate_performance_composite(df):
+    """
+    Performans skoru (%40)
+    """
 
-        gross_score = score_perf + score_risk + score_flow + score_quality + score_cost
+    score = (
+        _percentile(df["r_365"], True) * 0.40 +
+        _percentile(df["r_180"], True) * 0.25 +
+        _percentile(df["r_90"], True) * 0.20 +
+        _percentile(df["r_30"], True) * 0.15
+    )
 
-        # CEZALAR
-        if self.row['investor_growth_1m'] > 15.0 and self.row['return_3m'] < 0:
-            self.penalty_points += 10.0
-            self.penalties.append("FOMO Alarmı (-10)")
+    return score
 
-        if self.row['rank_volatility'] < 20.0 and self.row['rank_max_drawdown'] < 20.0:
-            self.penalty_points += 5.0
-            self.penalties.append("Aşırı Risk Cezası (-5)")
 
-        if self.row['management_fee'] > 3.0:
-            self.penalty_points += 3.0
-            self.penalties.append("Yüksek Maliyet Cezası (-3)")
+def calculate_risk_composite(df):
+    """
+    Risk skoru (%30)
+    Yüksek Sharpe/Sortino iyi,
+    yüksek volatilite ve mdd kötü
+    """
 
-        net_score = max(0.0, round(gross_score - self.penalty_points, 2))
+    score = (
+        _percentile(df["sharpe"], True) * 0.35 +
+        _percentile(df["sortino"], True) * 0.30 +
+        _percentile(df["volatility"], False) * 0.15 +
+        _percentile(df["mdd"], False) * 0.20
+    )
 
-        # Kalite Grubu
-        if net_score >= 90: grade = "A+"
-        elif net_score >= 80: grade = "A"
-        elif net_score >= 70: grade = "B"
-        elif net_score >= 60: grade = "C"
-        else: grade = "Zayıf"
+    return score
 
-        # Sinyal
-        if net_score >= 90: signal = "Güçlü AL"
-        elif net_score >= 75: signal = "AL / İzle"
-        elif net_score >= 60: signal = "Bekle"
-        elif net_score >= 40: signal = "Zayıf"
-        else: signal = "Uzak Dur"
 
-        return {
-            "fund_code": self.row['fund_code'],
-            "category": self.row['category'],
-            "total_score": net_score,
-            "grade": grade,
-            "signal": signal,
-            "applied_penalties": self.penalties
-        }
+def calculate_quality_composite(df):
+    """
+    Fon yaşı ve veri derinliği kalite skoru
+    """
+
+    score = (
+        _percentile(df["age_years"], True) * 0.50 +
+        _percentile(df["depth_score"], True) * 0.50
+    )
+
+    return score
+
+
+def calculate_cashflow_composite(df):
+    """
+    Şimdilik yatırımcı akışı verisi olmadığı için nötr kalite
+    """
+
+    return pd.Series(
+        50.0,
+        index=df.index
+    )
+
+
+def calculate_cost_composite(df):
+    """
+    Şimdilik maliyet verisi yoksa nötr
+    """
+
+    return pd.Series(
+        50.0,
+        index=df.index
+    )
+
+
+def calculate_confidence(prices, first_date, last_date):
+    """
+    Veri derinliği ve güncelliğe göre güven skoru.
+    """
+
+    try:
+        day_count = len(prices)
+
+        age_score = min(day_count / 1250 * 100, 100)
+
+        if day_count > 1000:
+            density_score = 100
+        else:
+            density_score = day_count / 10
+
+        last = pd.to_datetime(last_date)
+        today = pd.Timestamp.today()
+
+        days_old = (today - last).days
+
+        if days_old <= 2:
+            recency = 100
+        else:
+            recency = max(100 - days_old * 5, 10)
+
+
+        confidence = (
+            age_score * 0.35 +
+            density_score * 0.45 +
+            recency * 0.20
+        )
+
+        return round(float(confidence), 2)
+
+    except Exception:
+        return 50.0
+
+
+def calculate_absolute_score(
+    perf_percentile,
+    risk_percentile,
+    qual_percentile,
+    cash_percentile,
+    cost_percentile
+):
+    """
+    Ana kalite skoru.
+    Ağırlıklar:
+    Performans %40
+    Risk %30
+    Kalite %15
+    Akış %5
+    Maliyet %10
+    """
+
+    score = (
+        perf_percentile * 0.40 +
+        risk_percentile * 0.30 +
+        qual_percentile * 0.15 +
+        cash_percentile * 0.05 +
+        cost_percentile * 0.10
+    )
+
+    return score.round(2)
+
+
+def calculate_continuous_penalty(mdd, volatility):
+    """
+    Sürekli risk ceza motoru.
+
+    mdd:
+    Maximum Drawdown (%)
+
+    volatility:
+    Yıllık volatilite
+    """
+
+    total_penalty = 0.0
+    mdd_penalty = 0.0
+    vol_penalty = 0.0
+
+
+    # Derin düşüş cezası
+    if mdd >= 20:
+        mdd_penalty = min((mdd - 20) * 0.5, 10)
+        total_penalty += mdd_penalty
+
+
+    # Aşırı volatilite cezası
+    if volatility >= 0.30:
+        vol_penalty = min((volatility - 0.30) * 20, 10)
+        total_penalty += vol_penalty
+
+
+    return (
+        round(total_penalty, 2),
+        round(mdd_penalty, 2),
+        round(vol_penalty, 2)
+    )
+
+
+def calculate_final_score(absolute_score, penalty, confidence):
+    """
+    Final skor hesaplama.
+
+    Absolute Score:
+    Ana kalite
+
+    Penalty:
+    Risk cezaları
+
+    Confidence:
+    Veri güvenilirliği
+    """
+
+    raw_score = absolute_score - penalty
+
+    # Confidence artık çarpan değil,
+    # küçük kalite düzeltmesi olarak kullanılır.
+    confidence_factor = confidence / 100.0
+    confidence_adjustment = (
+        (confidence_factor - 0.5) * 10
+    )
+
+    final_score = raw_score + confidence_adjustment
+
+
+    final_score = max(
+        0,
+        min(100, final_score)
+    )
+
+
+    return (
+        round(float(final_score), 2),
+        round(float(raw_score), 2),
+        round(float(confidence_factor), 3)
+    )
+
+
+def explain_score(
+    perf,
+    risk,
+    quality,
+    cash,
+    cost,
+    absolute_score,
+    mdd_penalty,
+    vol_penalty,
+    raw_score,
+    confidence,
+    confidence_factor,
+    final_score
+):
+    """
+    Kullanıcıya gösterilecek skor açıklaması.
+    """
+
+    data = {
+        "performance_score": round(float(perf), 2),
+        "risk_score": round(float(risk), 2),
+        "quality_score": round(float(quality), 2),
+        "cashflow_score": round(float(cash), 2),
+        "cost_score": round(float(cost), 2),
+
+        "absolute_score": round(float(absolute_score), 2),
+
+        "penalties": {
+            "max_drawdown": round(float(mdd_penalty), 2),
+            "volatility": round(float(vol_penalty), 2)
+        },
+
+        "raw_score": round(float(raw_score), 2),
+        "confidence": round(float(confidence), 2),
+        "confidence_factor": round(float(confidence_factor), 3),
+
+        "final_score": round(float(final_score), 2)
+    }
+
+    return json.dumps(data, ensure_ascii=False)
+
+
+def calculate_category_percentile(df):
+    """
+    Fonları kendi kategorisi içinde percentile sıralar.
+    """
+
+    if df.empty:
+        return pd.Series(dtype=float)
+
+    result = (
+        df.groupby("category")["final_score"]
+        .rank(
+            pct=True,
+            ascending=True
+        ) * 100
+    )
+
+    return result.round(2)
+
+
+def calculate_rating(final_score, confidence):
+    """
+    Final skor + güven seviyesine göre
+    harf notu ve yatırım sinyali üretir.
+    """
+
+    # Güven çok düşükse sınırlama
+    if confidence < 40:
+        return "C", "İZLE"
+
+    if final_score >= 85:
+        return "A+", "GÜÇLÜ AL"
+
+    elif final_score >= 75:
+        return "A", "AL"
+
+    elif final_score >= 65:
+        return "B", "İZLE"
+
+    elif final_score >= 55:
+        return "C", "ZAYIF"
+
+    else:
+        return "D", "UZAK DUR"

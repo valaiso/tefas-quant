@@ -1,5 +1,4 @@
 import pandas as pd
-from app.services.ranking import calculate_category_percentiles
 from app.services.scoring_engine import QuantitativeFundScorer
 
 # Örnek Test Verisi
@@ -21,7 +20,6 @@ data = [
 df = pd.DataFrame(data)
 
 # 1. Kategori içi sıralamayı hesapla
-ranked_df = calculate_category_percentiles(df)
 
 # 2. Skorları hesapla ve ekrana yazdır
 for _, row in ranked_df.iterrows():

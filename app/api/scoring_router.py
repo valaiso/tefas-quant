@@ -1,3 +1,4 @@
+from app.services.ranking import calculate_category_percentiles
 from fastapi import APIRouter
 import pandas as pd
 from app.schemas.scoring import FundRawInput, FundScoreOutput
@@ -14,7 +15,7 @@ def calculate_batch_scores(funds: list[FundRawInput]):
     if df.empty:
         return []
 
-    ranked_df = calculate_category_percentiles(df)
+    
 
     results = []
     for _, row in ranked_df.iterrows():

@@ -1,247 +1,314 @@
 import pandas as pd
 import numpy as np
-import sqlite3
-import datetime
-import os
 import json
 
-def get_db_connection():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(base_dir, "tefas.db")
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    return conn
 
-def ensure_column(conn, table, column, dtype):
-    """Tabloda eksik bir kolon varsa güvenli bir şekilde ALTER TABLE uygular (Migration)."""
-    cursor = conn.cursor()
-    cols = [
-        x[1] 
-        for x in cursor.execute(
-            f"PRAGMA table_info({table})"
-        )
-    ]
-    if column not in cols:
-        cursor.execute(
-            f"ALTER TABLE {table} ADD COLUMN {column} {dtype}"
-        )
-        conn.commit()
+def _percentile(series, ascending=True):
+    """
+    Kategori içi percentile hesaplama
+    """
+    if len(series) == 0:
+        return series
 
-def init_fund_scores_table(conn):
-    """fund_scores tablosunu ve gelecekteki olası genişlemeler için migration destekli yapıyı hazırlar."""
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fund_scores (
-            fund_id INTEGER,
-            date TEXT,
-            performance_score REAL,
-            risk_score REAL,
-            consistency_score REAL,
-            stability_score REAL,
-            raw_score REAL,
-            confidence_score REAL,
-            final_score REAL,
-            category_rank INTEGER,
-            category_total INTEGER,
-            category_percentile REAL,
-            letter_grade TEXT,
-            signal TEXT,
-            breakdown_json TEXT,
-            PRIMARY KEY (fund_id, date)
-        )
-    """)
-    conn.commit()
-
-    # İleride eklenebilecek olası yeni metrik veya skor kolonları için güvenli migration kontrolü
-    migration_columns = [
-        ("momentum_score", "REAL"),
-        ("quality_score", "REAL"),
-        ("valuation_score", "REAL")
-    ]
-    for col_name, col_dtype in migration_columns:
-        ensure_column(conn, "fund_scores", col_name, col_dtype)
-
-def calculate_percentile_rank(series, ascending=True):
-    """Verilen pandas serisini 0-100 arasında percentile skora çevirir (yüksek score = yüksek percentile)."""
-    if len(series.dropna()) == 0:
-        return pd.Series(50.0, index=series.index)
     if ascending:
-        return series.rank(pct=True, ascending=True) * 100
+        return series.rank(pct=True) * 100
     else:
-        return series.rank(pct=True, ascending=False) * 100
+        return (1 - series.rank(pct=True)) * 100
 
-def run_scoring_pipeline(
-    conn=None,
-    full_sync=False,
-    history_years=5,
-    fund_limit=400
-):
-    print(
-        f"SYNC={full_sync}, YEARS={history_years}, LIMIT={fund_limit}"
+
+def calculate_performance_composite(df):
+    """
+    Performans skoru (%40)
+    """
+
+    score = (
+        _percentile(df["r_365"], True) * 0.40 +
+        _percentile(df["r_180"], True) * 0.25 +
+        _percentile(df["r_90"], True) * 0.20 +
+        _percentile(df["r_30"], True) * 0.15
     )
-    print("SCORING ENGINE BAŞLADI")
-    
-    close_conn = False
-    if conn is None:
-        conn = get_db_connection()
-        close_conn = True
+
+    return score
+
+
+def calculate_risk_composite(df):
+    """
+    Risk skoru (%30)
+    Yüksek Sharpe/Sortino iyi,
+    yüksek volatilite ve mdd kötü
+    """
+
+    score = (
+        _percentile(df["sharpe"], True) * 0.35 +
+        _percentile(df["sortino"], True) * 0.30 +
+        _percentile(df["volatility"], False) * 0.15 +
+        _percentile(df["mdd"], False) * 0.20
+    )
+
+    return score
+
+
+def calculate_quality_composite(df):
+    """
+    Fon yaşı ve veri derinliği kalite skoru
+    """
+
+    score = (
+        _percentile(df["age_years"], True) * 0.50 +
+        _percentile(df["depth_score"], True) * 0.50
+    )
+
+    return score
+
+
+def calculate_cashflow_composite(df):
+    """
+    Şimdilik yatırımcı akışı verisi olmadığı için nötr kalite
+    """
+
+    return pd.Series(
+        50.0,
+        index=df.index
+    )
+
+
+def calculate_cost_composite(df):
+    """
+    Şimdilik maliyet verisi yoksa nötr
+    """
+
+    return pd.Series(
+        50.0,
+        index=df.index
+    )
+
+
+def calculate_confidence(prices, first_date, last_date):
+    """
+    Veri derinliği ve güncelliğe göre güven skoru.
+    """
 
     try:
-        init_fund_scores_table(conn)
-        
-        # fund_metrics ve funds tablolarını birleştirerek verileri çek
-        query = """
-            SELECT m.*, f.code, f.category 
-            FROM fund_metrics m
-            JOIN funds f ON m.fund_id = f.id
-        """
-        df = pd.read_sql(query, con=conn)
-        print(f"Skorlanacak fon metrik sayısı: {len(df)}")
-        if df.empty:
-            return False, "Skorlanacak fon metrik verisi bulunamadı."
+        day_count = len(prices)
 
-        # Fonun geçmiş uzunluğunu / veri derinliğini hesaplamak için veritabanından gün sayısını çekelim
-        history_counts = pd.read_sql("""
-            SELECT fund_id, COUNT(date) as day_count 
-            FROM fund_daily_prices 
-            GROUP BY fund_id
-        """, con=conn).set_index('fund_id')['day_count']
-        
-        df['day_count'] = df['fund_id'].map(history_counts).fillna(0)
+        age_score = min(day_count / 1250 * 100, 100)
 
-        # 1) BİLEŞEN SKORLARI (0-100 Normalizasyonu / Percentile Ranking)
-        
-        # Performance Score (%40 Ağırlık)
-        perf_metrics = ['annual_return', 'sharpe_ratio', 'sortino_ratio', 'alpha', 'information_ratio', 'calmar_ratio']
-        perf_rank_sum = pd.Series(0.0, index=df.index)
-        for m in perf_metrics:
-            if m in df.columns:
-                perf_rank_sum += calculate_percentile_rank(df[m], ascending=True)
-        df['performance_score'] = perf_rank_sum / len(perf_metrics)
-
-        # Risk Score (%30 Ağırlık) - Düşük risk iyi olduğu için ascending=False
-        risk_metrics = ['max_drawdown', 'volatility', 'var_95', 'cvar_95']
-        risk_rank_sum = pd.Series(0.0, index=df.index)
-        for m in risk_metrics:
-            if m in df.columns:
-                risk_rank_sum += calculate_percentile_rank(df[m], ascending=False)
-        df['risk_score'] = risk_rank_sum / len(risk_metrics)
-
-        # Consistency Score (%20 Ağırlık)
-        cons_metrics = ['win_rate', 'information_ratio', 'skewness']
-        cons_rank_sum = pd.Series(0.0, index=df.index)
-        for m in cons_metrics:
-            if m in df.columns:
-                cons_rank_sum += calculate_percentile_rank(df[m], ascending=True)
-        df['consistency_score'] = cons_rank_sum / len(cons_metrics)
-
-        # Stability Score (%10 Ağırlık)
-        if 'beta' in df.columns:
-            df['beta_stability'] = -(df['beta'] - 1.0).abs()
+        if day_count > 1000:
+            density_score = 100
         else:
-            df['beta_stability'] = 0.0
+            density_score = day_count / 10
 
-        stab_metrics = ['recovery_time', 'beta_stability', 'day_count']
-        stab_rank_sum = pd.Series(0.0, index=df.index)
-        
-        if 'recovery_time' in df.columns:
-            stab_rank_sum += calculate_percentile_rank(df['recovery_time'], ascending=False)
-        if 'beta_stability' in df.columns:
-            stab_rank_sum += calculate_percentile_rank(df['beta_stability'], ascending=True)
-        if 'day_count' in df.columns:
-            stab_rank_sum += calculate_percentile_rank(df['day_count'], ascending=True)
-            
-        df['stability_score'] = stab_rank_sum / len(stab_metrics)
+        last = pd.to_datetime(last_date)
+        today = pd.Timestamp.today()
 
-        # RAW SCORE HESAPLAMASI (Ağırlıklı Ortalama)
-        df['raw_score'] = (
-            df['performance_score'] * 0.40 +
-            df['risk_score'] * 0.30 +
-            df['consistency_score'] * 0.20 +
-            df['stability_score'] * 0.10
+        days_old = (today - last).days
+
+        if days_old <= 2:
+            recency = 100
+        else:
+            recency = max(100 - days_old * 5, 10)
+
+
+        confidence = (
+            age_score * 0.35 +
+            density_score * 0.45 +
+            recency * 0.20
         )
 
-        # 2) CONFIDENCE SİSTEMİ & BASE SCORE (Yumuşatılmış: 0.85 + 0.15 * confidence)
-        base_confidence = df['day_count'].apply(lambda x: min(max(x / 750.0, 0.2), 1.0))
-        df['confidence_score'] = base_confidence
-        df['base_score'] = df['raw_score'] * (0.85 + 0.15 * df['confidence_score'])
+        return round(float(confidence), 2)
 
-        # 3) KATEGORİ BAZINDA RELATİVE RANKING & PERCENTILE (100 = en iyi, 0 = en kötü)
-        df['category_percentile'] = (
-            df.groupby('category')['base_score']
-            .rank(pct=True, ascending=True) * 100
-        )
-        
-        df['category_rank'] = df.groupby('category')['base_score'].rank(ascending=False, method='min').astype(int)
-        df['category_total'] = df.groupby('category')['base_score'].transform('count')
+    except Exception:
+        return 50.0
 
-        # 4) FİNAL SCORE (Base Score %70 + Kategori Persentil %30) VE SCORE BOOST
-        df['final_score'] = (
-            df['base_score'] * 0.70 +
-            df['category_percentile'] * 0.30
-        )
-        
-        # Üstün performansları ve elit fonları gerçek rating dağılımına taşımak için Score Boost (%10 Çarpan, Max 100)
-        df['final_score'] = np.minimum(
-            df['final_score'] * 1.10,
-            100.0
-        )
 
-        # 5) PROFESYONEL HARF NOTU VE SİNYAL ÜRETİMİ
-        def assign_grade_and_signal(score):
-            if score >= 95:
-                return 'A+', 'GÜÇLÜ AL / ELİT'
-            elif score >= 90:
-                return 'A', 'AL'
-            elif score >= 85:
-                return 'B+', 'İYİ'
-            elif score >= 75:
-                return 'B', 'TUT'
-            elif score >= 65:
-                return 'C', 'İZLE'
-            else:
-                return 'D', 'ZAYIF'
+def calculate_absolute_score(
+    perf_percentile,
+    risk_percentile,
+    qual_percentile,
+    cash_percentile,
+    cost_percentile
+):
+    """
+    Ana kalite skoru.
+    Ağırlıklar:
+    Performans %40
+    Risk %30
+    Kalite %15
+    Akış %5
+    Maliyet %10
+    """
 
-        grades_signals = df['final_score'].apply(assign_grade_and_signal)
-        df['letter_grade'] = [gs[0] for gs in grades_signals]
-        df['signal'] = [gs[1] for gs in grades_signals]
+    score = (
+        perf_percentile * 0.40 +
+        risk_percentile * 0.30 +
+        qual_percentile * 0.15 +
+        cash_percentile * 0.05 +
+        cost_percentile * 0.10
+    )
 
-        today_str = datetime.date.today().strftime('%Y-%m-%d')
-        score_records = []
+    return score.round(2)
 
-        for _, row in df.iterrows():
-            breakdown_dict = {
-                "performance": round(float(row['performance_score']), 1),
-                "risk": round(float(row['risk_score']), 1),
-                "consistency": round(float(row['consistency_score']), 1),
-                "stability": round(float(row['stability_score']), 1)
-            }
-            breakdown_json_str = json.dumps(breakdown_dict)
 
-            score_records.append((
-                int(row['fund_id']), today_str,
-                float(row['performance_score']), float(row['risk_score']),
-                float(row['consistency_score']), float(row['stability_score']),
-                float(row['raw_score']), float(row['confidence_score']),
-                float(row['final_score']), int(row['category_rank']),
-                int(row['category_total']), float(row['category_percentile']),
-                str(row['letter_grade']), str(row['signal']), str(breakdown_json_str)
-            ))
+def calculate_continuous_penalty(mdd, volatility):
+    """
+    Sürekli risk ceza motoru.
 
-        if score_records:
-            cursor = conn.cursor()
-            cursor.executemany("""
-                INSERT OR REPLACE INTO fund_scores 
-                (fund_id, date, performance_score, risk_score, consistency_score, stability_score, 
-                 raw_score, confidence_score, final_score, category_rank, category_total, 
-                 category_percentile, letter_grade, signal, breakdown_json) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, score_records)
-            conn.commit()
+    mdd:
+    Maximum Drawdown (%)
 
-        return True, f"Başarılı! {len(score_records)} fon için migration uyumlu, 70/30 ağırlıklı, boost destekli profesyonel skorlama tamamlandı."
+    volatility:
+    Yıllık volatilite
+    """
 
-    except Exception as e:
-        return False, f"Scoring Engine Hatası: {str(e)}"
-    finally:
-        if close_conn:
-            conn.close()
+    total_penalty = 0.0
+    mdd_penalty = 0.0
+    vol_penalty = 0.0
+
+
+    # Derin düşüş cezası
+    if mdd >= 20:
+        mdd_penalty = min((mdd - 20) * 0.5, 10)
+        total_penalty += mdd_penalty
+
+
+    # Aşırı volatilite cezası
+    if volatility >= 0.30:
+        vol_penalty = min((volatility - 0.30) * 20, 10)
+        total_penalty += vol_penalty
+
+
+    return (
+        round(total_penalty, 2),
+        round(mdd_penalty, 2),
+        round(vol_penalty, 2)
+    )
+
+
+def calculate_final_score(absolute_score, penalty, confidence):
+    """
+    Final skor hesaplama.
+
+    Absolute Score:
+    Ana kalite
+
+    Penalty:
+    Risk cezaları
+
+    Confidence:
+    Veri güvenilirliği
+    """
+
+    raw_score = absolute_score - (penalty * 0.50)
+
+    # Confidence artık çarpan değil,
+    # küçük kalite düzeltmesi olarak kullanılır.
+    confidence_factor = confidence / 100.0
+    confidence_adjustment = (
+        (confidence_factor - 0.5) * 8
+    )
+
+    final_score = raw_score + confidence_adjustment
+
+    # Hafif kalibrasyon
+    final_score = (
+        final_score * 0.90
+        + 10
+    )
+
+    final_score = max(
+        0,
+        min(100, final_score)
+    )
+
+    return (
+        round(float(final_score), 2),
+        round(float(raw_score), 2),
+        round(float(confidence_factor), 3)
+    )
+
+
+def explain_score(
+    perf,
+    risk,
+    quality,
+    cash,
+    cost,
+    absolute_score,
+    mdd_penalty,
+    vol_penalty,
+    raw_score,
+    confidence,
+    confidence_factor,
+    final_score
+):
+    """
+    Kullanıcıya gösterilecek skor açıklaması.
+    """
+
+    data = {
+        "performance_score": round(float(perf), 2),
+        "risk_score": round(float(risk), 2),
+        "quality_score": round(float(quality), 2),
+        "cashflow_score": round(float(cash), 2),
+        "cost_score": round(float(cost), 2),
+
+        "absolute_score": round(float(absolute_score), 2),
+
+        "penalties": {
+            "max_drawdown": round(float(mdd_penalty), 2),
+            "volatility": round(float(vol_penalty), 2)
+        },
+
+        "raw_score": round(float(raw_score), 2),
+        "confidence": round(float(confidence), 2),
+        "confidence_factor": round(float(confidence_factor), 3),
+
+        "final_score": round(float(final_score), 2)
+    }
+
+    return json.dumps(data, ensure_ascii=False)
+
+
+def calculate_category_percentile(df):
+    """
+    Fonları kendi kategorisi içinde percentile sıralar.
+    """
+
+    if df.empty:
+        return pd.Series(dtype=float)
+
+    result = (
+        df.groupby("category")["final_score"]
+        .rank(
+            pct=True,
+            ascending=True
+        ) * 100
+    )
+
+    return result.round(2)
+
+
+def calculate_rating(final_score, confidence):
+    """
+    Final skor + güven seviyesine göre
+    harf notu ve yatırım sinyali üretir.
+    """
+
+    # Güven çok düşükse sınırlama
+    if confidence < 40:
+        return "C", "İZLE"
+
+    if final_score >= 85:
+        return "A+", "GÜÇLÜ AL"
+
+    elif final_score >= 75:
+        return "A", "AL"
+
+    elif final_score >= 65:
+        return "B", "İZLE"
+
+    elif final_score >= 55:
+        return "C", "ZAYIF"
+
+    else:
+        return "D", "UZAK DUR"

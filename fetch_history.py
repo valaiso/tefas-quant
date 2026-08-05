@@ -12,8 +12,8 @@ except ImportError:
         from tefas import Crawler as TEFAS
 
 def fetch_dynamic_history_by_code():
-    # GÜNCELLEME: Başlangıçtaki aktif fonları bulurken 50 sınırına takılmamak için limiti 600 yapıyoruz.
-    tefas = TEFAS(fund_limit=600)
+    # GÜNCELLEME: Başlangıçtaki aktif fonları bulurken 50 sınırına takılmamak için limiti 2000 yapıyoruz.
+    tefas = TEFAS(fund_limit=2000)
     
     # Hedef 4 yıllık aralık
     end_date = datetime.now()
@@ -23,18 +23,14 @@ def fetch_dynamic_history_by_code():
     e_str = end_date.strftime("%Y-%m-%d")
     
     print("-> Aşama 1: Aktif fon kodları tespit ediliyor...")
-    recent_date = (end_date - timedelta(days=3)).strftime("%Y-%m-%d")
-    df_recent = tefas.fetch(start=recent_date, end=e_str)
+    all_codes = tefas._list_fund_codes("YAT")
     
-    if df_recent is None or df_recent.empty:
-        print("⚠️ Güncel fon listesi alınamadı. İnternet bağlantınızı kontrol edin.")
+    if not all_codes:
+        print("⚠️ Fon listesi alınamadı.")
         return
-
-    f_code_col = "code" if "code" in df_recent.columns else "Fon Kodu"
-    all_codes = df_recent[f_code_col].dropna().unique().tolist()
     
-    # Tam 500 adet fonu hedefliyoruz
-    target_codes = all_codes[:500]
+    # TEFAS'tan bulunan tüm fonları işle
+    target_codes = all_codes
     
     print(f"-> {len(target_codes)} adet fon kodu başarıyla bulundu.")
     print(f"-> Aşama 2: {s_str} ile {e_str} arası 4 yıllık veriler FON BAZLI çekiliyor...\n")

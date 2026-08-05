@@ -457,7 +457,7 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
                     </div>
                     <div>
                         <span style="font-size: 0.9rem; color: #94A3B8;">Kategori Sırası & Gücü</span><br>
-                        <span style="font-size: 1.8rem; font-weight: 800; color: #34D399;">%{top_pct:.1f}</span>
+                        <span style="font-size: 1.8rem; font-weight: 800; color: #34D399;">{format_category_strength(top_pct)}</span>
                         <div style="font-size: 0.8rem; color: #94A3B8;">({rank}. Sıra / {total} Fon)</div>
                     </div>
                     <div>
@@ -473,10 +473,26 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
             with col1:
                 st.markdown("#### 📊 Skor Alt Kırılımları (Breakdown)")
                 breakdown = fund_detail.get('breakdown', {})
-                render_progress_bar("Performans Skoru", breakdown.get('performance', 0))
-                render_progress_bar("Risk Skoru", breakdown.get('risk', 0))
-                render_progress_bar("Tutarlılık (Consistency)", breakdown.get('consistency', 0))
-                render_progress_bar("Stabilite (Stability)", breakdown.get('stability', 0))
+                render_progress_bar(
+                    "Performans Skoru",
+                    breakdown.get('performance_score', 0)
+                )
+                render_progress_bar(
+                    "Risk Skoru",
+                    breakdown.get('risk_score', 0)
+                )
+                render_progress_bar(
+                    "Kalite Skoru",
+                    breakdown.get('quality_score', 0)
+                )
+                render_progress_bar(
+                    "Nakit Akışı / Stabilite",
+                    breakdown.get('cashflow_score', 0)
+                )
+                render_progress_bar(
+                    "Maliyet Skoru",
+                    breakdown.get('cost_score', 0)
+                )
                 
             with col2:
                 st.markdown("#### 🤖 TEFAS Quant Otomatik Analiz Yorumu")

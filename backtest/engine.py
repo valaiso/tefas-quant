@@ -16,7 +16,16 @@ class VectorizedBacktestEngine:
         prices_df = prices_df.sort_values(['fund_id', 'date']).reset_index(drop=True)
 
         signals_df['date'] = pd.to_datetime(signals_df['date'])
-        buy_signals = signals_df[signals_df['signal'].isin(['Güçlü AL', 'AL / İzle'])].copy()
+        buy_signals = signals_df[
+            signals_df['signal'].isin(
+                [
+                    'GÜÇLÜ AL',
+                    'GÜÇLÜ AL / ELİT',
+                    'AL',
+                    'İZLE'
+                ]
+            )
+        ].copy()
 
         if buy_signals.empty:
             return {}

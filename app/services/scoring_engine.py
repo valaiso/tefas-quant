@@ -33,7 +33,7 @@ def calculate_performance_composite(df):
 
 def calculate_risk_composite(df):
     """
-    Risk skoru (%30)
+    Risk skoru (%25)
     Yüksek Sharpe/Sortino iyi,
     yüksek volatilite ve mdd kötü
     """
@@ -50,7 +50,7 @@ def calculate_risk_composite(df):
 
 def calculate_quality_composite(df):
     """
-    Fon yaşı ve veri derinliği kalite skoru
+    Fon yaşı ve veri derinliği kalite skoru (%15)
     """
 
     score = (
@@ -63,7 +63,7 @@ def calculate_quality_composite(df):
 
 def calculate_cashflow_composite(df):
     """
-    Fon akış ve yatırımcı ilgisi skoru.
+    Fon akış ve yatırımcı ilgisi skoru (%15).
 
     Ağırlıklar:
     - Yatırımcı büyümesi %40
@@ -125,7 +125,7 @@ def calculate_cashflow_composite(df):
 
 def calculate_cost_composite(df):
     """
-    Şimdilik maliyet verisi yoksa nötr
+    Şimdilik maliyet verisi yoksa nötr (%5)
     """
 
     return pd.Series(
@@ -204,16 +204,16 @@ def calculate_absolute_score(
     Performans %40
     Risk %25
     Kalite %15
-    Akış %10
-    Maliyet %10
+    Akış %15
+    Maliyet %5
     """
 
     score = (
         perf_percentile * 0.40 +
         risk_percentile * 0.25 +
         qual_percentile * 0.15 +
-        cash_percentile * 0.10 +
-        cost_percentile * 0.10
+        cash_percentile * 0.15 +
+        cost_percentile * 0.05
     )
 
     return score.round(2)

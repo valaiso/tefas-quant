@@ -10,6 +10,8 @@ def _percentile(series, ascending=True):
     if len(series) == 0:
         return series
 
+    series = pd.to_numeric(series, errors="coerce").fillna(0)
+
     if ascending:
         return series.rank(pct=True) * 100
     else:
@@ -69,12 +71,16 @@ def calculate_cashflow_composite(df):
 
 def calculate_cost_composite(df):
     """
-    Maliyet skoru (Devre Dışı Bırakıldı)
+    Maliyet skoru
+    Stopaj %60
+    Yönetim ücreti %40
     """
-    return pd.Series(
-        50,
-        index=df.index
+    cost = (
+        _percentile(df["stopaj"], False) * 0.60 +
+        _percentile(df["management_fee"], False) * 0.40
     )
+
+    return cost.round(2)
 
 
 def calculate_confidence(prices, first_date, last_date):
@@ -133,17 +139,27 @@ def calculate_absolute_score(
     performance_score,
     risk_score,
     investor_score,
-    portfolio_score
+    portfolio_score,
+    cost_score_val
 ):
     """
-    Ana kalite skoru (Yeni ağırlıklar: %40 Perf, %30 Risk, %25 Yatırımcı, %5 Portföy).
+    Nihai kalite skoru
+
+    Performans %40
+    Risk %20
+    Yatırımcı %20
+    Maliyet %10
+    Portföy Kalitesi %10
     """
+
     score = (
         performance_score * 0.40 +
-        risk_score * 0.30 +
-        investor_score * 0.25 +
-        portfolio_score * 0.05
+        risk_score * 0.20 +
+        investor_score * 0.20 +
+        cost_score_val * 0.10 +
+        portfolio_score * 0.10
     )
+
     return score.round(2)
 
 
@@ -232,6 +248,7 @@ def explain_score(
     risk,
     investor,
     portfolio,
+    cost,
     absolute_score,
     mdd_penalty,
     vol_penalty,
@@ -245,6 +262,7 @@ def explain_score(
         "risk_score": round(float(risk), 2),
         "investor_score": round(float(investor), 2),
         "portfolio_score": round(float(portfolio), 2),
+        "cost_score": round(float(cost), 2),
         "absolute_score": round(float(absolute_score), 2),
         "penalties": {
             "max_drawdown": round(float(mdd_penalty), 2),
@@ -275,16 +293,13 @@ def calculate_category_percentile(df):
 
 
 def calculate_rating(final_score, confidence):
-    if confidence < 40:
-        return "C", "İZLE"
-
-    if final_score >= 80:
+    if final_score >= 85:
         return "A+", "GÜÇLÜ AL"
-    elif final_score >= 70:
+    elif final_score >= 75:
         return "A", "AL"
-    elif final_score >= 60:
+    elif final_score >= 65:
         return "B", "İZLE"
-    elif final_score >= 45:
+    elif final_score >= 55:
         return "C", "ZAYIF"
     else:
         return "D", "UZAK DUR"

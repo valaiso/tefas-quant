@@ -1,0 +1,123 @@
+analysis_engine.py:    ilgili fonun tarih indeksine göre güvenli bir şekilde hizalar.
+analysis_engine.py:        print(f"Fon sayısı: {len(funds_df)}")
+analysis_engine.py:            return False, "Analiz edilecek aktif fon bulunamadı."
+analysis_engine.py:        print(f"Analiz başladı. Toplam fon: {len(funds_df)}")
+analysis_engine.py:                print(f"{i+1}/{len(funds_df)} Fon ID: {row['id']}")
+analysis_engine.py:                    print("HATA FON:", row['code'])
+analysis_engine.py:        return True, f"Başarılı! {len(metrics_records)} fon için finansal metrikler hesaplandı ve kaydedildi."
+app\services\scoring_engine.py:    Fon yaşı ve veri derinliği kalite skoru (%15)
+app\services\scoring_engine.py:    Fon akış ve yatırımcı ilgisi skoru (%15).
+app\services\scoring_engine.py:    - Fon büyüklüğü büyümesi %30
+app\services\scoring_engine.py:    Veri derinliği, fon yaşı ve güncelliğe göre
+app\services\scoring_engine.py:        # Fon geçmiş uzunluğu
+app\services\scoring_engine.py:        # Fon olgunluk seviyesi
+app\services\scoring_engine.py:    Büyük fonlarda küçük bonus,
+app\services\scoring_engine.py:    Fonları kendi kategorisi içinde percentile sıralar.
+app.py:        .main-header { font-size: 2.2rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0px; }
+app.py:        .sub-header { font-size: 1.1rem; color: #64748B; margin-bottom: 20px; }
+app.py:        .badge-aplus { background-color: #DCFCE7; color: #166534; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+app.py:        .badge-a { background-color: #ECFDF5; color: #047857; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+app.py:        .badge-bplus { background-color: #FEF9C3; color: #854D0E; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+app.py:        .badge-b { background-color: #FEF3C7; color: #92400E; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+app.py:        .badge-c { background-color: #FFEDD5; color: #C2410C; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+app.py:        .badge-d { background-color: #FEE2E2; color: #B91C1C; padding: 4px 10px; border-radius: 6px; font-weight: bold; }
+app.py:# --- 2. YAN MENÜ & SOL ALT KOMPAKT NİTELİKLİ FON FİLTRESİ ---
+app.py:        "🔎 Fon Keşif Merkezi", 
+app.py:        "🔄 Fon Senkronizasyonu", 
+app.py:        "🔍 Fon Havuzu & Yaş Filtresi", 
+app.py:        "📊 Fon Detay & Gizli Cevherler", 
+app.py:        "⚖️ Fon Karşılaştırma", 
+app.py:# Nitelikli fonların dashboard ve listelerden izole edilmesi (Varsayılan olarak açık)
+app.py:include_qualified = st.sidebar.checkbox("🔒 Nitelikli Fonları Dahil Et", value=True)
+app.py:# MODÜL: FON SENKRONİZASYONU
+app.py:if menu == "🔄 Fon Senkronizasyonu":
+app.py:    st.title("🔄 Otomatik Fon Senkronizasyon Merkezi")
+app.py:    st.markdown("TEFAS verilerini güncelleyebilir, 400 fon ve 5 yıllık tarihsel periyot parametreleriyle matris skorlamasını çalıştırabilirsin.")
+app.py:        if st.button("🔄 Tam Senkronizasyon (5 Yıl / 400 Fon Limitli)", use_container_width=True):
+app.py:            with st.spinner("Tam senkronizasyon çalıştırılıyor (5 yıl / 400 fon)..."):
+app.py:    st.markdown('<p class="main-header">🏆 TEFAS Quant — Kurumsal Piyasa & Fon Özeti</p>', unsafe_allow_html=True)
+app.py:        col1.metric("Toplam Fon", f"{total_analyzed}")
+app.py:                        <p style="font-size: 0.85rem; color: #CBD5E1; margin-bottom: 8px; height: 38px; overflow: hidden;">{row['name']}</p>
+app.py:                        <p style="margin: 0; font-size: 0.9rem;">Final Skor: <b>{row['final_score']:.1f}</b><br>Kategori Gücü: <b>Top %{max(1, 101 - row['category_percentile']):.0f}</b></p>
+app.py:                'code': 'Fon Kodu', 
+app.py:                'name': 'Fon Adı', 
+app.py:# MODÜL 1.5: FON KEŞİF MERKEZİ
+app.py:elif menu == "🔎 Fon Keşif Merkezi":
+app.py:    st.title("🔎 Fon Keşif Merkezi")
+app.py:    st.markdown("Yatırım karakterinize göre en güçlü fonları kategori içi güç metrikleriyle otomatik keşfedin.")
+app.py:                    'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
+app.py:                    'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
+app.py:                    'code': 'Fon Kodu', 'name': 'Fon Adı', 'category': 'Kategori', 
+app.py:# MODÜL 2: FON HAVUZU & ARAMA ÖZELLİĞİ
+app.py:elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
+app.py:    st.title("🔍 Kategori Bazlı Fon Havuzu ve Arama Süzgeci")
+app.py:        search_query = col_f1.text_input("🔎 Fon Ara (Kod veya Ad ile)", "").strip().upper()
+app.py:        st.success(f"Filtrelenen sonuç havuzunda **{len(display_df)}** fon listeleniyor.")
+app.py:# MODÜL 5: FON DETAY & GİZLİ CEVHERLER
+app.py:elif menu == "📊 Fon Detay & Gizli Cevherler":
+app.py:    st.title("📊 Fon Detay, Derinlemesine Analiz & Gizli Cevherler")
+app.py:        selected_label = st.selectbox("İncelemek İstediğiniz Fonu Seçin:", list(fund_options.keys()))
+app.py:                        <small style="color: #94A3B8; font-size: 1rem;">{fund_detail['category']}</small>
+app.py:                        <span style="font-size: 0.9rem; color: #94A3B8;">Final Score</span><br>
+app.py:                        <span style="font-size: 1.8rem; font-weight: 800; color: #60A5FA;">{fund_detail['final_score']:.1f}</span>
+app.py:                        <span style="font-size: 0.9rem; color: #94A3B8;">Kategori Sırası & Gücü</span><br>
+app.py:                        <span style="font-size: 1.8rem; font-weight: 800; color: #34D399;">{format_category_strength(top_pct)}</span>
+app.py:                        <div style="font-size: 0.8rem; color: #94A3B8;">({rank}. Sıra / {total} Fon)</div>
+app.py:                        <span style="font-size: 0.9rem; color: #94A3B8;">Confidence (Güven)</span><br>
+app.py:                        <span style="font-size: 1.8rem; font-weight: 800; color: #FBBF24;">%{fund_detail.get('confidence_score', 90):.0f}</span>
+app.py:                    yorum = "✔ Bu fon; üstün risk/getiri oranı, yüksek Sharpe ve düşük maksimum düşüş (drawdown) özellikleri ile elit seviyededir.\n\n**En büyük avantajı:** Piyasayı hem getiri hem istikrar açısından domine etmesi."
+app.py:                    yorum = "✔ Bu fon; güçlü performans ve istikrarlı yapısıyla dikkat çekmektedir. Portföylerde güvenle değerlendirilebilir."
+app.py:                    yorum = "✔ Bu fon orta segmenttedir. İstikrarlı getiri sağlasa da volatilite ve risk metrikleri yakından izlenmelidir."
+app.py:                    yorum = "⚠ Bu fon zayıf kategoridedir. Getiri/risk dengesi ve stabilite skorları sektör ortalamasının altındadır."
+app.py:            h_col1.metric("Fon Fair Value Skoru", f"{fair_value_score:.1f} / 100")
+app.py:            st.warning("Seçilen fon için skor verisi bulunamadı.")
+app.py:        st.warning("Veritabanında kayıtlı fon bulunamadı.")
+app.py:# MODÜL 6: FON KARŞILAŞTIRMA
+app.py:elif menu == "⚖️ Fon Karşılaştırma":
+app.py:    st.title("⚖️ Fon Kıyaslama & Karşılaştırma Matrisi")
+app.py:        fund_a = col_c1.selectbox("1. Fonu Seç", all_codes, index=0)
+app.py:        fund_b = col_c2.selectbox("2. Fonu Seç", all_codes, index=min(1, len(all_codes)-1))
+app.py:            "Metrik": ["Fon Adı", "Kategori", "Final Skor", "Kategori Gücü (%)", "Güven Skoru (%)", "Piyasa Sinyali", "Geçmiş Gün Sayısı"],
+app.py:                                display_trades.columns = ['Fon ID', 'Giriş Tarihi', 'Çıkış Tarihi', 'Giriş Fiyatı', 'Çıkış Fiyatı', 'Getiri (%)']
+backtest\engine.py:        # Aynı fon ve aynı gün içindeki tekrar eden sinyalleri temizle
+backtest\engine.py:        # Her fon için sıralı indeks (gün sırası) ver
+compare_benchmarks.py:    # Fiyatları, sinyalleri ve fon kodlarını çek
+compare_benchmarks.py:    # ID'leri fon kodlarıyla eşleştir
+compare_benchmarks.py:    # Fiyatları matrise çevir (Satırlar Tarih, Sütunlar Fon/Benchmark Kodları)
+compare_benchmarks.py:        plt.title('Portföy Benchmark Kıyaslaması (4 Yıllık Gelişim)', fontsize=14)
+extract_funds.py:url = "https://www.tefas.gov.tr/tr/tefas-fonlar"
+extract_funds.py:print("Kaydedilen fon:", len(funds))
+fetch_benchmarks.py:            # Veritabanında bu benchmark için bir 'Fon' kaydı var mı? Yoksa oluştur.
+fetch_data.py:                # 1. Fon veritabanında var mı?
+fetch_data.py:                    fund = Fund(code=f_code, title=title, category="Yatırım Fonu")
+fetch_data.py:            print(f"⚠️ {code} fonu çekilirken hata oluştu: {e}")
+fetch_history.py:    # GÜNCELLEME: Başlangıçtaki aktif fonları bulurken 50 sınırına takılmamak için limiti 2000 yapıyoruz.
+fetch_history.py:    print("-> Aşama 1: Aktif fon kodları tespit ediliyor...")
+fetch_history.py:        print("⚠️ Fon listesi alınamadı.")
+fetch_history.py:    # TEFAS'tan bulunan tüm fonları işle
+fetch_history.py:    print(f"-> {len(target_codes)} adet fon kodu başarıyla bulundu.")
+fetch_history.py:    print(f"-> Aşama 2: {s_str} ile {e_str} arası 4 yıllık veriler FON BAZLI çekiliyor...\n")
+fetch_history.py:            title = row_sample.get(title_col, "Yatırım Fonu")
+fetch_history.py:                fund = Fund(code=code, title=title, category="Yatırım Fonu")
+fix_categories.py:    "Fon Sepeti": [
+fix_categories.py:        "FON SEPETİ"
+generate_history_scores.py:        # Test için 50 fon ile sınırlandırıldı
+generate_history_scores.py:            print("Fon bulunamadı.")
+generate_history_scores.py:            # Fon geçmiş derinliği
+generate_history_scores.py:                    f"{counter}/{total} fon tamamlandı..."
+metrics.py:    """Fon getirilerinin dağılım kalitesini (Skewness / Çarpıklık) hesaplar."""
+run_backtest.py:    # 3. Motoru Başlat (Yatırım Fonu gerçekliğine uygun periyotlar: 1 Ay, 3 Ay, 6 Ay)
+scoring.py:# TEFAS API Crawler Fonksiyonları
+src\create_tables.py:engine = create_engine("sqlite:///database/fonlar.db")
+src\create_tables.py:print("Fon tabloları oluşturuldu")src\database.py:DATABASE_URL = "sqlite:///database/fonlar.db"
+src\data_fetch\tefas_api.py:    "fontip": "YAT",
+src\data_fetch\tefas_api.py:    "fonkod": "",
+src\data_fetch\tefas_api.py:    "sfontur": "",
+src\data_fetch\tefas_api.py:    "fonunvan": ""
+src\data_fetch\tefas_selenium.py:        # fund_limit=None ile 50 fon sınırı kaldırılır (Tüm piyasa verisi çekilir)
+src\data_fetch\tefas_selenium.py:            print(f"✅ Toplam {len(df)} adet fon verisi başarıyla çekildi!\n")
+tefas_fetcher.py:    ve rastgele gecikme ekleyen dayanıklı istek fonksiyonu.
+tefas_fetcher.py:    Veritabanını kontrol eder, eğer bu fon için son çekilen tarih varsa 
+tefas_fetcher.py:    # Veritabanından bu fonun en son hangi tarihe kadar indirildiğini sorgula
+test_scoring.py:    print("Fon:", i + 1)
+update_fund_names.py:print("Güncellenen fon:", updated)

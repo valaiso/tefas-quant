@@ -59,13 +59,16 @@ def calculate_quality_composite(df):
 
 def calculate_cashflow_composite(df):
     """
-    Fon akış ve yatırımcı ilgisi skoru (Yatırımcı skoru)
+    Fon akış ve yatırımcı kalitesi skoru
     """
+
     score = (
-        _percentile(df["investor_growth_1m"], True) * 0.40 +
-        _percentile(df["fund_size_growth_1m"], True) * 0.30 +
-        _percentile(df["cash_flow"], True) * 0.30
+        _percentile(df["investor_count"], True) * 0.50 +
+        _percentile(df["investor_growth_1m"], True) * 0.20 +
+        _percentile(df["fund_size_growth_1m"], True) * 0.15 +
+        _percentile(df["cash_flow"], True) * 0.15
     )
+
     return score.round(2)
 
 
@@ -314,15 +317,13 @@ def calculate_investor_quality_score(
     try:
         investor_count = int(investor_count or 0)
         if investor_count < 1000:
-            score -= 3
+            score -= 10
         elif investor_count < 5000:
-            score += 0
-        elif investor_count < 10000:
-            score += 1
-        elif investor_count < 50000:
-            score += 2
+            score -= 5
+        elif investor_count < 20000:
+            score += 10
         else:
-            score += 3
+            score += 10
     except:
         pass
 

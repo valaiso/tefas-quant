@@ -139,13 +139,13 @@ def calculate_absolute_score(
 ):
     """Nihai kalite skoru
 
-    Performans %40 Risk %20 Yatırımcı %20 Maliyet %10 Portföy Kalitesi %10
+    Performans %40 Risk %15 Yatırımcı %25 Maliyet %10 Portföy Kalitesi %10
     """
 
     score = (
         performance_score * 0.40
-        + risk_score * 0.20
-        + investor_score * 0.20
+        + risk_score * 0.15
+        + investor_score * 0.25
         + cost_score_val * 0.10
         + portfolio_score * 0.10
     )

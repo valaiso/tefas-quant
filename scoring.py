@@ -155,7 +155,8 @@ def run_batch_scoring_engine(conn):
     fund_id,
     investor_growth_1m,
     fund_size_growth_1m,
-    cash_flow
+    cash_flow,
+    source
     FROM fund_flow_metrics
     WHERE date = (
         SELECT MAX(date)
@@ -247,9 +248,9 @@ def run_batch_scoring_engine(conn):
                 or flow.get('investor_count')
                 or 0
             ),
-            'investor_growth_1m': flow.get('investor_growth_1m', 0),
-            'fund_size_growth_1m': info.get('fund_size_growth_1m', flow.get('fund_size_growth_1m', 0)),
-            'cash_flow': flow.get('cash_flow', 0),
+            'investor_growth_1m': flow.get('investor_growth_1m', 0) if flow.get('source') != 'PRICE_PROXY' else 0,
+            'fund_size_growth_1m': flow.get('fund_size_growth_1m', 0) if flow.get('source') != 'PRICE_PROXY' else 0,
+            'cash_flow': flow.get('cash_flow', 0) if flow.get('source') != 'PRICE_PROXY' else 0,
             'aum': (
                 external.get('aum')
                 or info.get('aum')
@@ -300,7 +301,9 @@ def run_batch_scoring_engine(conn):
         mdd_pen = 0
         vol_pen = 0
         
-        investor_penalty = 0
+        investor_penalty = scoring_engine.calculate_investor_penalty(
+            row['investor_count']
+        )
         tot_pen += investor_penalty
         
         final_sc, raw_score, conf_factor = scoring_engine.calculate_final_score(

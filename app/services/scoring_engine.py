@@ -4,9 +4,7 @@ import json
 
 
 def _percentile(series, ascending=True):
-    """
-    Kategori içi percentile hesaplama
-    """
+    """Kategori içi percentile hesaplama"""
     if len(series) == 0:
         return series
 
@@ -19,78 +17,79 @@ def _percentile(series, ascending=True):
 
 
 def calculate_performance_composite(df):
-    """
-    Performans skoru
-    """
+    """Performans skoru"""
     score = (
-        _percentile(df["r_365"], True) * 0.35 +
-        _percentile(df["r_180"], True) * 0.20 +
-        _percentile(df["r_90"], True) * 0.15 +
-        _percentile(df["real_return_1y"], True) * 0.30
+        _percentile(df["r_365"], True) * 0.35
+        + _percentile(df["r_180"], True) * 0.20
+        + _percentile(df["r_90"], True) * 0.15
+        + _percentile(df["real_return_1y"], True) * 0.30
     )
     return score.round(2)
 
 
 def calculate_risk_composite(df):
-    """
-    Risk skoru
-    """
+    """Risk skoru"""
     score = (
-        _percentile(df["sharpe"], True) * 0.35 +
-        _percentile(df["sortino"], True) * 0.25 +
-        _percentile(df["calmar"], True) * 0.15 +
-        _percentile(df["beta"], False) * 0.10 +
-        _percentile(df["volatility"], False) * 0.15
+        _percentile(df["sharpe"], True) * 0.35
+        + _percentile(df["sortino"], True) * 0.25
+        + _percentile(df["calmar"], True) * 0.15
+        + _percentile(df["beta"], False) * 0.10
+        + _percentile(df["volatility"], False) * 0.15
     )
     return score.round(2)
 
 
 def calculate_quality_composite(df):
-    """
-    Kalite skoru (Portföy skoru)
-    """
+    """Kalite skoru (Portföy skoru)"""
     score = (
-        _percentile(df["portfolio_quality"], True) * 0.60 +
-        _percentile(df["aum"], True) * 0.20 +
-        _percentile(df["alpha"], True) * 0.20
+        _percentile(df["portfolio_quality"], True) * 0.60
+        + _percentile(df["aum"], True) * 0.20
+        + _percentile(df["alpha"], True) * 0.20
     )
     return score.round(2)
 
 
 def calculate_cashflow_composite(df):
-    """
-    Fon akış ve yatırımcı kalitesi skoru
-    """
+    """Yatırımcı kalitesi skoru"""
 
-    score = (
-        _percentile(df["investor_count"], True) * 0.50 +
-        _percentile(df["investor_growth_1m"], True) * 0.20 +
-        _percentile(df["fund_size_growth_1m"], True) * 0.15 +
-        _percentile(df["cash_flow"], True) * 0.15
+    investor_base = (
+        _percentile(df["investor_count"], True) * 0.60
+        + _percentile(df["investor_growth_1m"], True) * 0.20
+        + _percentile(df["cash_flow"], True) * 0.20
     )
 
-    return score.round(2)
+    penalty = pd.Series(0, index=df.index)
+
+    penalty[df["investor_count"] < 1000] = -10
+    penalty[
+        (df["investor_count"] >= 1000) & (df["investor_count"] < 5000)
+    ] = -5
+
+    bonus = pd.Series(0, index=df.index)
+
+    bonus[df["investor_count"] >= 5000] = 5
+    bonus[df["investor_count"] >= 20000] = 10
+
+    score = investor_base + penalty + bonus
+
+    return score.clip(0, 100).round(2)
 
 
 def calculate_cost_composite(df):
-    """
-    Maliyet skoru
-    Stopaj %60
-    Yönetim ücreti %40
+    """Maliyet skoru
+
+    Stopaj %60 Yönetim ücreti %40
     """
     cost = (
-        _percentile(df["stopaj"], False) * 0.60 +
-        _percentile(df["management_fee"], False) * 0.40
+        _percentile(df["stopaj"], False) * 0.60
+        + _percentile(df["management_fee"], False) * 0.40
     )
 
     return cost.round(2)
 
 
 def calculate_confidence(prices, first_date, last_date):
-    """
-    Veri derinliği, fon yaşı ve güncelliğe göre
-    güven skoru hesaplar.
-    """
+    """Veri derinliği, fon yaşı ve güncelliğe göre güven skoru hesaplar."""
     try:
         day_count = len(prices) if prices is not None else 0
 
@@ -109,10 +108,7 @@ def calculate_confidence(prices, first_date, last_date):
         if days_old <= 2:
             recency_score = 100
         else:
-            recency_score = max(
-                100 - days_old * 5,
-                10
-            )
+            recency_score = max(100 - days_old * 5, 10)
 
         if day_count >= 365:
             maturity_score = 100
@@ -126,10 +122,10 @@ def calculate_confidence(prices, first_date, last_date):
             maturity_score = 10
 
         confidence = (
-            age_score * 0.35 +
-            density_score * 0.25 +
-            recency_score * 0.20 +
-            maturity_score * 0.20
+            age_score * 0.35
+            + density_score * 0.25
+            + recency_score * 0.20
+            + maturity_score * 0.20
         )
 
         return round(float(confidence), 2)
@@ -139,28 +135,19 @@ def calculate_confidence(prices, first_date, last_date):
 
 
 def calculate_absolute_score(
-    performance_score,
-    risk_score,
-    investor_score,
-    portfolio_score,
-    cost_score_val
+    performance_score, risk_score, investor_score, portfolio_score, cost_score_val
 ):
-    """
-    Nihai kalite skoru
+    """Nihai kalite skoru
 
-    Performans %40
-    Risk %20
-    Yatırımcı %20
-    Maliyet %10
-    Portföy Kalitesi %10
+    Performans %40 Risk %20 Yatırımcı %20 Maliyet %10 Portföy Kalitesi %10
     """
 
     score = (
-        performance_score * 0.40 +
-        risk_score * 0.20 +
-        investor_score * 0.20 +
-        cost_score_val * 0.10 +
-        portfolio_score * 0.10
+        performance_score * 0.40
+        + risk_score * 0.20
+        + investor_score * 0.20
+        + cost_score_val * 0.10
+        + portfolio_score * 0.10
     )
 
     return score.round(2)
@@ -220,7 +207,7 @@ def calculate_continuous_penalty(mdd, volatility):
     return (
         round(total_penalty, 2),
         round(mdd_penalty, 2),
-        round(vol_penalty, 2)
+        round(vol_penalty, 2),
     )
 
 
@@ -228,21 +215,16 @@ def calculate_final_score(absolute_score, penalty, confidence):
     raw_score = absolute_score - (penalty * 0.50)
 
     confidence_factor = confidence / 100.0
-    confidence_adjustment = (
-        (confidence_factor - 0.5) * 10
-    )
+    confidence_adjustment = (confidence_factor - 0.5) * 10
 
     final_score = raw_score + confidence_adjustment
 
-    final_score = max(
-        0,
-        min(100, final_score)
-    )
+    final_score = max(0, min(100, final_score))
 
     return (
         round(float(final_score), 2),
         round(float(raw_score), 2),
-        round(float(confidence_factor), 3)
+        round(float(confidence_factor), 3),
     )
 
 
@@ -258,7 +240,7 @@ def explain_score(
     raw_score,
     confidence,
     confidence_factor,
-    final_score
+    final_score,
 ):
     data = {
         "performance_score": round(float(perf), 2),
@@ -269,12 +251,12 @@ def explain_score(
         "absolute_score": round(float(absolute_score), 2),
         "penalties": {
             "max_drawdown": round(float(mdd_penalty), 2),
-            "volatility": round(float(vol_penalty), 2)
+            "volatility": round(float(vol_penalty), 2),
         },
         "raw_score": round(float(raw_score), 2),
         "confidence": round(float(confidence), 2),
         "confidence_factor": round(float(confidence_factor), 3),
-        "final_score": round(float(final_score), 2)
+        "final_score": round(float(final_score), 2),
     }
 
     return json.dumps(data, ensure_ascii=False)
@@ -285,11 +267,8 @@ def calculate_category_percentile(df):
         return pd.Series(dtype=float)
 
     result = (
-        df.groupby("category")["final_score"]
-        .rank(
-            pct=True,
-            ascending=True
-        ) * 100
+        df.groupby("category")["final_score"].rank(pct=True, ascending=True)
+        * 100
     )
 
     return result.round(2)
@@ -309,9 +288,7 @@ def calculate_rating(final_score, confidence):
 
 
 def calculate_investor_quality_score(
-    investor_count,
-    investor_change=None,
-    cash_flow=None
+    investor_count, investor_change=None, cash_flow=None
 ):
     score = 0
     try:

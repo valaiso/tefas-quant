@@ -88,7 +88,9 @@ def run_batch_scoring_engine(conn):
     max_drawdown,
     alpha,
     information_ratio,
-    recovery_time
+    recovery_time,
+    calmar_ratio,
+    beta
     FROM fund_metrics
     WHERE date = (SELECT MAX(date) FROM fund_metrics)
     """, con=conn)
@@ -97,14 +99,18 @@ def run_batch_scoring_engine(conn):
 
     info_df = pd.read_sql("""
     SELECT
-    fund_id,
-    investor_count,
-    investor_growth_1m,
-    fund_size,
-    fund_size_growth_1m,
-    cash_flow
-    FROM fund_flow_metrics
-    WHERE date = (
+        f.fund_id,
+        f.investor_count,
+        f.investor_growth_1m,
+        f.fund_size,
+        f.fund_size_growth_1m,
+        f.cash_flow,
+        i.management_fee,
+        i.withholding_tax
+    FROM fund_flow_metrics f
+    LEFT JOIN fund_info_metrics i
+    ON f.fund_id = i.fund_id
+    WHERE f.date = (
         SELECT MAX(date)
         FROM fund_flow_metrics
     )
@@ -115,6 +121,7 @@ def run_batch_scoring_engine(conn):
     SELECT
     fund_id,
     investor_growth_1m,
+    fund_size_growth_1m,
     cash_flow
     FROM fund_flow_metrics
     WHERE date = (
@@ -148,7 +155,6 @@ def run_batch_scoring_engine(conn):
         volatility = float(daily_returns.std() * (255 ** 0.5)) if len(daily_returns) > 5 else 0.2
         mean_ret = float(daily_returns.mean()) if len(daily_returns) > 0 else 0
         
-        # Gerçek metrikler varsa onları kullan, yoksa hesaplananları baz al
         m = metric_map.get(f_id, {})
         info = info_map.get(f_id, {})
         flow = flow_map.get(f_id, {})
@@ -173,14 +179,30 @@ def run_batch_scoring_engine(conn):
         raw_data.append({
             'fund_id': f_id, 
             'category': category,
+            'sharpe': sharpe,
+            'sortino': sortino,
+            'volatility': volatility,
+            'mdd': mdd,
+            'alpha': alpha,
+            'beta': m.get('beta', 1),
+            'information_ratio': information_ratio,
+            'r_30': r_30,
+            'r_90': r_90,
+            'r_180': r_180,
+            'r_365': r_365,
+            'real_return_1y': r_365,
+            'calmar': m.get('calmar_ratio', 0),
+            'portfolio_quality': 50,
             'investor_count': info.get('investor_count', flow.get('investor_count', 0)),
-            'aum': info.get('aum', flow.get('fund_size', 0)),
             'investor_growth_1m': flow.get('investor_growth_1m', 0),
+            'fund_size_growth_1m': info.get('fund_size_growth_1m', flow.get('fund_size_growth_1m', 0)),
             'cash_flow': flow.get('cash_flow', 0),
-            'r_30': r_30, 'r_90': r_90, 'r_180': r_180, 'r_365': r_365,
-            'sharpe': sharpe, 'sortino': sortino, 'volatility': volatility, 'mdd': mdd,
-            'alpha': alpha, 'information_ratio': information_ratio,
-            'confidence': conf, 'age_years': day_count / 365.0, 'depth_score': min(100, day_count / 3.65)
+            'aum': info.get('aum', flow.get('fund_size', 0)),
+            'management_fee': 0,
+            'stopaj_rate': 0,
+            'confidence': conf,
+            'age_years': day_count / 365.0,
+            'depth_score': min(100, day_count / 3.65)
         })
 
     if not raw_data: return
@@ -193,14 +215,15 @@ def run_batch_scoring_engine(conn):
         group['risk_percentile'] = scoring_engine.calculate_risk_composite(group)
         group['qual_percentile'] = scoring_engine.calculate_quality_composite(group)
         group['cash_percentile'] = scoring_engine.calculate_cashflow_composite(group)
-        group['cost_percentile'] = scoring_engine.calculate_cost_composite(group)
         composite_dfs.append(group)
 
     df_scored = pd.concat(composite_dfs)
     
     df_scored['absolute_score'] = scoring_engine.calculate_absolute_score(
-        df_scored['perf_percentile'], df_scored['risk_percentile'],
-        df_scored['qual_percentile'], df_scored['cash_percentile'], df_scored['cost_percentile']
+        df_scored['perf_percentile'],
+        df_scored['risk_percentile'],
+        df_scored['cash_percentile'],
+        df_scored['qual_percentile']
     )
 
     final_scores = []
@@ -218,10 +241,21 @@ def run_batch_scoring_engine(conn):
             row['absolute_score'], tot_pen, row['confidence']
         )
         
+        investor_adjustment = scoring_engine.calculate_investor_stability_adjustment(
+            row['investor_count']
+        )
+        final_sc = final_sc + investor_adjustment
+        final_sc = max(0, min(100, final_sc))
+        
         row['investor_penalty'] = investor_penalty
+        row['investor_adjustment'] = investor_adjustment
+        
         breakdown_json = scoring_engine.explain_score(
-            row['perf_percentile']*0.40, row['risk_percentile']*0.25, row['qual_percentile']*0.15, 
-            row['cash_percentile']*0.15, row['cost_percentile']*0.05, row['absolute_score'], 
+            row['perf_percentile'] * 0.40, 
+            row['risk_percentile'] * 0.30, 
+            row['cash_percentile'] * 0.25, 
+            row['qual_percentile'] * 0.05, 
+            row['absolute_score'], 
             mdd_pen, vol_pen, raw_score, row['confidence'], conf_factor, final_sc
         )
         
@@ -239,7 +273,6 @@ def run_batch_scoring_engine(conn):
     # 3. KATEGORİ İÇİ PERCENTILE
     df_scored['final_percentile'] = scoring_engine.calculate_category_percentile(df_scored)
 
-    # KATEGORİ İÇİ SIRALAMA BİLGİLERİ
     df_scored['category_rank'] = (
         df_scored.groupby('category')['final_score']
         .rank(ascending=False, method='min')

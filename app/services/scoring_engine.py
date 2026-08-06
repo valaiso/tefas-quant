@@ -1,6 +1,6 @@
-import pandas as pd
-import numpy as np
 import json
+import numpy as np
+import pandas as pd
 
 
 def _percentile(series, ascending=True):
@@ -50,29 +50,21 @@ def calculate_quality_composite(df):
 
 
 def calculate_cashflow_composite(df):
-    """Yatırımcı kalitesi skoru"""
+    """
+    Fon akış ve yatırımcı ilgisi skoru (Yatırımcı skoru)
 
-    investor_base = (
-        _percentile(df["investor_count"], True) * 0.60
-        + _percentile(df["investor_growth_1m"], True) * 0.20
-        + _percentile(df["cash_flow"], True) * 0.20
+    Yatırımcı büyümesi %30
+    Fon büyümesi %25
+    Nakit giriş/çıkışı %45
+    """
+
+    score = (
+        _percentile(df["investor_growth_1m"], True) * 0.30
+        + _percentile(df["fund_size_growth_1m"], True) * 0.25
+        + _percentile(df["cash_flow"], True) * 0.45
     )
 
-    penalty = pd.Series(0, index=df.index)
-
-    penalty[df["investor_count"] < 1000] = -10
-    penalty[
-        (df["investor_count"] >= 1000) & (df["investor_count"] < 5000)
-    ] = -5
-
-    bonus = pd.Series(0, index=df.index)
-
-    bonus[df["investor_count"] >= 5000] = 5
-    bonus[df["investor_count"] >= 20000] = 10
-
-    score = investor_base + penalty + bonus
-
-    return score.clip(0, 100).round(2)
+    return score.round(2)
 
 
 def calculate_cost_composite(df):

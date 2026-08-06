@@ -230,8 +230,10 @@ def run_batch_scoring_engine(conn):
 
     day_count = len(prices)
     r_30 = (prices[-1] / prices[-30] - 1) * 100 if day_count >= 30 else 0
+    r_60 = (prices[-1] / prices[-60] - 1) * 100 if day_count >= 60 else r_30
     r_90 = (prices[-1] / prices[-90] - 1) * 100 if day_count >= 90 else r_30
     r_180 = (prices[-1] / prices[-180] - 1) * 100 if day_count >= 180 else r_90
+    r_270 = (prices[-1] / prices[-270] - 1) * 100 if day_count >= 270 else r_180
     r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_180
 
     daily_returns = pd.Series(prices).pct_change().dropna()
@@ -298,8 +300,10 @@ def run_batch_scoring_engine(conn):
         "beta": m.get("beta", 1),
         "information_ratio": information_ratio,
         "r_30": r_30,
+        "r_60": r_60,
         "r_90": r_90,
         "r_180": r_180,
+        "r_270": r_270,
         "r_365": r_365,
         "real_return_1y": r_365,
         "calmar": m.get("calmar_ratio", 0),

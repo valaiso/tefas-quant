@@ -17,13 +17,26 @@ def _percentile(series, ascending=True):
 
 
 def calculate_performance_composite(df):
-    """Performans skoru"""
+    """
+    Performans skoru
+
+    1 ay  : %10
+    2 ay  : %15
+    3 ay  : %20
+    6 ay  : %25
+    9 ay  : %15
+    12 ay : %15
+    """
+
     score = (
-        _percentile(df["r_365"], True) * 0.35
-        + _percentile(df["r_180"], True) * 0.20
-        + _percentile(df["r_90"], True) * 0.15
-        + _percentile(df["real_return_1y"], True) * 0.30
+        _percentile(df["r_30"], True) * 0.10
+        + _percentile(df["r_60"], True) * 0.15
+        + _percentile(df["r_90"], True) * 0.20
+        + _percentile(df["r_180"], True) * 0.25
+        + _percentile(df["r_270"], True) * 0.15
+        + _percentile(df["r_365"], True) * 0.15
     )
+
     return score.round(2)
 
 
@@ -53,15 +66,15 @@ def calculate_cashflow_composite(df):
     """
     Fon akış ve yatırımcı ilgisi skoru (Yatırımcı skoru)
 
-    Yatırımcı büyümesi %30
-    Fon büyümesi %25
-    Nakit giriş/çıkışı %45
+    Nakit giriş/çıkışı %40
+    Fon büyümesi %35
+    Yatırımcı büyümesi %25
     """
 
     score = (
-        _percentile(df["investor_growth_1m"], True) * 0.30
-        + _percentile(df["fund_size_growth_1m"], True) * 0.25
-        + _percentile(df["cash_flow"], True) * 0.45
+        _percentile(df["cash_flow"], True) * 0.40
+        + _percentile(df["fund_size_growth_1m"], True) * 0.35
+        + _percentile(df["investor_growth_1m"], True) * 0.25
     )
 
     return score.round(2)
@@ -73,8 +86,8 @@ def calculate_cost_composite(df):
     Stopaj %60 Yönetim ücreti %40
     """
     cost = (
-        _percentile(df["stopaj"], False) * 0.60
-        + _percentile(df["management_fee"], False) * 0.40
+        _percentile(df["management_fee"], False) * 0.60
+        + _percentile(df["stopaj"], False) * 0.40
     )
 
     return cost.round(2)

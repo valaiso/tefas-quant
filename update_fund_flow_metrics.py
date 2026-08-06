@@ -1,79 +1,79 @@
 import sqlite3
-import pandas as pd
+import requests
 import datetime
+import time
 
 
 DB = "tefas.db"
 
+API_URL = (
+    "https://api.fundfy.net/api/v1/fund/detail/graph/chart/"
+    "daily-cash-flow/{code}?fromDate={start}&toDate={end}"
+)
+
+
+def get_cash_flow(code):
+    try:
+        today = datetime.date.today()
+        start = today - datetime.timedelta(days=30)
+
+        url = API_URL.format(
+            code=code,
+            start=start.strftime("%Y-%m-%d"),
+            end=today.strftime("%Y-%m-%d"),
+        )
+
+        r = requests.get(url, timeout=10)
+
+        if r.status_code != 200:
+            return 0
+
+        data = r.json()
+
+        if not data:
+            return 0
+
+        total = sum(float(x.get("value", 0)) for x in data)
+
+        return total
+
+    except Exception:
+        return 0
+
 
 def run():
-
     conn = sqlite3.connect(DB)
 
-    prices = pd.read_sql("""
-        SELECT 
-            fund_id,
-            date,
-            price
-        FROM fund_daily_prices
-        ORDER BY fund_id,date
-    """, conn)
-
-
-    if prices.empty:
-        print("Fiyat datası yok")
-        return
-
-
-    results = []
-
+    funds = conn.execute("SELECT id,code FROM funds").fetchall()
 
     today = datetime.date.today().strftime("%Y-%m-%d")
 
+    results = []
 
-    for fund_id, df in prices.groupby("fund_id"):
-
-        df = df.sort_values("date")
-
-        if len(df) < 60:
-            continue
-
-
-        price_now = df["price"].iloc[-1]
-
-        price_30 = df["price"].iloc[-30]
-
-
-        if price_30 > 0 and price_now > 0:
-            growth_1m = (
-                (price_now / price_30)-1
-            ) * 100
-        else:
-            growth_1m = 0
-
-
-        # fiyat ilgisi proxy
-        cash_flow = growth_1m
-
+    for idx, (fund_id, code) in enumerate(funds):
+        cash_flow = get_cash_flow(code)
 
         results.append(
             (
                 int(fund_id),
                 today,
                 None,
-                float(growth_1m),
+                0.0,
                 None,
-                float(growth_1m),
+                0.0,
                 float(cash_flow),
-                "PRICE_PROXY"
+                "FUNDFY_CASH_FLOW",
             )
         )
 
+        if idx % 50 == 0:
+            print("İşlenen:", idx, "/", len(funds))
 
-    cur = conn.cursor()
+        time.sleep(0.05)
 
-
-    cur.executemany("""
+    conn.execute("DELETE FROM fund_flow_metrics")
+    conn.executemany(
+        """
     INSERT OR REPLACE INTO fund_flow_metrics
     (
     fund_id,
@@ -86,20 +86,16 @@ def run():
     source
     )
     VALUES (?,?,?,?,?,?,?,?)
-    """,results)
-
+    """,
+        results,
+    )
 
     conn.commit()
 
-    print(
-        "FLOW METRICS YAZILDI:",
-        len(results)
-    )
-
+    print("FUNDFY CASH FLOW YAZILDI:", len(results))
 
     conn.close()
 
 
-
-if __name__=="__main__":
+if __name__ == "__main__":
     run()

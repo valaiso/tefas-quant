@@ -471,11 +471,11 @@ def run_batch_scoring_engine(conn):
         row["cash_flow_penalty"] = cash_flow_penalty
 
         breakdown_json = scoring_engine.explain_score(
-            row["perf_percentile"] * 0.35,
-            row["risk_percentile"] * 0.25,
-            row["cash_percentile"] * 0.20,
-            row["qual_percentile"] * 0.10,
-            row["cost_percentile"] * 0.10,
+            row["perf_percentile"],
+            row["risk_percentile"],
+            row["cash_percentile"],
+            row["qual_percentile"],
+            row["cost_percentile"],
             row["absolute_score"],
             mdd_pen,
             vol_pen,

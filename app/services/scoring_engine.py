@@ -83,11 +83,11 @@ def calculate_risk_composite(df):
     """Risk skoru"""
 
     score = (
-        df["volatility"].apply(_score_volatility) * 0.35
-        + df["mdd"].apply(_score_drawdown) * 0.30
-        + df["sharpe"].apply(_score_sharpe) * 0.10
-        + df["sortino"].apply(_score_sortino) * 0.10
-        + df["calmar"].apply(_score_calmar) * 0.10
+        df["mdd"].apply(_score_drawdown) * 0.35
+        + df["volatility"].apply(_score_volatility) * 0.25
+        + df["sharpe"].apply(_score_sharpe) * 0.15
+        + df["sortino"].apply(_score_sortino) * 0.15
+        + df["calmar"].apply(_score_calmar) * 0.05
         + df["beta"].apply(_score_beta) * 0.05
     )
 

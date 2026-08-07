@@ -64,17 +64,15 @@ def calculate_quality_composite(df):
 
 def calculate_cashflow_composite(df):
     """
-    Fon akış ve yatırımcı ilgisi skoru (Yatırımcı skoru)
+    Yatırımcı Kalitesi Skoru
 
-    Nakit giriş/çıkışı %40
-    Fon büyümesi %35
-    Yatırımcı büyümesi %25
+    Mevcut yatırımcı sayısı %70
+    Investor Growth %30
     """
 
     score = (
-        _percentile(df["cash_flow"], True) * 0.40
-        + _percentile(df["fund_size_growth_1m"], True) * 0.35
-        + _percentile(df["investor_growth_1m"], True) * 0.25
+        _percentile(df["investor_count"], True) * 0.70
+        + _percentile(df["investor_growth_1m"], True) * 0.30
     )
 
     return score.round(2)

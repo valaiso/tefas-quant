@@ -57,13 +57,12 @@ def _percentile(series, ascending=True):
 
 
 def calculate_performance_composite(df):
-    """
-    Performans skoru
+    """Performans skoru
 
-    1 ay  : %10
-    2 ay  : %10
-    3 ay  : %20
-    6 ay  : %20
+    1 ay : %10
+    2 ay : %10
+    3 ay : %20
+    6 ay : %20
     1 yıl : %20
     3 yıl : %15
     5 yıl : %5
@@ -106,56 +105,72 @@ def calculate_quality_composite(df):
 
 
 def calculate_cashflow_composite(df):
-    """
-    Yatırımcı Kalitesi Skoru
+    """Investor Quality Score
 
-    Yatırımcı tabanı %80
-    Investor Growth %20
-
-    Büyük fon avantajı:
-    20.000+ yatırımcı = maksimum taban skoru
+    Ağırlık:
+    Yatırımcı tabanı %55
+    Yatırımcı büyümesi %15
+    Nakit akışı kalitesi %30
     """
 
-    investor_base = pd.Series(index=df.index, dtype=float)
-
-
-    for idx, row in df.iterrows():
-
+    def investor_base_score(x):
         try:
-            count = int(row["investor_count"])
+            x = int(x)
+            if x < 1000:
+                return 20
+            elif x < 5000:
+                return 50
+            elif x < 20000:
+                return 75
+            else:
+                return 100
         except:
-            count = 0
+            return 20
 
+    def growth_score(x):
+        try:
+            x = float(x)
+            if x < -10:
+                return 0
+            elif x < 0:
+                return 40
+            elif x < 5:
+                return 70
+            else:
+                return 100
+        except:
+            return 50
 
-        if count < 1000:
-            base = 20
+    def cashflow_score(row):
+        try:
+            aum = float(row.get("aum", 0))
+            flow = float(row.get("cash_flow", 0))
 
-        elif count < 5000:
-            base = 50
+            if aum <= 0:
+                return 50
 
-        elif count < 20000:
-            base = 75
+            ratio = (flow / aum) * 100
 
-        else:
-            base = 100
+            if ratio >= 10:
+                return 100
+            elif ratio >= 0:
+                return 70
+            elif ratio >= -5:
+                return 50
+            elif ratio >= -10:
+                return 25
+            elif ratio >= -20:
+                return 10
+            else:
+                return 0
+        except:
+            return 50
 
+    base = df["investor_count"].apply(investor_base_score)
+    growth = df["investor_growth_1m"].apply(growth_score)
+    cash = df.apply(cashflow_score, axis=1)
 
-        investor_base.loc[idx] = base
-
-
-
-    growth_score = _percentile(
-        df["investor_growth_1m"],
-        True
-    )
-
-
-    score = (
-        investor_base * 0.80
-        +
-        growth_score * 0.20
-    )
-
+    score = base * 0.55 + growth * 0.15 + cash * 0.30
 
     return score.round(2)
 
@@ -169,19 +184,9 @@ def calculate_cost_composite(df):
     result = pd.Series(index=df.index, dtype=float)
 
     for category, group in df.groupby("category"):
-
-        management_score = _percentile(
-            group["management_fee"],
-            False
-        )
-
-        stopaj_score = _percentile(
-            group["stopaj"],
-            False
-        )
-
+        management_score = _percentile(group["management_fee"], False)
+        stopaj_score = _percentile(group["stopaj"], False)
         category_score = management_score
-
         result.loc[group.index] = category_score
 
     return result.round(2)
@@ -234,17 +239,21 @@ def calculate_confidence(prices, first_date, last_date):
 
 
 def calculate_absolute_score(
-    performance_score, risk_score, investor_score, portfolio_score, cost_score_val
+    performance_score,
+    risk_score,
+    investor_score,
+    portfolio_score,
+    cost_score_val,
 ):
     """Nihai kalite skoru
 
-    Performans %40 Risk %15 Yatırımcı %25 Maliyet %10 Portföy Kalitesi %10
+    Performans %35 Risk %25 Yatırımcı %20 Maliyet %10 Portföy Kalitesi %10
     """
 
     score = (
-        performance_score * 0.40
-        + risk_score * 0.15
-        + investor_score * 0.25
+        performance_score * 0.35
+        + risk_score * 0.25
+        + investor_score * 0.20
         + cost_score_val * 0.10
         + portfolio_score * 0.10
     )
@@ -311,9 +320,10 @@ def calculate_continuous_penalty(mdd, volatility):
 
 
 def calculate_final_score(absolute_score, penalty, confidence):
-    raw_score = absolute_score - (penalty * 0.50)
+    raw_score = absolute_score - penalty
 
     confidence_factor = confidence / 100.0
+
     confidence_adjustment = (confidence_factor - 0.5) * 10
 
     final_score = raw_score + confidence_adjustment
@@ -366,8 +376,7 @@ def calculate_category_percentile(df):
         return pd.Series(dtype=float)
 
     result = (
-        df.groupby("category")["final_score"].rank(pct=True, ascending=True)
-        * 100
+        df.groupby("category")["final_score"].rank(pct=True, ascending=True) * 100
     )
 
     return result.round(2)

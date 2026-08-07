@@ -21,22 +21,22 @@ def calculate_performance_composite(df):
     Performans skoru
 
     1 ay  : %10
-    2 ay  : %15
+    2 ay  : %10
     3 ay  : %20
-    6 ay  : %25
-    9 ay  : %15
-    12 ay : %15
+    6 ay  : %20
+    1 yıl : %20
+    3 yıl : %15
+    5 yıl : %5
     """
-
     score = (
         _percentile(df["r_30"], True) * 0.10
-        + _percentile(df["r_60"], True) * 0.15
+        + _percentile(df["r_60"], True) * 0.10
         + _percentile(df["r_90"], True) * 0.20
-        + _percentile(df["r_180"], True) * 0.25
-        + _percentile(df["r_270"], True) * 0.15
-        + _percentile(df["r_365"], True) * 0.15
+        + _percentile(df["r_180"], True) * 0.20
+        + _percentile(df["r_365"], True) * 0.20
+        + _percentile(df["r_1095"], True) * 0.15
+        + _percentile(df["r_1825"], True) * 0.05
     )
-
     return score.round(2)
 
 

@@ -4,36 +4,44 @@ conn = sqlite3.connect("tefas.db")
 c = conn.cursor()
 
 updates = {
+    "Yabancı Hisse Senedi": [
+        "YABANCI HİSSE",
+        "YABANCI HISSE",
+        "YABANCI TEKNOLOJİ",
+        "YABANCI TEKNOLOJI",
+        "YABANCI SAĞLIK",
+        "YABANCI SAGLIK",
+    ],
     "Hisse Senedi": [
+        "HİSSE SENEDİ",
+        "HISSE SENEDI",
         "HİSSE",
-        "HISSE",
-        "HİSSE SENEDİ"
+        "HISSE"
     ],
     "Para Piyasası": [
         "PARA PİYASASI"
     ],
-    "Altın": [
-        "ALTIN"
-    ],
     "Borçlanma": [
         "BORÇLANMA",
         "BORCLANMA"
+    ],
+    "Altın": [
+        "ALTIN"
     ],
     "Değişken": [
         "DEĞİŞKEN",
         "DEGISKEN"
     ],
     "Fon Sepeti": [
-        "FON SEPETİ"
+        "FON SEPETİ",
+        "FON SEPETI",
+        "BYF FON SEPETİ",
+        "BYF FON SEPETI"
     ],
     "Katılım": [
         "KATILIM"
-    ],
-    "Yabancı": [
-        "YABANCI"
     ]
 }
-
 
 for category, keys in updates.items():
     for key in keys:
@@ -41,13 +49,20 @@ for category, keys in updates.items():
             """
             UPDATE funds
             SET category=?
-            WHERE UPPER(title) LIKE ?
+            WHERE UPPER(name) LIKE ?
             """,
             (category, f"%{key}%")
         )
 
-conn.commit()
+# Öncelikli yabancı fon düzeltmesi
+c.execute("""
+UPDATE funds
+SET category='Yabancı Hisse Senedi'
+WHERE UPPER(name) LIKE '%YABANCI HİSSE%'
+   OR UPPER(name) LIKE '%YABANCI HISSE%'
+""")
 
+conn.commit()
 
 print(
     c.execute(

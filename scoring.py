@@ -225,8 +225,12 @@ def run_batch_scoring_engine(conn):
       continue
 
     p_history = grouped[f_id]
-    prices = p_history["price"].values
-    prices = prices[prices > 0]
+    # Geçersiz fiyatları çıkar ve tarihi sırala
+    valid_history = (
+        p_history[p_history["price"] > 0]
+        .sort_values("date")
+    )
+    prices = valid_history["price"].values
     if len(prices) < 30:
       continue
 
@@ -296,8 +300,12 @@ def run_batch_scoring_engine(conn):
       drawdowns = (prices - cum_max) / cum_max
       mdd = float(abs(drawdowns.min()) * 100) if len(drawdowns) > 0 else 0.0
 
-    first_date = p_history["date"].iloc[0]
-    last_date = p_history["date"].iloc[-1]
+    valid_history = (
+        p_history[p_history["price"] > 0]
+        .sort_values("date")
+    )
+    first_date = valid_history["date"].iloc[0]
+    last_date = valid_history["date"].iloc[-1]
 
     conf = scoring_engine.calculate_confidence(prices, first_date, last_date)
 

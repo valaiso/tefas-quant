@@ -3,6 +3,46 @@ import numpy as np
 import pandas as pd
 
 
+def _clip(score):
+    return max(0.0, min(100.0, score))
+
+
+def _score_sharpe(x):
+    if pd.isna(x):
+        return 50
+    return _clip((x + 1.0) / 3.0 * 100)
+
+
+def _score_sortino(x):
+    if pd.isna(x):
+        return 50
+    return _clip((x + 1.0) / 4.0 * 100)
+
+
+def _score_calmar(x):
+    if pd.isna(x):
+        return 50
+    return _clip(x / 5.0 * 100)
+
+
+def _score_volatility(x):
+    if pd.isna(x):
+        return 50
+    return _clip(100 - x * 250)
+
+
+def _score_drawdown(x):
+    if pd.isna(x):
+        return 50
+    return _clip(100 - x * 150)
+
+
+def _score_beta(x):
+    if pd.isna(x):
+        return 50
+    return _clip(100 - abs(x - 1) * 50)
+
+
 def _percentile(series, ascending=True):
     """Kategori içi percentile hesaplama"""
     if len(series) == 0:
@@ -42,13 +82,16 @@ def calculate_performance_composite(df):
 
 def calculate_risk_composite(df):
     """Risk skoru"""
+
     score = (
-        _percentile(df["sharpe"], True) * 0.35
-        + _percentile(df["sortino"], True) * 0.25
-        + _percentile(df["calmar"], True) * 0.15
-        + _percentile(df["beta"], False) * 0.10
-        + _percentile(df["volatility"], False) * 0.15
+        df["volatility"].apply(_score_volatility) * 0.35
+        + df["mdd"].apply(_score_drawdown) * 0.30
+        + df["sharpe"].apply(_score_sharpe) * 0.10
+        + df["sortino"].apply(_score_sortino) * 0.10
+        + df["calmar"].apply(_score_calmar) * 0.10
+        + df["beta"].apply(_score_beta) * 0.05
     )
+
     return score.round(2)
 
 
@@ -66,29 +109,82 @@ def calculate_cashflow_composite(df):
     """
     Yatırımcı Kalitesi Skoru
 
-    Mevcut yatırımcı sayısı %70
-    Investor Growth %30
+    Yatırımcı tabanı %80
+    Investor Growth %20
+
+    Büyük fon avantajı:
+    20.000+ yatırımcı = maksimum taban skoru
     """
 
-    score = (
-        _percentile(df["investor_count"], True) * 0.70
-        + _percentile(df["investor_growth_1m"], True) * 0.30
+    investor_base = pd.Series(index=df.index, dtype=float)
+
+
+    for idx, row in df.iterrows():
+
+        try:
+            count = int(row["investor_count"])
+        except:
+            count = 0
+
+
+        if count < 1000:
+            base = 20
+
+        elif count < 5000:
+            base = 50
+
+        elif count < 20000:
+            base = 75
+
+        else:
+            base = 100
+
+
+        investor_base.loc[idx] = base
+
+
+
+    growth_score = _percentile(
+        df["investor_growth_1m"],
+        True
     )
+
+
+    score = (
+        investor_base * 0.80
+        +
+        growth_score * 0.20
+    )
+
 
     return score.round(2)
 
 
 def calculate_cost_composite(df):
-    """Maliyet skoru
+    """Kategori içi maliyet skoru"""
 
-    Stopaj %60 Yönetim ücreti %40
-    """
-    cost = (
-        _percentile(df["management_fee"], False) * 0.60
-        + _percentile(df["stopaj"], False) * 0.40
-    )
+    if df.empty:
+        return pd.Series(dtype=float)
 
-    return cost.round(2)
+    result = pd.Series(index=df.index, dtype=float)
+
+    for category, group in df.groupby("category"):
+
+        management_score = _percentile(
+            group["management_fee"],
+            False
+        )
+
+        stopaj_score = _percentile(
+            group["stopaj"],
+            False
+        )
+
+        category_score = management_score
+
+        result.loc[group.index] = category_score
+
+    return result.round(2)
 
 
 def calculate_confidence(prices, first_date, last_date):
@@ -308,10 +404,14 @@ def calculate_investor_quality_score(
         pass
 
     try:
-        if investor_change > 0:
-            score += 1
-        elif investor_change < 0:
-            score -= 1
+        if investor_count < 20000:
+            if investor_change > 0:
+                score += 1
+            elif investor_change < 0:
+                score -= 1
+        else:
+            if investor_change > 0:
+                score += 1
     except:
         pass
 

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 TRADING_DAYS = 252
-DEFAULT_RISK_FREE_RATE = 0.40  # %40
+DEFAULT_RISK_FREE_RATE = 0.20
 
 def _get_rf():
     """Config üzerinden risk-free rate alma (config yoksa varsayılanı kullanır)."""

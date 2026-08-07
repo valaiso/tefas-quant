@@ -10,25 +10,25 @@ def _clip(score):
 def _score_sharpe(x):
     if pd.isna(x):
         return 50
-    return _clip((x + 1.0) / 3.0 * 100)
+    return _clip((x / 2.0) * 100)
 
 
 def _score_sortino(x):
     if pd.isna(x):
         return 50
-    return _clip((x + 1.0) / 4.0 * 100)
+    return _clip((x / 3.0) * 100)
 
 
 def _score_calmar(x):
     if pd.isna(x):
         return 50
-    return _clip(x / 5.0 * 100)
+    return _clip((x / 4.0) * 100)
 
 
 def _score_volatility(x):
     if pd.isna(x):
         return 50
-    return _clip(100 - x * 250)
+    return _clip(100 - x * 150)
 
 
 def _score_drawdown(x):
@@ -60,34 +60,34 @@ def calculate_performance_composite(df):
     """Performans skoru
 
     1 ay : %10
-    2 ay : %10
+    2 ay : %15
     3 ay : %20
-    6 ay : %20
+    6 ay : %25
     1 yıl : %20
-    3 yıl : %15
+    3 yıl : %5
     5 yıl : %5
     """
     score = (
         _percentile(df["r_30"], True) * 0.10
-        + _percentile(df["r_60"], True) * 0.10
+        + _percentile(df["r_60"], True) * 0.15
         + _percentile(df["r_90"], True) * 0.20
-        + _percentile(df["r_180"], True) * 0.20
+        + _percentile(df["r_180"], True) * 0.25
         + _percentile(df["r_365"], True) * 0.20
-        + _percentile(df["r_1095"], True) * 0.15
+        + _percentile(df["r_1095"], True) * 0.05
         + _percentile(df["r_1825"], True) * 0.05
     )
     return score.round(2)
 
 
 def calculate_risk_composite(df):
-    """Risk skoru"""
+    """Risk skoru (Güncellenmiş Dengeli Dağılım)"""
 
     score = (
-        df["mdd"].apply(_score_drawdown) * 0.35
-        + df["volatility"].apply(_score_volatility) * 0.25
-        + df["sharpe"].apply(_score_sharpe) * 0.15
+        df["volatility"].apply(_score_volatility) * 0.25
+        + df["mdd"].apply(_score_drawdown) * 0.25
+        + df["sharpe"].apply(_score_sharpe) * 0.20
         + df["sortino"].apply(_score_sortino) * 0.15
-        + df["calmar"].apply(_score_calmar) * 0.05
+        + df["calmar"].apply(_score_calmar) * 0.10
         + df["beta"].apply(_score_beta) * 0.05
     )
 
@@ -176,7 +176,7 @@ def calculate_cashflow_composite(df):
 
 
 def calculate_cost_composite(df):
-    """Kategori içi maliyet skoru"""
+    """Kategori içi maliyet skoru - yönetim ücretini aşırı cezalandırmaz"""
 
     if df.empty:
         return pd.Series(dtype=float)
@@ -184,10 +184,22 @@ def calculate_cost_composite(df):
     result = pd.Series(index=df.index, dtype=float)
 
     for category, group in df.groupby("category"):
-        management_score = _percentile(group["management_fee"], False)
-        stopaj_score = _percentile(group["stopaj"], False)
-        category_score = management_score
-        result.loc[group.index] = category_score
+
+        fee = pd.to_numeric(
+            group["management_fee"],
+            errors="coerce"
+        ).fillna(group["management_fee"].median())
+
+        # düşük ücret avantajı var ama aşırı baskı yok
+        fee_score = 100 - (
+            (fee - fee.min()) /
+            (fee.max() - fee.min() + 0.0001)
+        ) * 50
+
+        # minimum 50 puan tabanı
+        fee_score = fee_score.clip(50, 100)
+
+        result.loc[group.index] = fee_score
 
     return result.round(2)
 

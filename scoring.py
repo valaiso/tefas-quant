@@ -42,7 +42,9 @@ def get_db_connection():
       " REAL, signal TEXT, letter_grade TEXT, breakdown_json TEXT, raw_score"
       " REAL, confidence_factor REAL, PRIMARY KEY (fund_id, date))"
   )
-  cursor.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)")
+  cursor.execute(
+      "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)"
+  )
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS fund_flow_metrics (
         fund_id INTEGER,
@@ -215,7 +217,7 @@ def run_batch_scoring_engine(conn):
   grouped = dict(tuple(prices_df.groupby("fund_id")))
   raw_data = []
 
-  # 1. HAM VERİLERİ HAZİRLAMA (FVT Öncelikli Hiyerarşi)
+  # 1. HAM VERİLERİ HAZIRLAMA (FVT Öncelikli Hiyerarşi)
   for _, row in funds_df.iterrows():
     f_id = row["id"]
     category = row["category"]
@@ -235,6 +237,16 @@ def run_batch_scoring_engine(conn):
     r_180 = (prices[-1] / prices[-180] - 1) * 100 if day_count >= 180 else r_90
     r_270 = (prices[-1] / prices[-270] - 1) * 100 if day_count >= 270 else r_180
     r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_180
+    r_1095 = (
+        (prices[-1] / prices[-1095] - 1) * 100
+        if day_count >= 1095
+        else r_365
+    )
+    r_1825 = (
+        (prices[-1] / prices[-1825] - 1) * 100
+        if day_count >= 1825
+        else r_1095
+    )
 
     daily_returns = pd.Series(prices).pct_change().dropna()
     volatility = (
@@ -305,6 +317,8 @@ def run_batch_scoring_engine(conn):
         "r_180": r_180,
         "r_270": r_270,
         "r_365": r_365,
+        "r_1095": r_1095,
+        "r_1825": r_1825,
         "real_return_1y": r_365,
         "calmar": m.get("calmar_ratio", 0),
         "portfolio_quality": calculate_portfolio_quality(

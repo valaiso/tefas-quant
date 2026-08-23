@@ -1000,57 +1000,57 @@ elif menu == "🚀 Backtest Performansı":
                     " seçin veya daha eski bir tarih aralığı için veri senkronizasyonu yapın."
                 )
             else:
-          from backtest.engine import VectorizedBacktestEngine
+        from backtest.engine import VectorizedBacktestEngine
 
-          engine = VectorizedBacktestEngine(
-              holding_periods=[21, 63, 126, 252, 756, 1260]
-          )
-          report = engine.run(prices_df=prices_df, signals_df=signals_df)
+        engine = VectorizedBacktestEngine(
+            holding_periods=[21, 63, 126, 252, 756, 1260]
+        )
+        report = engine.run(prices_df=prices_df, signals_df=signals_df)
 
-          key_str = f"{selected_period}_days_performance"
-          if report and key_str in report:
+        key_str = f"{selected_period}_days_performance"
+        if report and key_str in report:
             metrics = report[key_str]
 
             if metrics["analyzed_signals"] == 0:
-              st.warning(
-                  f"Seçilen {b_period_label} için yeterli ileri tarihli fiyat"
-                  " eşleşmesi bulunamadı."
-              )
+                st.warning(
+                    f"Seçilen {b_period_label} için yeterli ileri tarihli fiyat"
+                    " eşleşmesi bulunamadı."
+                )
             else:
-              st.success(f"Backtest ({b_period_label}) başarıyla tamamlandı!")
+                st.success(f"Backtest ({b_period_label}) başarıyla tamamlandı!")
 
-              m1, m2, m3, m4 = st.columns(4)
-              m1.metric(
-                  "Strateji Ortalama Getirisi",
-                  f"%{metrics['average_return']:+.2f}",
-                  f"{metrics['analyzed_signals']} İşlem",
-              )
-              m2.metric(
-                  "İsabet Oranı (Hit Ratio)", f"%{metrics['hit_ratio']:.1f}"
-              )
-              m3.metric("Sharpe Oranı", f"{metrics['sharpe_ratio']:.2f}")
-              m4.metric("Maksimum Düşüş", f"%{metrics['max_drawdown']:.2f}")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric(
+                    "Strateji Ortalama Getirisi",
+                    f"%{metrics['average_return']:+.2f}",
+                    f"{metrics['analyzed_signals']} İşlem",
+                )
+                m2.metric(
+                    "İsabet Oranı (Hit Ratio)", f"%{metrics['hit_ratio']:.1f}"
+                )
+                m3.metric("Sharpe Oranı", f"{metrics['sharpe_ratio']:.2f}")
+                m4.metric("Maksimum Düşüş", f"%{metrics['max_drawdown']:.2f}")
 
-              st.markdown("---")
-              st.subheader("📋 Simülasyon İşlem Detayları")
-              trades_df = metrics["trades_df"]
-              if not trades_df.empty:
-                display_trades = trades_df.copy()
-                display_trades["return"] = (
-                    (display_trades["return"] * 100).round(2).astype(str) + "%"
-                )
-                display_trades.columns = [
-                    "Fon ID",
-                    "Giriş Tarihi",
-                    "Çıkış Tarihi",
-                    "Giriş Fiyatı",
-                    "Çıkış Fiyatı",
-                    "Getiri (%)",
-                ]
-                st.dataframe(
-                    display_trades.head(100), use_container_width=True
-                )
-          else:
+                st.markdown("---")
+                st.subheader("📋 Simülasyon İşlem Detayları")
+                trades_df = metrics["trades_df"]
+                if not trades_df.empty:
+                    display_trades = trades_df.copy()
+                    display_trades["return"] = (
+                        (display_trades["return"] * 100).round(2).astype(str) + "%"
+                    )
+                    display_trades.columns = [
+                        "Fon ID",
+                        "Giriş Tarihi",
+                        "Çıkış Tarihi",
+                        "Giriş Fiyatı",
+                        "Çıkış Fiyatı",
+                        "Getiri (%)",
+                    ]
+                    st.dataframe(
+                        display_trades.head(100), use_container_width=True
+                    )
+        else:
             st.warning("Seçilen periyot için rapor oluşturulamadı.")
       except Exception as e:
         st.error(f"Backtest çalıştırılırken hata oluştu: {e}")

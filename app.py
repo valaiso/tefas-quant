@@ -93,6 +93,18 @@ def load_universe_data():
         con=conn,
     )
     scores_df = pd.read_sql("SELECT * FROM fund_scores", con=conn)
+        # Ensure we have enough forward data for the selected holding period
+        max_price_date = prices_df["date"].max()
+        from pandas import Timedelta
+        cutoff_date = max_price_date - Timedelta(days=selected_period)
+        signals_df = scores_df[scores_df["date"] <= cutoff_date].copy()
+        if signals_df.empty:
+            st.warning(
+                f"Seçilen {b_period_label} için yeterli ileri tarihli fiyat"
+                " eşleşmesi olan sinyal bulunamadı. Lütfen daha kısa bir süre"
+                " seçin veya daha eski bir tarih aralığı için veri senkronizasyonu yapın."
+            )
+        else:
   except Exception:
     return pd.DataFrame()
 
@@ -993,7 +1005,7 @@ elif menu == "🚀 Backtest Performansı":
           engine = VectorizedBacktestEngine(
               holding_periods=[21, 63, 126, 252, 756, 1260]
           )
-          report = engine.run(prices_df=prices_df, signals_df=scores_df)
+          report = engine.run(prices_df=prices_df, signals_df=signals_df)
 
           key_str = f"{selected_period}_days_performance"
           if report and key_str in report:

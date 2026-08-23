@@ -988,6 +988,10 @@ elif menu == "🚀 Backtest Performansı":
               " önce sol menüden veri senkronizasyonu çalıştırın."
           )
         else:
+            # Convert date columns to datetime
+            prices_df["date"] = pd.to_datetime(prices_df["date"])
+            scores_df["date"] = pd.to_datetime(scores_df["date"])
+
             # Ensure we have enough forward data for the selected holding period
             max_price_date = prices_df["date"].max()
             from pandas import Timedelta

@@ -523,7 +523,12 @@ def run_batch_scoring_engine(conn):
     ) * 100
 
     # 4. VERİTABANI KAYITLARI
-    today_str = datetime.date.today().strftime("%Y-%m-%d")
+    # Determine the score date as 1260 days (5 years) before the most recent price date
+    # to ensure we have forward data for the maximum holding period in the backtest
+    max_price_date_str = prices_df["date"].max()
+    max_price_date = datetime.datetime.strptime(max_price_date_str, "%Y-%m-%d").date()
+    score_date = max_price_date - datetime.timedelta(days=1260)
+    today_str = score_date.strftime("%Y-%m-%d")
     db_records = []
 
     for _, row in df_scored.iterrows():

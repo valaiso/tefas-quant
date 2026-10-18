@@ -106,3 +106,22 @@ STRONG_BUY = {
 # A1 Capital, Hedef, Atlas ve Bulls fonları grup halinde durdu; aynı kurucunun
 # işlem gören fonları da sıçrama (spillover) riski taşır.
 FOUNDER_RISK = {"min_share": 0.30, "min_funds": 3, "penalty": 10.0, "max_grade": "B"}
+
+# ------------------------------------------------------------- risk bayrakları
+# Point-in-time test (Eki 2024 – Eyl 2026, 24 ay, ~28 bin fon-ay gözlemi):
+# * Son 3 ayda tepeden kategorisinden 10 puandan fazla düşüş: sonraki 1 yılda
+#   kategoriye göre ~−4 puan, 1 yılda >%20 kaybettirme oranı ~5 kat -> küçük ceza.
+# * Kuyruk riski (son 1 yılın en kötü %5 günlerinin ortalaması kategorinin en
+#   kötü %10'unda): büyük kayıp oranı ~5 kat -> GÜÇLÜ AL engeli.
+# * Sıcak para (1 ayda büyüklüğün %30'undan fazla net giriş): büyük kayıp oranı
+#   ~3 kat -> GÜÇLÜ AL engeli.
+# * Yoğunlaşma (yatırımcı azalırken para girişi, ör. TMG): sonraki getiriyi
+#   düşürmedi -> ceza yok, yalnızca bilgi notu.
+RISK_FLAGS = {
+    "drawdown_rel_points": 10.0,   # son 3 ay tepeden düşüş, kategori medyanı + bu kadar puan
+    "drawdown_penalty": 3.0,
+    "tail_quantile": 0.10,         # CVaR %5 kategorinin en kötü %10'u
+    "hot_money_flow_pct": 30.0,    # 1 aylık net giriş / büyüklük
+    "concentration_investor_pct": -2.0,  # bilgi notu: 1A yatırımcı değişimi bunun altında
+    "concentration_flow_pct": 5.0,       # ... ve 1A net giriş bunun üstünde
+}

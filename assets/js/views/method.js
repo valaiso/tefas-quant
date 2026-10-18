@@ -22,7 +22,8 @@ export function render(app, _route, store) {
       <li><b>Not:</b> kategori içi sıraya göre verilir: üst %32,5 A (Al), sonraki %35 B (İzle), %22,5 C (Zayıf), alt %10 D (Uzak Dur).
         <b>A+ (Güçlü Al)</b> yalnızca şu şartların hepsini sağlayan fonlara verilir: kategorisinde en üst %${100 - (c.strongBuy?.top_percentile ?? 95)},
         en az 1 yıllık geçmiş, en az ${num(c.strongBuy?.min_investors ?? 1000, 0)} yatırımcı, en az ${num((c.strongBuy?.min_aum ?? 1e8) / 1e6, 0)} mn ₺ büyüklük,
-        getiri anomalisi cezası yok, önceki ${c.strongBuy?.streak_months ?? 2} ay sonunda da A veya A+ ve kurucu riski yok.</li>
+        getiri anomalisi cezası yok, önceki ${c.strongBuy?.streak_months ?? 2} ay sonunda da A veya A+, kurucu riski yok,
+        kuyruk riski kategorinin en kötü %10'unda değil ve son 1 ayda büyüklüğün %${c.riskFlags?.hot_money_flow_pct ?? 30}'undan fazla net giriş (sıcak para) yok.</li>
     </ol>
   </section>
 
@@ -60,6 +61,10 @@ export function render(app, _route, store) {
         <tr><td>Üst sınır</td><td class="down">−${num(c.anomaly.max, 0)}</td></tr>
         <tr><th colspan="2">Kurucu riski</th></tr>
         <tr><td>Portföy şirketinin halka açık fonlarının en az %${num((c.founderRisk?.min_share ?? 0.3) * 100, 0)}'u (en az ${c.founderRisk?.min_funds ?? 3}) işleme kapalı, çökmüş ya da fiyatı durmuşsa kalan fonlarına; not en fazla İZLE</td><td class="down">−${num(c.founderRisk?.penalty ?? 10, 0)}</td></tr>
+        <tr><th colspan="2">Sert düşüş cezası</th></tr>
+        <tr><td>Son 3 ayda tepeden düşüş, kategori medyanından ${num(c.riskFlags?.drawdown_rel_points ?? 10, 0)} puandan fazlaysa</td><td class="down">−${num(c.riskFlags?.drawdown_penalty ?? 3, 0)}</td></tr>
+        <tr><th colspan="2">Bilgi notu (ceza yok)</th></tr>
+        <tr><td>Yoğunlaşma: 1 ayda yatırımcı sayısı azalırken (&lt; %${c.riskFlags?.concentration_investor_pct ?? -2}) büyüklüğün %${c.riskFlags?.concentration_flow_pct ?? 5}'inden fazla net giriş</td><td class="dim">not</td></tr>
         <tr><th colspan="2">Ayarlar</th></tr>
         <tr><td>Veri güveni (geçmiş uzunluğu, süreklilik, güncellik)</td><td>−5 … +5</td></tr>
         <tr><td>Yatırımcı istikrarı (yatırımcı sayısı kademesi)</td><td>−5 … +3</td></tr>

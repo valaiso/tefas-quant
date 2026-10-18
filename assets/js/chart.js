@@ -4,17 +4,38 @@ import { esc, monthLabel, dateTR, num } from "./util.js";
 const PALETTE = ["var(--c1)", "var(--c2)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c3)"];
 
 /**
+ * Açıklamadaki bir seriye tıklayınca seri gizlenir / gösterilir. Gizlenenler
+ * aynı grafik kutusunda (dönem değişse de) hatırlanır; ölçek görünenlere göre ayarlanır.
  * @param {HTMLElement} el
- * @param {{name:string, d:string[], v:number[], dashed?:boolean}[]} series
+ * @param {{name:string, d:string[], v:number[], dashed?:boolean, color?:string}[]} series
  * @param {{height?:number, format?:(v:number)=>string, base?:number}} opts
  */
 export function lineChart(el, series, opts = {}) {
+  const full = series.map((s, i) => ({ ...s, color: s.color || PALETTE[i % PALETTE.length] }));
+  el._hidden = el._hidden || new Set();
+  const visible = full.filter((s) => !el._hidden.has(s.name));
+  draw(el, visible, opts, full);
+  el.querySelectorAll(".chart-legend .item").forEach((item) =>
+    item.addEventListener("click", () => {
+      const name = item.dataset.name;
+      el._hidden.has(name) ? el._hidden.delete(name) : el._hidden.add(name);
+      lineChart(el, series, opts);
+    }));
+}
+
+function legendHtml(full, hidden) {
+  return `<div class="chart-legend">${full.map((s) => `<button type="button" class="item ${hidden.has(s.name) ? "off" : ""}"
+      data-name="${esc(s.name)}" aria-pressed="${!hidden.has(s.name)}" title="Göster / gizle">
+      <span class="swatch" style="background:${s.color}"></span>${esc(s.name)}</button>`).join("")}</div>`;
+}
+
+function draw(el, series, opts, full) {
   const H = opts.height || 280, W = Math.max(320, el.clientWidth || 720);
   const pad = { l: 46, r: 14, t: 12, b: 26 };
   const fmt = opts.format || ((v) => num(v, 1));
   const all = series.flatMap((s) => s.d.map((d, i) => ({ d, v: s.v[i] }))).filter((p) => p.v != null);
   if (!all.length) {
-    el.innerHTML = `<div class="empty">Grafik verisi yok</div>`;
+    el.innerHTML = `<div class="empty">${full.length ? "Tüm seriler gizli — açıklamadan birini seçin" : "Grafik verisi yok"}</div>${legendHtml(full, el._hidden)}`;
     return;
   }
   const dates = [...new Set(all.map((p) => p.d))].sort();
@@ -59,9 +80,7 @@ export function lineChart(el, series, opts = {}) {
       <rect x="${pad.l}" y="${pad.t}" width="${W - pad.l - pad.r}" height="${H - pad.t - pad.b}" fill="transparent" class="hit"/>
     </svg>
     <div class="tooltip" hidden></div>
-    <div class="chart-legend">${series
-      .map((s, i) => `<span class="item"><span class="swatch" style="background:${s.color || PALETTE[i % PALETTE.length]}"></span>${esc(s.name)}</span>`)
-      .join("")}</div>`;
+    ${legendHtml(full, el._hidden)}`;
 
   const svg = el.querySelector("svg"), tip = el.querySelector(".tooltip"), line = el.querySelector(".hover-line");
   const hit = el.querySelector(".hit");

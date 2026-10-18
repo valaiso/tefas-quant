@@ -451,3 +451,20 @@ ve en fazla İZLE (Sialm & Tham 2016: kurucu sıkıntısı bağlı fonlara sıç
 Pusula, MT, Sparta — 28 fon işaretli.
 
 Backtest sayfası da aynı kuralla hesaplanıyor; 1 yıllık geçmiş şartı nedeniyle ilk A+ sinyali Ekim 2024'te, 2Y sonucu henüz yok.
+
+---
+
+## 14. Yeni risk bayrakları (18.10.2026)
+
+Point-in-time test (Eki 2024 – Eyl 2026, 24 ay, ~28 bin fon-ay; sonraki getiri kategori medyanına göre):
+
+| Bayrak | 1Y fark (bayraklı − diğer) | 1Y'de >%20 kayıp (bayraklı / diğer, tüm fonlar) | Karar |
+|---|---|---|---|
+| Son 3 ayda tepeden >%15 düşüş | −3,9 / −4,5 puan | %10,1 / %1,9 | Kategoriye göre >10 puan ise **−3 ceza** |
+| Kuyruk riski (CVaR %5, kategorinin en kötü %10'u) | ≈0 | %8,0 / %1,5 | **GÜÇLÜ AL engeli** |
+| Sıcak para (1A net giriş > büyüklüğün %30'u) | +0,5–0,9 | %5,8 / %2,0 | **GÜÇLÜ AL engeli** |
+| Yoğunlaşma (yatırımcı ↓ + giriş ↑; TMG/EIL örüntüsü) | +0,2 – +1,7 | %2,2 / %2,2 | **Ceza yok, bilgi notu** |
+| Akış oynaklığı / yatırımcı tabanı erimesi / kişi başı tutar | küçük ya da ters | — | Uygulanmadı |
+
+Sonuç: GÜÇLÜ AL nitelikli hariç 34 → 31; backtest A+ kategori medyanını geçme 3A %59,3 → %61,0, 6A %65,8 → %67,3, 1Y ≈ %67.
+Literatür: Kruttli, Monin & Watugala (2017) yoğunlaşma; Rakowski (2010) akış oynaklığı; Coval & Stafford (2007) aşırı çıkış/fire sale.

@@ -60,6 +60,7 @@ def _fund_record(code: str, f: pd.Series) -> dict:
             "outflow": _r(f["p_outflow"], 1),
             "anomaly": _r(f["p_anomaly"], 1),
             "founder": _r(f.get("p_founder", 0), 1),
+            "drawdown": _r(f.get("p_drawdown", 0), 1),
         },
         "adj": {"confidence": _r(f["adj_confidence"], 1), "stability": _r(f["adj_stability"], 1)},
         "r": {"1g": _r(f["r_1g"]), **{k: _r(f[f"raw_r_{k}"]) for k in config.DISPLAY_WINDOWS}},
@@ -85,8 +86,13 @@ def _fund_record(code: str, f: pd.Series) -> dict:
         "fee": _r(f["fee"]),
         "fd": f["founder"] if isinstance(f.get("founder"), str) else None,
         "fk": bool(f.get("founder_risk", False)),
-        "sb": {k: bool(f[f"sb_{k}"]) for k in ("top", "history", "investors", "aum", "anomaly", "streak", "founder")
-               if f"sb_{k}" in f},
+        "sb": {k: bool(f[f"sb_{k}"]) for k in ("top", "history", "investors", "aum", "anomaly", "streak",
+                                                "founder", "tail", "hot") if f"sb_{k}" in f},
+        "rk2": {
+            "dd3m": _r(f.get("dd3m")), "ddRel": _r(f.get("dd_rel")), "cvar5": _r(f.get("cvar5")),
+            "flow1m": _r(f.get("flow_1m_ratio")), "tail": bool(f.get("flag_tail", False)),
+            "hot": bool(f.get("flag_hot", False)), "conc": bool(f.get("flag_concentration", False)),
+        },
         "st": _r(f["stopaj"]),
         "d0": f["first_date"],
         "hd": int(f["history_days"]),
@@ -178,6 +184,7 @@ def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
             "ratingMode": config.RATING_MODE,
             "strongBuy": config.STRONG_BUY,
             "founderRisk": config.FOUNDER_RISK,
+            "riskFlags": config.RISK_FLAGS,
         },
     }
     _write(data_dir / "meta.json", meta)

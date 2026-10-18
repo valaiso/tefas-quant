@@ -25,6 +25,7 @@ function waterfall(f, weights) {
     ["Net nakit çıkışı cezası", -f.p.outflow],
     ["Getiri anomalisi cezası", -f.p.anomaly],
     ["Kurucu riski cezası", -(f.p.founder || 0)],
+    ["Sert düşüş cezası (son 3 ay)", -(f.p.drawdown || 0)],
     ["Veri güveni ayarı", f.adj.confidence],
     ["Yatırımcı istikrarı ayarı", f.adj.stability],
   ].map(([label, v]) =>
@@ -52,7 +53,9 @@ export async function render(app, route, store) {
   const peers = store.funds.filter((x) => x.k === f.k).sort((a, b) => a.rk - b.rk);
   const around = peers.slice(0, 8);
   if (!around.includes(f)) around.push(f);
-  const totalPenalty = f.p.investor + f.p.outflow + f.p.anomaly + (f.p.founder || 0);
+  const totalPenalty = f.p.investor + f.p.outflow + f.p.anomaly + (f.p.founder || 0) + (f.p.drawdown || 0);
+  const rk = f.rk2 || {};
+  const rfc = store.meta.config.riskFlags || {};
   const sbc = store.meta.config.strongBuy || {};
   const SB_LABELS = [
     ["top", `Kategorisinde en üst %${100 - (sbc.top_percentile ?? 95)}`],
@@ -62,6 +65,8 @@ export async function render(app, route, store) {
     ["anomaly", "Getiri anomalisi cezası yok"],
     ["streak", `Önceki ${sbc.streak_months ?? 2} ay sonunda da A veya A+`],
     ["founder", "Kurucu riski yok"],
+    ["tail", "Kuyruk riski kategorinin en kötü %10'unda değil"],
+    ["hot", `Son 1 ayda büyüklüğün %${rfc.hot_money_flow_pct ?? 30}'undan fazla net giriş (sıcak para) yok`],
   ];
   const sbList = f.sb && Object.keys(f.sb).length
     ? `<section class="card"><div class="card-head"><h2>GÜÇLÜ AL kriterleri</h2>
@@ -90,6 +95,13 @@ export async function render(app, route, store) {
   ${f.fk ? `<div class="notice danger">⛔ <b>Kurucu riski (${esc(f.fd || "portföy şirketi")}):</b> bu şirketin halka açık
     ${store.meta.founderRisk?.[f.fd]?.total ?? "?"} fonundan ${store.meta.founderRisk?.[f.fd]?.problem ?? "birçoğu"} tanesi işleme kapalı, çökmüş ya da fiyatı durmuş.
     Aynı kurucunun işlem gören fonları da benzer riski taşıyabilir; bu fon −${num(f.p.founder, 0)} puan ceza aldı ve notu en fazla İZLE olabilir.</div>` : ""}
+
+  ${(f.p.drawdown || 0) > 0 ? `<div class="notice warn">↘ <b>Sert düşüş:</b> son 3 ayda tepeden %${num(rk.dd3m, 1)} düştü,
+    kategorisinin ${num(rk.ddRel, 1)} puan üstünde (−${num(f.p.drawdown, 0)} puan ceza). Testlerde böyle fonlar sonraki yıl kategorisinin gerisinde kaldı.</div>` : ""}
+
+  ${rk.conc ? `<div class="notice">ℹ <b>Yoğunlaşma notu (ceza yok):</b> son 1 ayda yatırımcı sayısı ${pct(f.ig, 1)} değişirken
+    büyüklüğün ${pct(rk.flow1m, 1)}'i kadar net para girdi; para daha az ama daha büyük yatırımcıda toplanıyor.
+    Büyük bir yatırımcının çıkışı fonu zorlayabilir; ancak testlerde bu örüntü sonraki getiriyi düşürmedi, bu yüzden puan kesilmiyor.</div>` : ""}
 
   ${f.p.anomaly > 0 ? `<div class="notice warn">⚠ <b>Getiri anomalisi:</b> 1 yıllık getirisi (${pct(f.r["1y"], 1)}) kategorisinin çok üstünde,
     bu yüzden −${num(f.p.anomaly, 1)} puan ceza aldı. Pürüzsüz ve olağan dışı yüksek getiri, değerlemesi zor ya da likit olmayan

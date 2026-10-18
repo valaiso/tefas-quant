@@ -378,7 +378,11 @@ table.compare td.best { background: var(--up-soft); font-weight: 700; }
 .chart .axis { fill: var(--text-dim); font-size: 11px; font-family: var(--sans); }
 .chart .hover-line { stroke: var(--text-dim); stroke-width: 1; opacity: .5; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; font-size: .82rem; color: var(--text-dim); }
-.chart-legend .item { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend .item { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: none;
+  color: inherit; font: inherit; padding: 2px 8px; border-radius: 999px; cursor: pointer; transition: opacity .15s, background .15s; }
+.chart-legend .item:hover { background: var(--surface-2); border-color: var(--border); }
+.chart-legend .item.off { opacity: .4; text-decoration: line-through; }
+.chart-legend .item.off .swatch { background: var(--border) !important; }
 .chart-legend .swatch { width: 10px; height: 10px; border-radius: 3px; }
 .chart-note { font-size: .76rem; margin: 6px 0 0; }
 .period-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 6px; margin-top: 10px; }

@@ -237,6 +237,11 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame,
     # Pürüzsüzlük: günlük getirilerin 1. derece otokorelasyonu (Getmansky-Lo-Makarov).
     # Değerlemesi zor / likit olmayan varlık taşıyan fonlarda yüksek çıkar.
     m["smoothness"] = r_win.apply(lambda s: s.autocorr(1) if s.notna().sum() > 30 else np.nan)
+    # Kuyruk riski: son 1 yılın en kötü %5 günlerinin ortalama getirisi (%, negatif)
+    m["cvar5"] = r_win.apply(lambda s: s[s <= s.quantile(0.05)].mean() if s.notna().sum() > 60 else np.nan) * 100
+    # Son 3 ayda tepeden bugüne düşüş (%)
+    px3 = px.iloc[-63:]
+    m["dd3m"] = (1 - px3.iloc[-1] / px3.max()) * 100
 
     obs = rets.notna().sum()
     first_px = px.apply(lambda s: s.dropna().iloc[0])
@@ -275,6 +280,7 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame,
     weighted = m["flow_3m"].fillna(0) * 0.6 + m["flow_1m"].fillna(0) * 0.3 + m["flow_1w"].fillna(0) * 0.1
     m["flow_ratio"] = (weighted / m["aum"].replace(0, np.nan) * 100).clip(-100, 100)
     m["flow_3m_ratio"] = (m["flow_3m"] / m["aum"].replace(0, np.nan) * 100).clip(-100, 100)
+    m["flow_1m_ratio"] = (m["flow_1m"] / m["aum"].replace(0, np.nan) * 100).clip(-100, 1000)
 
     # ---- maliyet
     fee = funds["fee"].reindex(keep)
@@ -442,7 +448,19 @@ def score_funds(m: pd.DataFrame, founder_flag: pd.Series | None = None,
             if founder_flag is not None else pd.Series(False, index=s.index))
     s["founder_risk"] = flag
     s["p_founder"] = np.where(flag, config.FOUNDER_RISK["penalty"], 0.0)
-    s["score"] = (s["score"] - s["p_founder"]).clip(0, 100)
+
+    # Risk bayrakları (kategori içi): sert düşüş cezası, kuyruk riski, sıcak para, yoğunlaşma notu
+    rf = config.RISK_FLAGS
+    cat = s.groupby("category")
+    s["dd_rel"] = s["dd3m"] - cat["dd3m"].transform("median")
+    s["p_drawdown"] = np.where(s["dd_rel"] > rf["drawdown_rel_points"], rf["drawdown_penalty"], 0.0)
+    tail_cut = cat["cvar5"].transform(lambda x: x.quantile(rf["tail_quantile"]) if x.notna().sum() >= 10 else np.nan)
+    s["flag_tail"] = (s["cvar5"] < tail_cut).fillna(False)
+    s["flag_hot"] = (s["flow_1m_ratio"] > rf["hot_money_flow_pct"]).fillna(False)
+    s["flag_concentration"] = ((s["investor_growth_1m"] < rf["concentration_investor_pct"])
+                               & (s["flow_1m_ratio"] > rf["concentration_flow_pct"])).fillna(False)
+
+    s["score"] = (s["score"] - s["p_founder"] - s["p_drawdown"]).clip(0, 100)
 
     s["rank"] = s.groupby("category")["score"].rank(ascending=False, method="min").astype(int)
     s["cat_size"] = s.groupby("category")["score"].transform("count").astype(int)
@@ -475,8 +493,10 @@ def apply_strong_buy(s: pd.DataFrame, prev_grades: list[pd.Series]) -> None:
         streak &= g.reindex(s.index).isin(["A+", "A"])
     s["sb_streak"] = streak
     s["sb_founder"] = ~s["founder_risk"]
+    s["sb_tail"] = ~s["flag_tail"]
+    s["sb_hot"] = ~s["flag_hot"]
     ok = (s["sb_top"] & s["sb_history"] & s["sb_investors"] & s["sb_aum"]
-          & s["sb_anomaly"] & s["sb_streak"] & s["sb_founder"])
+          & s["sb_anomaly"] & s["sb_streak"] & s["sb_founder"] & s["sb_tail"] & s["sb_hot"])
     grade = s["base_grade"].where(s["base_grade"] != "A+", "A")
     grade = grade.mask(ok, "A+")
     cap = config.FOUNDER_RISK["max_grade"]

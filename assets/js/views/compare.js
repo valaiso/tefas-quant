@@ -1,4 +1,4 @@
-import { esc, num, pctCell, money, gradeBadge, trUpper, COMPONENT_LABELS, RETURN_LABELS } from "../util.js";
+import { esc, num, pctCell, money, gradeBadge, searchFunds, COMPONENT_LABELS, RETURN_LABELS } from "../util.js";
 import { lineChart, rebase } from "../chart.js";
 
 const MAX = 5;
@@ -69,13 +69,18 @@ export async function render(app, route, store) {
 
   const input = app.querySelector("#addFund"), list = app.querySelector("#addList");
   input?.addEventListener("input", () => {
-    const q = trUpper(input.value.trim());
-    if (q.length < 2) { list.hidden = true; return; }
-    const hits = store.funds.filter((f) => !codes.includes(f.c) && (f.c.includes(q) || trUpper(f.n).includes(q))).slice(0, 8);
+    const q = input.value.trim();
+    if (!q) { list.hidden = true; return; }
+    const hits = searchFunds(store.funds, q, { limit: 10, exclude: codes });
     list.innerHTML = hits.map((f) => `<div class="ac-item" data-add="${esc(f.c)}"><b class="mono">${esc(f.c)}</b><span class="ac-name">${esc(f.n)}</span></div>`).join("")
       || `<div class="ac-item dim">Sonuç yok</div>`;
     list.hidden = false;
   });
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") list.querySelector("[data-add]")?.click();
+    if (e.key === "Escape") list.hidden = true;
+  });
+  if (input && funds.length < 2) input.focus();
   list?.addEventListener("click", (e) => {
     const it = e.target.closest("[data-add]");
     if (it) setCodes([...codes, it.dataset.add]);

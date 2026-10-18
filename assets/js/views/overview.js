@@ -27,6 +27,7 @@ export function render(app, _route, store) {
          Az yatırımcı, nakit çıkışı ve olağan dışı getiri cezalandırılır; fiyatı durmuş fonlar listeye alınmaz.</p>
       <div class="hero-actions">
         <a class="btn btn-light" href="#/siralama">Tüm sıralama</a>
+        <a class="btn btn-ghost" href="#/backtest">QuantBacktest</a>
         <a class="btn btn-ghost" href="#/metodoloji">Yöntemi incele</a>
       </div>
     </div>
@@ -34,7 +35,7 @@ export function render(app, _route, store) {
       <div><span>Derecelendirilen fon</span><strong>${num(funds.length, 0)}</strong></div>
       <div><span>A+ · Güçlü Al</span><strong>${num(counts["GÜÇLÜ AL"], 0)}</strong></div>
       <div><span>Risksiz faiz (1Y, PPF medyan)</span><strong>%${num(meta.riskFree, 1)}</strong></div>
-      <div><span>Listeden çıkarılan</span><strong>${num(meta.excluded.length, 0)}</strong></div>
+      <div><span>Kategori</span><strong>${num(new Set(funds.map((f) => f.k)).size, 0)}</strong></div>
     </div>
   </section>
 
@@ -85,17 +86,6 @@ export function render(app, _route, store) {
       </tbody></table></div>
   </section>
 
-  <div class="grid grid-2">
-    <section class="card">
-      <div class="card-head"><h2>Listeden çıkarılan fonlar</h2><span class="sub">${num(meta.excluded.length, 0)} fon · işleme kapalı, fiyatı duran ya da alım-satımı donmuş</span></div>
-      ${meta.excluded.length ? `<div class="table-wrap"><table class="compact excluded">
-        <thead><tr><th>Fon</th><th>Son fiyat</th><th class="left">Neden</th></tr></thead>
-        <tbody>${meta.excluded.map((x, i) => `<tr ${i >= 12 ? 'class="more" hidden' : ""}><td class="fund-cell"><b class="mono">${esc(x.code)}</b><span class="name">${esc(x.name)}</span></td>
-          <td>${dateTR(x.lastDate)}</td><td class="left"><span class="pill down">${esc(x.reason)}</span></td></tr>`).join("")}</tbody>
-      </table></div>
-      ${meta.excluded.length > 12 ? `<button class="btn btn-sm show-more" type="button">Tümünü göster (${meta.excluded.length})</button>` : ""}
-      ${meta.privateSkipped ? `<p class="dim small">Ayrıca halka açık olmayan ${num(meta.privateSkipped, 0)} özel fon sıralamaya alınmaz.</p>` : ""}` : `<p class="dim">Fiyatı duran fon yok.</p>`}
-    </section>
     <section class="card">
       <div class="card-head"><h2>Getiri anomalisi cezası alanlar</h2><span class="sub">1Y getirisi kategorisinin çok üstünde</span></div>
       ${anomalies.length ? `<div class="table-wrap"><table class="compact">
@@ -104,13 +94,8 @@ export function render(app, _route, store) {
           <td class="fund-cell">${codeChip(f.c)}<span class="name">${esc(f.n)}</span></td>
           <td>${pctCell(f.r["1y"], 1)}</td><td class="down">−${num(f.p.anomaly, 1)}</td></tr>`).join("")}</tbody>
       </table></div>` : `<p class="dim">Bu dönemde anomali cezası yok.</p>`}
-    </section>
-  </div>`;
+    </section>`;
 
   bindRows(app);
   bindQualified(app, () => render(app, _route, store));
-  app.querySelector(".show-more")?.addEventListener("click", (e) => {
-    app.querySelectorAll("table.excluded tr.more").forEach((tr) => (tr.hidden = false));
-    e.target.remove();
-  });
 }

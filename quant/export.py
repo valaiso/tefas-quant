@@ -95,6 +95,10 @@ def _weekly(series: pd.Series) -> pd.Series:
     return s[last_rows]
 
 
+def write_backtest(bt: dict, out_dir: Path = ROOT / "dist") -> None:
+    _write(out_dir / "data" / "backtest.json", bt)
+
+
 def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
     scored: pd.DataFrame = result["scored"]
     price: pd.DataFrame = result["panel"]["price"]

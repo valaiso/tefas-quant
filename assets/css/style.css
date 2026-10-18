@@ -301,9 +301,6 @@ table.ranking .fund-cell .name { max-width: 190px; }
 table.ranking .scorebar { width: 44px; }
 @media (max-width: 1500px) { table.ranking .cat-cell, table.ranking th[data-key="k"] { display: none; } }
 table.compact td, table.compact th { padding: 7px 8px; }
-table.excluded td.left { white-space: normal; }
-.show-more { margin-top: 10px; }
-.small { font-size: .8rem; margin: 10px 0 0; }
 td.pick, th.pick { width: 28px; padding-right: 0; }
 td.pick input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 td.empty { text-align: center; padding: 30px; color: var(--text-dim); }
@@ -394,6 +391,27 @@ table.compare td.best { background: var(--up-soft); font-weight: 700; }
 .defs dt { font-weight: 700; margin-top: 8px; }
 .defs dd { margin: 0; color: var(--text-dim); }
 ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: .88rem; }
+
+/* ------------------------------------------------------------ backtest */
+
+.bt-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1350px) { .bt-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .bt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .bt-main { font-size: 1.35rem; } }
+.bt-kpi { display: grid; gap: 4px; border-top: 3px solid var(--brand-3); }
+.bt-kpi.muted { border-top-color: var(--border); }
+.bt-h { color: var(--text-dim); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.bt-main { font-size: 1.7rem; font-weight: 780; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.bt-sub { color: var(--text-dim); font-size: .8rem; }
+.bt-na { font-size: 1.1rem; font-weight: 700; color: var(--text-dim); margin-top: 6px; }
+.bt-rows { display: grid; gap: 5px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--border); font-size: .82rem; }
+.bt-rows > div { display: flex; justify-content: space-between; gap: 8px; }
+.bt-rows span { color: var(--text-dim); }
+.bt-rows b { font-variant-numeric: tabular-nums; }
+.small-note { font-size: .74rem; }
+table.bt-grades td { white-space: nowrap; }
+.field.inline { display: flex; align-items: center; gap: 8px; }
+.field.inline span { white-space: nowrap; }
+.muted-chip { opacity: .55; }
 
 /* ------------------------------------------------------------- durumlar */
 

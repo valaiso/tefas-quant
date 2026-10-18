@@ -1,16 +1,18 @@
 // TEFAS Quant - uygulama girişi: veri yükleme, yönlendirme, tema, arama
-import { esc, dateTR, trUpper, debounce } from "./util.js";
+import { esc, dateTR, debounce, searchFunds } from "./util.js";
 import * as overview from "./views/overview.js";
 import * as ranking from "./views/ranking.js";
 import * as fund from "./views/fund.js";
 import * as compare from "./views/compare.js";
 import * as method from "./views/method.js";
+import * as backtest from "./views/backtest.js";
 
 const VIEWS = {
   genel: { mod: overview, title: "Genel Bakış", eyebrow: "PİYASA ÖZETİ" },
   siralama: { mod: ranking, title: "Fon Sıralaması", eyebrow: "KATEGORİ İÇİ DERECELENDİRME" },
   fon: { mod: fund, title: "Fon Detayı", eyebrow: "FON ANALİZİ", nav: "siralama" },
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
+  backtest: { mod: backtest, title: "QuantBacktest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
   metodoloji: { mod: method, title: "Metodoloji", eyebrow: "PUANLAMA & CEZALAR" },
 };
 
@@ -90,14 +92,14 @@ document.getElementById("themeBtn").addEventListener("click", () => {
 const searchInput = document.getElementById("globalSearch");
 const searchList = document.getElementById("searchResults");
 searchInput.addEventListener("input", debounce(() => {
-  const q = trUpper(searchInput.value.trim());
-  if (q.length < 2) { searchList.hidden = true; return; }
-  const hits = store.funds.filter((f) => f.c.includes(q) || trUpper(f.n).includes(q)).slice(0, 8);
+  const q = searchInput.value.trim();
+  if (!q) { searchList.hidden = true; return; }
+  const hits = searchFunds(store.funds, q, { limit: 10 });
   searchList.innerHTML = hits.length
     ? hits.map((f) => `<a class="ac-item" href="#/fon/${encodeURIComponent(f.c)}"><b class="mono">${esc(f.c)}</b><span class="ac-name">${esc(f.n)}</span></a>`).join("")
     : `<div class="ac-item dim">Sonuç yok</div>`;
   searchList.hidden = false;
-}, 120));
+}, 80));
 searchInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") searchList.querySelector("a")?.click();
   if (e.key === "Escape") searchList.hidden = true;

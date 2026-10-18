@@ -73,3 +73,29 @@ export function debounce(fn, ms = 200) {
 }
 
 export const trUpper = (s) => String(s ?? "").toLocaleUpperCase("tr-TR");
+
+/**
+ * Fon arama: kod yazılanla başlıyorsa en üstte, sonra kodda geçenler, sonra
+ * ünvanda kelime başı eşleşenler, en son ünvanın herhangi bir yerinde geçenler.
+ * Aynı gruptakiler skora göre sıralanır.
+ */
+export function searchFunds(funds, query, { limit = 10, exclude = [] } = {}) {
+  const q = trUpper(query.trim());
+  if (!q) return [];
+  const skip = new Set(exclude);
+  const rank = (f) => {
+    if (f.c.startsWith(q)) return 0;
+    if (f.c.includes(q)) return 1;
+    const name = trUpper(f.n);
+    if (name.split(/\s+/).some((w) => w.startsWith(q))) return 2;
+    if (name.includes(q)) return 3;
+    return -1;
+  };
+  return funds
+    .filter((f) => !skip.has(f.c))
+    .map((f) => [rank(f), f])
+    .filter(([r]) => r >= 0)
+    .sort((a, b) => a[0] - b[0] || (b[1].s ?? 0) - (a[1].s ?? 0))
+    .slice(0, limit)
+    .map(([, f]) => f);
+}

@@ -121,7 +121,9 @@ def _trailing_return(prices: pd.DataFrame, n: int) -> pd.Series:
     return (prices.iloc[-1] / prices.iloc[-1 - n] - 1) * 100
 
 
-def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame) -> tuple[pd.DataFrame, list, float]:
+def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame,
+                    light: bool = False) -> tuple[pd.DataFrame, list, float]:
+    """light=True: skorda kullanılmayan beta/alfa/bilgi oranı atlanır (backtest hızı)."""
     price = panel["price"]
     universe_last = price.index[-1]
     last_seen = price.apply(pd.Series.last_valid_index)
@@ -229,7 +231,7 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame) -> tupl
 
     # ---- kategori benchmark'ı: eşit ağırlıklı günlük getiri
     beta, alpha, info = {}, {}, {}
-    for cat, codes in category.groupby(category).groups.items():
+    for cat, codes in ({} if light else category.groupby(category).groups).items():
         bench = rets[list(codes)].mean(axis=1)
         for code in codes:
             pair = pd.concat([rets[code], bench, rf_daily], axis=1, keys=["f", "b", "rf"]).dropna()

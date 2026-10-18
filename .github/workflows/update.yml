@@ -93,6 +93,8 @@ jobs:
         timeout-minutes: 35
         env:
           PYTHONIOENCODING: utf-8
+          # TÜFE için TCMB EVDS anahtarı (yoksa Portföy Analiz yayınındaki seri kullanılır)
+          EVDS_API_KEY: ${{ secrets.EVDS_API_KEY }}
         run: python scripts/update.py --delay 3.0 --budget-min 20 ${{ github.event.inputs.full == 'true' && '--full' || '' }}
 
       - name: Veri deposunu kaydet

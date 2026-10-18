@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from quant import backtest, export, fetch, scoring  # noqa: E402
+from quant import backtest, benchmarks, export, fetch, scoring, simulation  # noqa: E402
 from quant.db import DEFAULT_DB, ROOT, open_db  # noqa: E402
 
 
@@ -38,9 +38,21 @@ def main() -> int:
         fetch.update(conn, delay=args.delay, full=args.full, budget_min=args.budget_min)
     result = scoring.run(conn)
     meta = export.build(result, Path(args.out))
-    bt = backtest.run(result["panel"], scoring.load_funds(conn))
+    funds = scoring.load_funds(conn)
+    bt = backtest.run(result["panel"], funds)
+    baskets = bt.pop("_baskets")
     export.write_backtest(bt, Path(args.out))
     print(f"[backtest] {len(bt['signalDates'])} ay, {bt['observations']} A+ gözlemi", flush=True)
+
+    print("[kıyas] dolar, altın, TÜFE, PPF", flush=True)
+    bench = benchmarks.collect(result["panel"]["price"], funds["category"])
+    export.write_benchmarks(bench, Path(args.out))
+    sim = simulation.run(result["panel"]["price"], baskets, bench, funds["category"])
+    export.write_json(Path(args.out) / "data" / "simulation.json", sim)
+    if sim.get("available"):
+        st = sim["stats"]["aplus_public"]
+        print(f"[simülasyon] {sim['dates'][0]} – {sim['dates'][-1]}: A+ sepeti %{st['total']}, "
+              f"PPF %{sim['stats']['ppf']['total']}", flush=True)
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.close()
     print(

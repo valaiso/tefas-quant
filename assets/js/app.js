@@ -6,6 +6,7 @@ import * as fund from "./views/fund.js";
 import * as compare from "./views/compare.js";
 import * as method from "./views/method.js";
 import * as backtest from "./views/backtest.js";
+import * as simulation from "./views/simulation.js";
 
 const VIEWS = {
   genel: { mod: overview, title: "Genel Bakış", eyebrow: "PİYASA ÖZETİ" },
@@ -13,6 +14,7 @@ const VIEWS = {
   fon: { mod: fund, title: "Fon Detayı", eyebrow: "FON ANALİZİ", nav: "siralama" },
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
   backtest: { mod: backtest, title: "QuantBacktest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
+  simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ" },
   metodoloji: { mod: method, title: "Metodoloji", eyebrow: "PUANLAMA & CEZALAR" },
 };
 
@@ -24,6 +26,11 @@ export const store = {
   funds: [],
   byCode: new Map(),
   categories: {},
+  _bench: null,
+  async benchmarks() {
+    if (!this._bench) this._bench = fetch("data/benchmarks.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    return this._bench;
+  },
   async history(code) {
     if (!historyCache.has(code)) {
       historyCache.set(code, fetch(`data/history/${encodeURIComponent(code)}.json`).then((r) => (r.ok ? r.json() : null)));

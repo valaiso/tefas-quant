@@ -40,6 +40,7 @@ def run(panel: dict, funds: pd.DataFrame, grade: str = "A+") -> dict:
     funds_pit["trading_active"] = np.nan  # geçmişte bilinemeyen bayrak
 
     obs = []
+    baskets = []  # portföy simülasyonu için her ayın sepetleri
     prev_base: list[pd.Series] = []  # önceki ay sonlarının temel notları (süreklilik şartı)
     signal_dates = [i for i in scoring.month_ends(dates) if i >= MIN_HISTORY and i + 1 < len(dates)]
     for i in signal_dates:
@@ -50,6 +51,14 @@ def run(panel: dict, funds: pd.DataFrame, grade: str = "A+") -> dict:
         flag = funds["founder"].reindex(m.index).isin(risky)
         s = scoring.score_funds(m, founder_flag=flag, prev_grades=prev_base)
         prev_base.append(scoring.score_funds(m)["base_grade"])
+        qualified = funds["qualified"].reindex(s.index).fillna(0).astype(bool)
+        baskets.append({
+            "signal": i,
+            "aplus": list(s.index[s["grade"] == "A+"]),
+            "aplus_public": list(s.index[(s["grade"] == "A+") & ~qualified]),
+            "universe": list(s.index),
+            "universe_public": list(s.index[~qualified]),
+        })
         entry = i + 1  # T+1: emir ertesi işlem günü fiyatından gerçekleşir
         p0 = px.iloc[entry].reindex(s.index)
         row = {"date": dates[i], "code": s.index, "category": s["category"].values,
@@ -109,4 +118,5 @@ def run(panel: dict, funds: pd.DataFrame, grade: str = "A+") -> dict:
         "byGrade": by_grade,
         "byDate": by_date,
         "observations": int(len(sel)),
+        "_baskets": baskets,  # dışa yazılmaz; simulation.run kullanır
     }

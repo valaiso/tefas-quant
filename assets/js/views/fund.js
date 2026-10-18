@@ -105,7 +105,9 @@ export async function render(app, route, store) {
         <div class="seg" id="periodSeg">${PERIODS.map((p) => `<button data-k="${p.key}" aria-pressed="${p.key === "1y"}">${p.label}</button>`).join("")}</div>
       </div>
       <div class="chart" id="priceChart"><div class="loading"><div class="spinner"></div></div></div>
-      <p class="chart-note dim">Haftalık kapanış, dönem başı = 100. Kesik çizgi: ${esc(f.k)} kategorisi eşit ağırlıklı ortalaması.</p>
+      <div class="period-compare" id="periodCompare"></div>
+      <p class="chart-note dim">Haftalık kapanış, dönem başı = 100. Kesik gri çizgi: ${esc(f.k)} kategorisinin eşit ağırlıklı ortalaması.
+        TÜFE: aylık enflasyon (TCMB EVDS), Dolar/TL: kur.</p>
     </section>
   </div>
 
@@ -161,8 +163,9 @@ export async function render(app, route, store) {
 
   bindRows(app);
 
-  const hist = await store.history(f.c);
+  const [hist, bench] = await Promise.all([store.history(f.c), store.benchmarks()]);
   const cat = store.categories[f.k];
+  const BENCH = [["tufe", "TÜFE", "var(--c2)"], ["usd", "Dolar/TL", "var(--c4)"]];
   const chartEl = app.querySelector("#priceChart");
   const draw = (key) => {
     if (!hist) { chartEl.innerHTML = `<div class="empty">Fiyat geçmişi yok</div>`; return; }
@@ -171,7 +174,23 @@ export async function render(app, route, store) {
     const fund = rebase(hist.d, hist.p, from);
     const series = [{ name: f.c, ...fund }];
     if (cat) series.push({ name: `${f.k} ort.`, ...rebase(cat.d, cat.v, fund.d[0]), dashed: true, color: "var(--text-dim)" });
+    for (const [k, label, color] of BENCH) {
+      const b = bench?.s?.[k];
+      if (b) series.push({ name: label, ...rebase(bench.d, b.v, fund.d[0]), color });
+    }
     lineChart(chartEl, series, { base: 100, format: (v) => num(v, 0) });
+
+    // Dönem getirisi ve enflasyona / dolara göre (reel) getiri
+    const end = (s) => (s && s.v.length ? s.v[s.v.length - 1] / 100 - 1 : null);
+    const rf = end(series[0]);
+    const byName = Object.fromEntries(series.map((s) => [s.name, end(s)]));
+    const infl = byName["TÜFE"], usd = byName["Dolar/TL"];
+    const real = rf != null && infl != null ? ((1 + rf) / (1 + infl) - 1) * 100 : null;
+    const usdRet = rf != null && usd != null ? ((1 + rf) / (1 + usd) - 1) * 100 : null;
+    app.querySelector("#periodCompare").innerHTML = `
+      ${series.map((s) => `<div><span>${esc(s.name)}</span><b class="${(byName[s.name] ?? 0) >= 0 ? "up" : "down"}">${pct(byName[s.name] * 100, 1)}</b></div>`).join("")}
+      <div class="pc-strong"><span>Enflasyona göre (reel)</span><b class="${(real ?? 0) >= 0 ? "up" : "down"}">${pct(real, 1)}</b></div>
+      <div class="pc-strong"><span>Dolar bazında</span><b class="${(usdRet ?? 0) >= 0 ? "up" : "down"}">${pct(usdRet, 1)}</b></div>`;
   };
   draw("1y");
   app.querySelector("#periodSeg").addEventListener("click", (e) => {

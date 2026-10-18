@@ -104,6 +104,24 @@ def write_backtest(bt: dict, out_dir: Path = ROOT / "dist") -> None:
     _write(out_dir / "data" / "backtest.json", bt)
 
 
+def write_json(path: Path, value) -> None:
+    _write(path, value)
+
+
+BENCH_LABELS = {"usd": "Dolar/TL", "gold": "Gram altın", "tufe": "TÜFE", "ppf": "PPF ortalaması"}
+
+
+def write_benchmarks(bench: pd.DataFrame, out_dir: Path = ROOT / "dist") -> None:
+    """Haftalık kıyas serileri (fon grafiği için): {"d": [...], "s": {anahtar: {label, v}}}."""
+    weekly = bench[~bench.index.to_period("W-FRI").duplicated(keep="last")]
+    out = {"d": [d.strftime("%Y-%m-%d") for d in weekly.index], "s": {}}
+    for col in weekly.columns:
+        if weekly[col].notna().any():
+            out["s"][col] = {"label": BENCH_LABELS.get(col, col),
+                             "v": [None if pd.isna(x) else round(float(x), 4) for x in weekly[col]]}
+    _write(out_dir / "data" / "benchmarks.json", out)
+
+
 def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
     scored: pd.DataFrame = result["scored"]
     price: pd.DataFrame = result["panel"]["price"]

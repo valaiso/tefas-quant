@@ -21,6 +21,8 @@ const flowShare = (f, key) => {
   return base > 0 ? (f.fl[key] / base) * 100 : null;
 };
 
+const gradeChip = (f) => `<span class="rp-grade g-${f.g === "A+" ? "ap" : f.g.toLowerCase()}" title="${esc(f.sig)}">${esc(f.g)}</span>`;
+
 function bar(value, max, tone) {
   const w = max ? Math.min(100, (Math.abs(value) / max) * 100) : 0;
   return `<span class="rp-bar ${tone}"><i style="width:${w.toFixed(1)}%"></i></span>`;
@@ -31,12 +33,13 @@ function flowTable(title, rows, key, tone) {
   return `<section class="rp-block">
     <h3><span class="rp-dot ${tone}"></span>${title}</h3>
     <table class="rp-table">
-      <thead><tr><th>#</th><th>Fon</th><th class="r">Net akış</th><th class="r" title="Net akış / dönem başı büyüklük">Büyüklüğe</th><th class="bar-col"></th></tr></thead>
+      <thead><tr><th>#</th><th>Fon</th><th class="r">Net akış</th><th class="r" title="Net akış / dönem başı büyüklük">Büyüklüğe</th><th class="r">Not</th><th class="bar-col"></th></tr></thead>
       <tbody>${rows.map((f, i) => `<tr>
         <td class="rk">${i + 1}</td>
         <td><b class="mono">${esc(f.c)}</b> <span class="nm">${esc(short(f.n, 34))}</span><div class="ct">${esc(f.k)}</div></td>
         <td class="r num ${tone}">${signed(f.fl[key])}</td>
         <td class="r num">${pctS(flowShare(f, key))}</td>
+        <td class="r">${gradeChip(f)}</td>
         <td class="bar-col">${bar(f.fl[key], max, tone)}</td></tr>`).join("")}
       </tbody></table></section>`;
 }
@@ -54,7 +57,7 @@ function investorTable(rows, key) {
         <td class="r num up">${signedNum(f.ivd[key])}</td>
         <td class="r num">${pctS(f.ivp[key])}</td>
         <td class="r num">${num(f.inv, 0)}</td>
-        <td class="r"><span class="rp-grade g-${f.g === "A+" ? "ap" : f.g.toLowerCase()}">${esc(f.g)}</span></td>
+        <td class="r">${gradeChip(f)}</td>
         <td class="bar-col">${bar(f.ivd[key], max, "brand")}</td></tr>`).join("")}
       </tbody></table></section>`;
 }

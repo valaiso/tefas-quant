@@ -527,7 +527,7 @@ table.bt-grades td { white-space: nowrap; }
 .rp-kpis > div { background: var(--rp-soft); border-radius: 8px; padding: 9px 11px; border-left: 3px solid var(--rp-brand); display: grid; gap: 2px; }
 .rp-kpis > div.up { border-left-color: var(--rp-up); }
 .rp-kpis > div.down { border-left-color: var(--rp-down); }
-.rp-kpis span { font-size: 8px; text-transform: uppercase; letter-spacing: .07em; color: var(--rp-dim); font-weight: 700; }
+.rp-kpis > div > span { font-size: 8px; text-transform: uppercase; letter-spacing: .07em; color: var(--rp-dim); font-weight: 700; }
 .rp-kpis b { font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--rp-ink); }
 .rp-kpis > div.up b { color: var(--rp-up); }
 .rp-kpis > div.down b { color: var(--rp-down); }
@@ -561,6 +561,8 @@ table.bt-grades td { white-space: nowrap; }
 .rp-table .bar-col { width: 52px; }
 .rp-two .rp-table th:nth-child(3) { width: 62px; }
 .rp-two .rp-table th:nth-child(4) { width: 50px; }
+.rp-two .rp-table th:nth-child(5) { width: 30px; }
+.rp-two .rp-table .bar-col { width: 40px; }
 .rp-inv th:nth-child(3) { width: 110px; }
 .rp-inv th:nth-child(4), .rp-inv th:nth-child(5), .rp-inv th:nth-child(6) { width: 62px; }
 .rp-inv th:nth-child(7) { width: 30px; }

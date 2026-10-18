@@ -6,6 +6,7 @@ Kullanım
     python scripts/update.py               # artımlı güncelleme + site
     python scripts/update.py --full        # 3 yılı baştan çek
     python scripts/update.py --skip-fetch  # yalnızca skor ve site
+    python scripts/update.py --budget-min 20  # geçmiş doldurmayı 20 dk ile sınırla
 """
 from __future__ import annotations
 
@@ -26,13 +27,15 @@ def main() -> int:
     parser.add_argument("--out", default=str(ROOT / "dist"))
     parser.add_argument("--delay", type=float, default=3.0, help="TEFAS istekleri arası saniye")
     parser.add_argument("--full", action="store_true")
+    parser.add_argument("--budget-min", type=float, default=None,
+                        help="Geçmiş doldurma için azami dakika (CI'da ilk kurulumu böler)")
     parser.add_argument("--skip-fetch", action="store_true")
     args = parser.parse_args()
 
     started = time.time()
     conn = open_db(args.db)
     if not args.skip_fetch:
-        fetch.update(conn, delay=args.delay, full=args.full)
+        fetch.update(conn, delay=args.delay, full=args.full, budget_min=args.budget_min)
     result = scoring.run(conn)
     meta = export.build(result, Path(args.out))
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")

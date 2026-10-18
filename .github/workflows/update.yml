@@ -46,8 +46,8 @@ jobs:
     outputs:
       run: ${{ steps.karar.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - id: karar
@@ -61,10 +61,10 @@ jobs:
     # Zamanlanmış çalışmada yalnızca yeni kapanış varsa; elle ve kod değişikliğinde her zaman.
     if: ${{ github.event_name != 'schedule' || needs.kontrol.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Bağımlılıklar
@@ -85,10 +85,15 @@ jobs:
           for f in assets/js/*.js assets/js/views/*.js; do cp "$f" "/tmp/esm/$(basename "${f%.js}").mjs"; done
           for f in /tmp/esm/*.mjs; do node --check "$f"; done
 
+      # Önce güncel günler çekilir, sonra eksik geçmiş yeniden eskiye doldurulur.
+      # Geçmiş doldurma 20 dakikayla sınırlı: ilk kurulumda 3 yıl birkaç
+      # çalışmaya yayılır ama site her seferinde güncel fiyatla yayınlanır.
+      # Her 28 günlük parça hemen kaydedildiği için kesintide ilerleme kaybolmaz.
       - name: Veriyi güncelle, skorla, siteyi üret
+        timeout-minutes: 35
         env:
           PYTHONIOENCODING: utf-8
-        run: python scripts/update.py --delay 3.0 ${{ github.event.inputs.full == 'true' && '--full' || '' }}
+        run: python scripts/update.py --delay 3.0 --budget-min 20 ${{ github.event.inputs.full == 'true' && '--full' || '' }}
 
       - name: Veri deposunu kaydet
         if: always()

@@ -19,6 +19,30 @@ const BEAT = {
   ppf_3y: "3Y'de PPF'yi, 1Y ve 2Y'de TÜFE'yi geçmiş",
   tufe_all: "1Y, 2Y ve 3Y'nin hepsinde TÜFE'yi geçmiş (reel getiri pozitif)",
 };
+const GLOSSARY = [
+  ["PPF ortalaması", "Tüm para piyasası fonlarının eşit ağırlıklı günlük getiri endeksi. Faize yakın, en düşük riskli kıyas olarak kullanılır."],
+  ["TÜFE", "Tüketici fiyat endeksi (enflasyon). TÜFE'yi geçen getiri reel olarak pozitiftir; veri TCMB EVDS'ten gelir."],
+  ["Stopaj / vergi sonrası (net) getiri", "Fon kazancından kesilen vergi; hisse yoğun fonlarda %0, çoğu fonda %17,5. Net getiri, kazancın stopaj düşüldükten sonraki yıllık karşılığıdır."],
+  ["Yıllık bileşik getiri (1Y / 2Y / 3Y)", "Dönem boyunca elde edilen toplam getirinin yıllığa çevrilmiş hâli; 2Y ve 3Y'de her yıl aynı oranda kazanılmış gibi gösterir."],
+  ["Oynaklık", "Günlük getirilerin standart sapmasının yıllığa çevrilmiş hâli (son 1 yıl). Ne kadar yüksekse fiyat o kadar dalgalıdır; profilleri bu ayırır."],
+  ["Azami düşüş", "Son 2 yılda fonun bir zirveden sonraki en büyük değer kaybı. Kötü senaryoda ne kadar kaybettirebileceğini gösterir."],
+  ["Sharpe oranı", "PPF'nin üzerindeki fazla getirinin oynaklığa oranı (2 yıl). Alınan her birim risk başına ne kadar fazla getiri kazanıldığını ölçer."],
+  ["İstikrar (PPF'yi geçen 12A)", "Son 2 yılda aylık kaydırılan 12 aylık dönemlerin yüzde kaçında fonun PPF'yi geçtiği. Yüksekse getiri tek bir döneme bağlı değildir."],
+  ["TEFAS Quant notu / skoru", "Fonun kendi kategorisi içinde performans, risk, maliyet, yatırımcı ve büyüklük ölçülerinden aldığı 0-100 puan ve buna göre verilen A+…D notu."],
+  ["Getiri anomalisi", "1 yıllık getirinin kategori ortancasından, kategorideki olağan yayılmanın 3 katından fazla sapması. Benzer fonlardan çok farklı kazanç olağandışı risk ya da fiyatlama işaretidir; skordan ceza keser."],
+  ["Kuyruk riski", "En kötü %5'lik günlerin ortalama kaybı (CVaR) kategorinin en kötü %10'u içindeyse konur. Sert düşüş günlerinde ortalamadan çok kaybettiren fonlar."],
+  ["Sıcak para", "Son 1 ayda fona giren net para, ay başındaki büyüklüğün %30'undan fazlaysa konur. Hızlı gelen para hızlı da çıkabilir; fiyat ve fon yapısını bozabilir."],
+  ["Kurucu riski", "Bir portföy şirketinin halka açık fonlarının en az %30'u (en az 3 fon) çökmüş, işleme kapanmış, alım-satımı donmuş ya da fiyatı durmuşsa o şirketin tüm fonları işaretlenir; skordan ceza keser ve not en fazla B olur."],
+  ["Köklü kurucu", "Devlet bankaları ve büyük özel bankaların portföy şirketleri. Öncelik puanı alır ve sepetlerin belirli bir payını oluşturmak zorundadır."],
+  ["Hariç tutulan kurucu", "Yönetici riski nedeniyle (ör. grup hisselerini şişiren, çarpanları aşırı fonlar) hiçbir sepete alınmayan portföy şirketi; elle belirlenir."],
+  ["Sıçrama filtresi", "Getirinin büyük kısmı tek bir aydan, son 3 aydaki aşırı yükselişten ya da tek günlük büyük hareketten geliyorsa fon alınmaz."],
+  ["Korelasyon", "İki fonun haftalık getirilerinin birlikte hareket etme derecesi. 0,85'in üstündeyse aynı fonu iki kez almak gibi olduğundan biri alınmaz."],
+  ["Çapa (ÇAPA)", "Dengeli sepetin %40'ını oluşturan, Güvenli sepetten gelen düşük oynaklıklı fonlar; sepetin dalgalanmasını sınırlar."],
+  ["Süreklilik puanı", "Önceki dönem sepette olan fona yeni kurulumda verilen +3 puan; iyi kalan fonun gereksiz yere değiştirilmesini önler."],
+  ["Nitelikli yatırımcı fonu", "Yalnızca belirli varlık eşiğini aşan yatırımcıların alabildiği (serbest) fonlar; modele alınmaz."],
+  ["Havuz", "O profilin tüm kapılarını (oynaklık, düşüş, kıyas, sıçrama, not ve bayraklar) geçen aday fon sayısı."],
+  ["T+1 alış / o gün bilinen veri", "Geçmiş testte sepet kurulum günü yalnızca o güne kadar bilinen verilerle seçilir ve ertesi işlem günü fiyatından alınmış sayılır; gelecek bilgisi kullanılmaz."],
+];
 const state = { profile: "guvenli", period: "all", month: {} };
 let cache = null;
 
@@ -88,6 +112,10 @@ export async function render(app, _route, store) {
       <li><b>Ağırlık:</b> puan² / oynaklık ile orantılı; her fon %${num(R.minW * 100, 0)}–%${num(R.maxW * 100, 0)}, 5'in katlarına yuvarlanır.</li>
       <li><b>Köklü kurucular:</b> <span class="dim">${R.banks.map(esc).join(", ")}</span></li>
     </ol>
+    <h3 class="glossary-title">Kavramlar</h3>
+    <dl class="glossary">
+      ${GLOSSARY.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${d}</dd></div>`).join("")}
+    </dl>
   </section>`;
 
   const drawProfile = () => {
@@ -150,8 +178,6 @@ export async function render(app, _route, store) {
       </table></div>
       ${warnN ? `<div class="notice warn"><b>${warnN} fonda dönem içinde uyarı var.</b> Sepet 2 aylık dönem boyunca sabit kalır; uyarılar bir sonraki
         kurulumda (${dateTR(m.nextRebalance)}) değerlendirilir ve bayraklı fon o zaman sepete alınmaz.</div>` : ""}
-      <div class="notice warn">Bu sayfa bir <b>model çıktısıdır, yatırım tavsiyesi değildir</b>. Geçmiş getiri gelecek getirinin göstergesi değildir;
-        kişisel risk tercihin, vaden ve vergi durumun dikkate alınmadı. Fon alım-satım valörleri ve giriş/çıkış kuralları hesaba katılmadı.</div>
     </section>
 
     ${bt.available ? `<section class="card">

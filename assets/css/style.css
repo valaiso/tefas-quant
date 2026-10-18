@@ -412,6 +412,12 @@ table.compare td.best { background: var(--up-soft); font-weight: 700; }
 .model-table tfoot td { border-top: 1px solid var(--border); }
 .hold-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 3px; border: 1px solid var(--border); border-radius: 999px; font-size: .84rem; }
 .rule-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: .9rem; line-height: 1.5; }
+.glossary-title { margin: 18px 0 8px; font-size: .95rem; }
+.glossary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; margin: 0; }
+.glossary > div { padding: 8px 0; border-top: 1px solid var(--border); }
+.glossary dt { font-weight: 700; font-size: .86rem; }
+.glossary dd { margin: 2px 0 0; font-size: .84rem; color: var(--text-dim); line-height: 1.45; }
+@media (max-width: 640px) { .glossary { grid-template-columns: 1fr; } }
 .profile-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .profile-card { text-align: left; display: grid; gap: 3px; padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--border);
   background: var(--surface); color: var(--text); cursor: pointer; border-top: 4px solid var(--pc, var(--brand-3)); font: inherit; }

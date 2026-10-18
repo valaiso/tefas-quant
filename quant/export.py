@@ -202,5 +202,32 @@ def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
             shutil.copytree(src, out_dir / name)
         elif src.exists():
             shutil.copy2(src, out_dir / name)
+    _version_assets(out_dir)
     (out_dir / ".nojekyll").write_text("", encoding="utf-8")
     return meta
+
+
+def _version_assets(out_dir: Path) -> None:
+    """Önbellek kırıcı: JS/CSS'i içerik özetli klasöre kopyalar ve index.html'i ona yönlendirir.
+
+    GitHub Pages dosyaları ~10 dk önbellekte tutar; yeni index.html eski app.js ile
+    açılmasın diye her değişiklikte farklı bir yol kullanılır. ES modül içe
+    aktarmaları göreli olduğu için alt modüller de aynı sürüm klasöründen gelir.
+    Görseller ve veri dosyaları kök yollarında kalır.
+    """
+    import hashlib
+
+    assets = out_dir / "assets"
+    digest = hashlib.sha1()
+    for f in sorted(assets.rglob("*")):
+        if f.is_file() and f.suffix in (".js", ".css"):
+            digest.update(f.relative_to(assets).as_posix().encode())
+            digest.update(f.read_bytes())
+    version = digest.hexdigest()[:10]
+    target = out_dir / "v" / version / "assets"
+    shutil.copytree(assets, target, ignore=shutil.ignore_patterns("img"))
+    index = out_dir / "index.html"
+    html = index.read_text(encoding="utf-8")
+    html = html.replace('href="assets/css/style.css"', f'href="v/{version}/assets/css/style.css"')
+    html = html.replace('src="assets/js/app.js"', f'src="v/{version}/assets/js/app.js"')
+    index.write_text(html, encoding="utf-8")

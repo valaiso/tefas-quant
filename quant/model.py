@@ -15,7 +15,8 @@ Adımlar (her profil için)
 1. Aday havuzu: halka açık (nitelikli/özel değil), ≥3 yıl geçmiş, ≥100m TL,
    ≥1000 yatırımcı, fiyatı güncel; o günkü TEFAS Quant notu A+/A/B (C ve D
    alınmaz) ve o gün getiri anomalisi, kuyruk riski, sıcak para ya da kurucu
-   riski bayrağı yok.
+   riski bayrağı yok; yönetici riski listesindeki kurucuların (ör. Tera
+   Portföy) fonları hiç alınmaz.
 2. Sıçrama filtresi: 2 yıllık getirinin büyük kısmı tek aydan geliyorsa, son
    3 ay kendi geçmişine göre aşırıysa, tek günde aşırı hareket varsa ya da son
    1 yıl getirisi aşırı yüksekse (profil sınırı) fon alınmaz.
@@ -87,6 +88,18 @@ PROFILES = {
         "weights": {"ret": 35, "win": 10, "sharpe": 20, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
 }
+
+
+# Yönetici riski nedeniyle hiçbir profile alınmayan kurucular (kod -> neden).
+# Fon dağılımı ve çarpan (F/K, PD/DD) verisi tutulmadığı için bu tür riskler
+# elle işaretlenir.
+EXCLUDED_FOUNDERS = {
+    "TERA PORTFÖY": "grup şirketlerinin hisselerini alarak fiyatını yükselten, çarpanları (F/K, PD/DD) aşırı hisselere yoğunlaşan fonlar",
+}
+
+
+def excluded_founder(founder) -> str | None:
+    return EXCLUDED_FOUNDERS.get(" ".join(founder.split())) if isinstance(founder, str) else None
 
 
 def is_bank(founder) -> bool:
@@ -255,6 +268,7 @@ def universe(price: pd.DataFrame, panel: dict, funds: pd.DataFrame, ppf: pd.Seri
     elig = [c for c in px_all.columns
             if c in public and pd.notna(hist.get(c)) and pd.notna(px_all[c].iloc[-1]) and fresh.get(c, False)
             and size.get(c, 0) >= MIN_AUM and inv.get(c, 0) >= MIN_INVESTORS
+            and not excluded_founder(funds["founder"].get(c))
             and (scores is None or (grades.get(c) in OK_GRADES and c not in flagged))]
     if not elig:
         return pd.DataFrame(), None
@@ -563,6 +577,8 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
             "minW": MIN_W, "maxW": MAX_W, "spikeShare": SPIKE_SHARE, "spikeZ": SPIKE_Z, "spikeDay": SPIKE_DAY,
             "periodMonths": PERIOD_MONTHS, "bankBonus": BANK_BONUS, "stayBonus": STAY_BONUS,
             "ppfStopaj": PPF_STOPAJ, "banks": sorted(BANK_FOUNDERS),
+            "excludedFounders": [{"name": k, "why": v, "funds": int((funds["founder"].map(excluded_founder) == v).sum())}
+                                 for k, v in EXCLUDED_FOUNDERS.items()],
             "retWindows": {k: w for k, (_, w) in RET_WINDOWS.items()},
         },
     }

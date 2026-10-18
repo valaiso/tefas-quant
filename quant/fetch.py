@@ -267,7 +267,12 @@ def update(conn: sqlite3.Connection, delay: float = 3.0, full: bool = False,
             if out_of_time():
                 print(f"[geçmiş] süre bütçesi doldu; {e} öncesi sonraki çalışmada", flush=True)
                 break
-            n = fetch_window(conn, client, s, e)
+            try:
+                n = fetch_window(conn, client, s, e)
+            except Exception as exc:  # noqa: BLE001
+                # Geçmiş eksikliği siteyi durdurmasın: güncel veriyle yayınla, sonra devam et.
+                print(f"[geçmiş] {s} -> {e} alınamadı ({exc}); sonraki çalışmada devam", flush=True)
+                break
             print(f"[geçmiş] {s} -> {e}: {n} kayıt", flush=True)
     else:
         print("[geçmiş] saklama penceresi tamam", flush=True)

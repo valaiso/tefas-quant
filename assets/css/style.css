@@ -452,8 +452,8 @@ table.bt-grades td { white-space: nowrap; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
-  /* Telefonda alt menü kalabalık olmasın: Metodoloji yalnızca masaüstünde */
-  .tab[data-view="metodoloji"] { display: none; }
+  /* Telefonda alt menü kalabalık olmasın: Metodoloji ve Karşılaştır yalnızca masaüstünde */
+  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"] { display: none; }
   .app-shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar {
     position: fixed; inset: auto 0 0; width: 100%; height: auto; padding: 0 8px env(safe-area-inset-bottom);

@@ -1,99 +1,111 @@
-from datetime import datetime, timedelta
+"""Son fiyatları TEFAS'tan çekip fund_daily_prices'a ekler.
+
+- Başlangıç: DB'deki son tarihin LOOKBACK_DAYS öncesi (boşlukları ve geç
+  düzeltmeleri de doldurmak için). --start ile elle verilebilir.
+- Yeni TEFAS API'si tarih bazlı toplu sorguyu desteklemiyor; fon başına istek
+  atılıyor (az sayıda paralel işçiyle).
+- (fund_id, date) için UNIQUE index kullanılır; mevcut gün varsa fiyat
+  güncellenir, 0/boş fiyatlar yazılmaz.
+"""
+import argparse
+import sqlite3
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta
+
 import pandas as pd
-from database.database import SessionLocal
-from database.models import Fund, FundDailyPrice
-try:
-    from tefas import TEFAS
-except ImportError:
-    try:
-        from tefas.crawler import Crawler as TEFAS
-    except ImportError:
-        from tefas import Crawler as TEFAS
+from tefas import Crawler
 
-def fetch_recent_prices():
-    db = SessionLocal()
-    tefas = TEFAS(fund_limit=2000)
-    
-    # Get the maximum price date in the database
-    max_price_date = db.query(FundDailyPrice.date).order_by(FundDailyPrice.date.desc()).first()
-    if max_price_date is None:
-        start_date = datetime.now() - timedelta(days=4*365)  # fallback to 4 years ago
-        start_date = start_date.date()
-    else:
-        start_date = max_price_date[0]  # already a date object
-    
-    end_date = datetime.now().date()
-    
-    if start_date > end_date:
-        print("No new prices to fetch.")
-        db.close()
-        return
-    
-    s_str = start_date.strftime("%Y-%m-%d")
-    e_str = end_date.strftime("%Y-%m-%d")
-    
-    print(f"Fetching prices from {s_str} to {e_str}")
-    
-    all_codes = tefas._list_fund_codes("YAT")
-    if not all_codes:
-        print("!! Fund listesi alinamadi.")
-        db.close()
-        return
-    
-    total_added = 0
-    for i, code in enumerate(all_codes, 1):
+DB = "tefas.db"
+LOOKBACK_DAYS = 30
+MAX_WORKERS = 4
+
+
+def fetch_one(crawler, code, s_str, e_str, retries=3):
+    for attempt in range(retries):
         try:
-            df = tefas.fetch(start=s_str, end=e_str, name=code)
-            
-            if df is None or df.empty:
-                print(f"[{i}/{len(all_codes)}] ?? {code} icin veri bulunamadi, geciliyor.")
-                continue
-                
-            added_for_fund = 0
-            row_sample = df.iloc[0]
-            title_col = "title" if "title" in row_sample else "Unvan"
-            title = row_sample.get(title_col, "Yatirim Fonu")
-            
-            fund = db.query(Fund).filter(Fund.code == code).first()
-            if not fund:
-                fund = Fund(code=code, title=title, category="Yatirim Fonu")
-                db.add(fund)
-                db.commit()
-                db.refresh(fund)
-                
-            price_col = "price" if "price" in df.columns else "Fiyat"
-            date_col = "date" if "date" in df.columns else "Tarih"
-            
-            existing_dates = {
-                p.date for p in db.query(FundDailyPrice.date).filter(FundDailyPrice.fund_id == fund.id).all()
-            }
-            
-            new_prices = []
-            for _, row in df.iterrows():
-                val_date = pd.to_datetime(row[date_col]).date()
-                val_price = row[price_col]
-                
-                if val_date not in existing_dates and pd.notna(val_price):
-                    new_prices.append(FundDailyPrice(
-                        fund_id=fund.id,
-                        date=val_date,
-                        price=val_price
-                    ))
-                    existing_dates.add(val_date)
-            
-            if new_prices:
-                db.bulk_save_objects(new_prices)
-                db.commit()
-                added_for_fund = len(new_prices)
-                total_added += added_for_fund
-                
-            print(f"[{i}/{len(all_codes)}] OK {code} tamamlandi. ({added_for_fund} yeni gun kaydedildi)")
-            
-        except Exception as e:
-            print(f"[{i}/{len(all_codes)}] ERR {code} cekilirken hata: {e}")
+            return crawler.fetch(
+                start=s_str, end=e_str, name=code, columns=["date", "code", "title", "price"]
+            )
+        except Exception:
+            time.sleep(2 * (attempt + 1))
+    return None
 
-    db.close()
-    print(f"\n!! Islem tamamlandi! Veritabanina toplam {total_added} gunluk fiyat verisi eklendi.")
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--start", help="YYYY-MM-DD")
+    parser.add_argument("--end", default=date.today().strftime("%Y-%m-%d"))
+    args = parser.parse_args()
+
+    conn = sqlite3.connect(DB)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_fund_daily_prices_fund_date"
+        " ON fund_daily_prices (fund_id, date)"
+    )
+
+    if args.start:
+        s_str = args.start
+    else:
+        last = conn.execute("SELECT MAX(date) FROM fund_daily_prices").fetchone()[0]
+        last_d = (
+            datetime.strptime(last, "%Y-%m-%d").date()
+            if last
+            else date.today() - timedelta(days=4 * 365)
+        )
+        s_str = (last_d - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    e_str = args.end
+    print(f"Fiyatlar çekiliyor: {s_str} -> {e_str}")
+
+    crawler = Crawler()
+    codes = crawler._list_fund_codes("YAT")
+    if not codes:
+        print("Fon listesi alınamadı.")
+        return
+    fund_ids = dict(conn.execute("SELECT code, id FROM funds").fetchall())
+
+    total, empty, failed = 0, 0, 0
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(fetch_one, crawler, c, s_str, e_str): c for c in codes}
+        for i, fut in enumerate(as_completed(futures), 1):
+            code = futures[fut]
+            df = fut.result()
+            if df is None:
+                failed += 1
+                continue
+            df = df[pd.to_numeric(df["price"], errors="coerce") > 0]
+            if df.empty:
+                empty += 1
+                continue
+
+            if code not in fund_ids:
+                cur = conn.execute(
+                    "INSERT INTO funds (code, title, status) VALUES (?, ?, 'ACTIVE')",
+                    (code, str(df["title"].iloc[-1])),
+                )
+                fund_ids[code] = cur.lastrowid
+                print(f"Yeni fon eklendi: {code}")
+
+            rows = [
+                (fund_ids[code], pd.to_datetime(d).strftime("%Y-%m-%d"), float(p))
+                for d, p in zip(df["date"], df["price"])
+            ]
+            conn.executemany(
+                "INSERT INTO fund_daily_prices (fund_id, date, price) VALUES (?, ?, ?)"
+                " ON CONFLICT(fund_id, date) DO UPDATE SET price = excluded.price",
+                rows,
+            )
+            total += len(rows)
+            if i % 100 == 0:
+                conn.commit()
+                print(f"[{i}/{len(codes)}] yazılan satır: {total}")
+
+    conn.commit()
+    conn.close()
+    print(
+        f"Bitti. Satır: {total} | veri yok: {empty} | hatalı: {failed} | fon: {len(codes)}"
+    )
+
 
 if __name__ == "__main__":
-    fetch_recent_prices()
+    main()

@@ -1,5 +1,6 @@
 import datetime
 import hashlib
+import json
 import os
 import sqlite3
 import numpy as np
@@ -61,7 +62,24 @@ try:
 except Exception:
   last_sync_str = "Henüz Senkronize Edilmedi"
 
+# scoring.py'nin skorlamadığı (işlemi durdurulmuş / fiyatı bayat) fonlar
+try:
+  meta_cursor.execute("SELECT value FROM metadata WHERE key='excluded_funds'")
+  excluded_row = meta_cursor.fetchone()
+  excluded_funds = json.loads(excluded_row[0]) if excluded_row else []
+except Exception:
+  excluded_funds = []
+
+try:
+  last_price_date = conn.execute(
+      "SELECT MAX(date) FROM fund_daily_prices"
+  ).fetchone()[0]
+except Exception:
+  last_price_date = None
+
 st.sidebar.markdown(f"🔄 **Son Güncelleme:** `{last_sync_str}`")
+if last_price_date:
+  st.sidebar.markdown(f"📅 **Son Fiyat Günü:** `{last_price_date}`")
 st.sidebar.markdown("---")
 
 menu = st.sidebar.radio(
@@ -140,7 +158,8 @@ def load_universe_data():
   merged["is_qualified_clean"] = merged["is_qualified"].apply(parse_qualified)
 
   price_counts = pd.read_sql(
-      "SELECT fund_id, COUNT(date) as day_count FROM fund_daily_prices GROUP"
+      "SELECT fund_id, COUNT(DISTINCT date) as day_count FROM fund_daily_prices"
+      " WHERE price > 0 GROUP"
       " BY fund_id",
       con=conn,
   )
@@ -320,6 +339,17 @@ elif menu == "⚡ Ana Dashboard":
     col4.metric("🟡 İZLE", f"{izle_count}")
     col5.metric("🟠 ZAYIF", f"{zayif_count}")
     col6.metric("🔴 UZAK DUR", f"{uzak_dur_count}")
+
+    if excluded_funds:
+      with st.expander(
+          f"⛔ Skorlanmayan {len(excluded_funds)} fon (işlem durdurulmuş /"
+          " fiyatı güncel değil)"
+      ):
+        st.dataframe(
+            pd.DataFrame(excluded_funds, columns=["Fon Kodu", "Neden"]),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     st.markdown("---")
     st.subheader("🏆 Her Kategorinin Lideri")
@@ -548,6 +578,11 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
         }
     ).copy()
 
+    # Sıralamayı metne çevirmeden önce sayısal değer üzerinden yap
+    # ("Top %10" < "Top %2" diye alfabetik sıralanıyordu)
+    display_df = display_df.sort_values(
+        by=["Kategori Gücü", "Final Skor"], ascending=[False, False]
+    )
     display_df["Kategori Gücü"] = display_df["Kategori Gücü"].apply(
         format_category_strength
     )
@@ -560,9 +595,6 @@ elif menu == "🔍 Fon Havuzu & Yaş Filtresi":
     if selected_categories:
       display_df = display_df[display_df["category"].isin(selected_categories)]
 
-    display_df = display_df.sort_values(
-        by=["Kategori Gücü", "Final Skor"], ascending=[True, False]
-    )
     st.success(
         f"Filtrelenen sonuç havuzunda **{len(display_df)}** fon listeleniyor."
     )
@@ -643,9 +675,12 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
             "Performans Skoru", breakdown.get("performance_score", 0)
         )
         render_progress_bar("Risk Skoru", breakdown.get("risk_score", 0))
-        render_progress_bar("Kalite Skoru", breakdown.get("quality_score", 0))
+        # explain_score() bu iki skoru portfolio_score / investor_score adıyla yazar
         render_progress_bar(
-            "Nakit Akışı / Stabilite", breakdown.get("cashflow_score", 0)
+            "Kalite Skoru", breakdown.get("portfolio_score", 0)
+        )
+        render_progress_bar(
+            "Yatırımcı / Nakit Akışı", breakdown.get("investor_score", 0)
         )
         render_progress_bar("Maliyet Skoru", breakdown.get("cost_score", 0))
 
@@ -677,8 +712,21 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
 
         st.info(yorum)
 
+        anomaly = breakdown.get("penalties", {}).get("return_anomaly", 0) or 0
+        if anomaly > 0:
+          st.warning(
+              f"⚠ Getiri anomalisi: 1 yıllık getirisi kategorisinin çok"
+              f" üstünde (−{anomaly:.1f} puan ceza). Pürüzsüz ve olağan dışı"
+              " yüksek getiri, değerlemesi zor ya da likit olmayan varlıklara"
+              " işaret edebilir; portföy dağılımını ve KAP bildirimlerini"
+              " kontrol edin."
+          )
+
       # Risk Engine Metrikleri
-      metrics_query = "SELECT * FROM fund_metrics WHERE fund_id = ?"
+      metrics_query = (
+          "SELECT * FROM fund_metrics WHERE fund_id = ? ORDER BY date DESC"
+          " LIMIT 1"
+      )
       m_df = pd.read_sql(metrics_query, con=conn, params=(selected_fund_id,))
       if not m_df.empty:
         m_row = m_df.iloc[0]
@@ -789,99 +837,54 @@ elif menu == "📊 Fon Detay & Gizli Cevherler":
         holdings_df = pd.DataFrame()
 
       if holdings_df.empty:
-        seed_str = hashlib.md5(selected_code.encode()).hexdigest()
-        fund_seed = int(seed_str, 16) % 10000
-        rng = np.random.default_rng(fund_seed)
-        comp_names = [
-            f"{selected_code} Varlık A",
-            f"{selected_code} Varlık B",
-            f"{selected_code} Varlık C",
-            f"{selected_code} Varlık D",
+        # Eskiden burada fon koduna göre rastgele (sahte) varlıklar üretilip
+        # gerçek analiz gibi gösteriliyordu; veri yoksa bunu açıkça söyle.
+        st.info(
+            "Bu fon için portföy dağılımı (fund_stock_holdings) verisi henüz"
+            " yok; içsel değer analizi yapılamıyor."
+        )
+      else:
+        weighted_potential = sum(
+            holdings_df["dcf_discount"] * holdings_df["weight"]
+        )
+        avg_quant = sum(holdings_df["quant_score"] * holdings_df["weight"])
+
+        fair_value_score = (
+            (min(max(weighted_potential, 0), 50) / 50 * 40)
+            + (avg_quant / 100 * 40)
+            + (75.0 / 100 * 20)
+        )
+
+        h_col1, h_col2, h_col3 = st.columns(3)
+        h_col1.metric("Fon Fair Value Skoru", f"{fair_value_score:.1f} / 100")
+        h_col2.metric("Ağırlıklı İskonto (DCF)", f"%{weighted_potential:+.1f}")
+        h_col3.metric("Ağırlıklı Quant Skoru", f"{avg_quant:.1f}")
+
+        display_holdings = holdings_df[
+            ["symbol", "name", "sector", "weight", "dcf_discount", "quant_score"]
+        ].copy()
+        display_holdings["weight"] = (
+            (display_holdings["weight"] * 100).round(1).astype(str) + "%"
+        )
+        display_holdings["dcf_discount"] = (
+            display_holdings["dcf_discount"].round(1).astype(str) + "%"
+        )
+        display_holdings.columns = [
+            "Sembol / Kod",
+            "Varlık Adı",
+            "Sektör",
+            "Ağırlık",
+            "DCF İskontosu",
+            "Quant Skoru",
         ]
-        raw_w = rng.uniform(0.1, 0.3, size=4)
-        raw_w = raw_w / raw_w.sum() * 0.60
 
-        mock_holdings = [
-            {
-                "symbol": comp_names[0],
-                "name": comp_names[0],
-                "sector": "Teknoloji",
-                "weight": raw_w[0],
-                "dcf_discount": float(rng.uniform(15, 55)),
-                "quant_score": int(rng.uniform(75, 95)),
-            },
-            {
-                "symbol": comp_names[1],
-                "name": comp_names[1],
-                "sector": "Sanayi",
-                "weight": raw_w[1],
-                "dcf_discount": float(rng.uniform(5, 35)),
-                "quant_score": int(rng.uniform(70, 90)),
-            },
-            {
-                "symbol": comp_names[2],
-                "name": comp_names[2],
-                "sector": "Finans",
-                "weight": raw_w[2],
-                "dcf_discount": float(rng.uniform(-10, 25)),
-                "quant_score": int(rng.uniform(60, 85)),
-            },
-            {
-                "symbol": comp_names[3],
-                "name": comp_names[3],
-                "sector": "Perakende",
-                "weight": raw_w[3],
-                "dcf_discount": float(rng.uniform(-15, 15)),
-                "quant_score": int(rng.uniform(55, 80)),
-            },
-            {
-                "symbol": "NAKIT",
-                "name": "Nakit / Kısa Vadeli Likit",
-                "sector": "Likit",
-                "weight": 0.40,
-                "dcf_discount": 10.0,
-                "quant_score": 90,
-            },
-        ]
-        holdings_df = pd.DataFrame(mock_holdings)
-
-      weighted_potential = sum(
-          holdings_df["dcf_discount"] * holdings_df["weight"]
-      )
-      avg_quant = sum(holdings_df["quant_score"] * holdings_df["weight"])
-
-      fair_value_score = (
-          (min(max(weighted_potential, 0), 50) / 50 * 40)
-          + (avg_quant / 100 * 40)
-          + (75.0 / 100 * 20)
-      )
-
-      h_col1, h_col2, h_col3 = st.columns(3)
-      h_col1.metric("Fon Fair Value Skoru", f"{fair_value_score:.1f} / 100")
-      h_col2.metric("Ağırlıklı İskonto (DCF)", f"%{weighted_potential:+.1f}")
-      h_col3.metric("Ağırlıklı Quant Skoru", f"{avg_quant:.1f}")
-
-      display_holdings = holdings_df[
-          ["symbol", "name", "sector", "weight", "dcf_discount", "quant_score"]
-      ].copy()
-      display_holdings["weight"] = (
-          (display_holdings["weight"] * 100).round(1).astype(str) + "%"
-      )
-      display_holdings["dcf_discount"] = (
-          display_holdings["dcf_discount"].round(1).astype(str) + "%"
-      )
-      display_holdings.columns = [
-          "Sembol / Kod",
-          "Varlık Adı",
-          "Sektör",
-          "Ağırlık",
-          "DCF İskontosu",
-          "Quant Skoru",
-      ]
-
-      st.dataframe(display_holdings, use_container_width=True)
+        st.dataframe(display_holdings, use_container_width=True)
     else:
-      st.warning("Seçilen fon için skor verisi bulunamadı.")
+      reason = dict(excluded_funds).get(selected_code)
+      if reason:
+        st.error(f"⛔ {selected_code} skorlanmadı: {reason}.")
+      else:
+        st.warning("Seçilen fon için skor verisi bulunamadı.")
   else:
     st.warning("Veritabanında kayıtlı fon bulunamadı.")
 
@@ -992,11 +995,9 @@ elif menu == "🚀 Backtest Performansı":
             prices_df["date"] = pd.to_datetime(prices_df["date"])
             scores_df["date"] = pd.to_datetime(scores_df["date"])
 
-            # Ensure we have enough forward data for the selected holding period
-            max_price_date = prices_df["date"].max()
-            from pandas import Timedelta
-            cutoff_date = max_price_date - Timedelta(days=selected_period)
-            signals_df = scores_df[scores_df["date"] <= cutoff_date].copy()
+            # Elde tutma süresi işlem günü cinsinden; ileri fiyatı olmayan sinyalleri
+            # motor zaten eler (takvim günüyle kesmek 21 işlem gününü ~30 gün sanıyordu).
+            signals_df = scores_df.copy()
             if signals_df.empty:
                 st.warning(
                     f"Seçilen {b_period_label} için yeterli ileri tarihli fiyat"
@@ -1035,14 +1036,27 @@ elif menu == "🚀 Backtest Performansı":
                         m3.metric("Sharpe Oranı", f"{metrics['sharpe_ratio']:.2f}")
                         m4.metric("Maksimum Düşüş", f"%{metrics['max_drawdown']:.2f}")
 
+                        # TL bazında neredeyse her fon yükseldiği için isabet oranı tek
+                        # başına yanıltıcı; aynı tarihlerde tüm fonların ortalamasıyla kıyasla.
+                        b1, b2 = st.columns(2)
+                        b1.metric(
+                            "Fon Evreni Ortalaması (aynı tarihler)",
+                            f"%{metrics['universe_average_return']:+.2f}",
+                        )
+                        b2.metric(
+                            "Evrene Göre Fazla Getiri",
+                            f"%{metrics['excess_return']:+.2f}",
+                        )
+
                         st.markdown("---")
                         st.subheader("📋 Simülasyon İşlem Detayları")
                         trades_df = metrics["trades_df"]
                         if not trades_df.empty:
                             display_trades = trades_df.copy()
-                            display_trades["return"] = (
-                                (display_trades["return"] * 100).round(2).astype(str) + "%"
-                            )
+                            for col in ["return", "universe_return"]:
+                                display_trades[col] = (
+                                    (display_trades[col] * 100).round(2).astype(str) + "%"
+                                )
                             display_trades.columns = [
                                 "Fon ID",
                                 "Giriş Tarihi",
@@ -1050,6 +1064,7 @@ elif menu == "🚀 Backtest Performansı":
                                 "Giriş Fiyatı",
                                 "Çıkış Fiyatı",
                                 "Getiri (%)",
+                                "Evren Getirisi (%)",
                             ]
                             st.dataframe(
                                 display_trades.head(100), use_container_width=True

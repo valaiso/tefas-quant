@@ -1,34 +1,43 @@
-name: Hourly TEFAS Data Pipeline
+name: TEFAS Data Pipeline
 
+# Eskiden her 20 dakikada var olmayan collector.py'yi çalıştırıp başarısız oluyordu.
+# TEFAS fiyatları günde bir kez yayınlandığı için hafta içi akşam bir kez yeterli.
 on:
   schedule:
-    - cron: '*/20 * * * *' # Artık her 20 dakikada bir otomatik çalışır
+    - cron: '0 18 * * 1-5' # 21:00 TSİ
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   update-data:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas requests
+          pip install -r requirements.txt
 
       - name: Run Data Pipeline
-        run: python collector.py
+        run: |
+          python fetch_recent_prices.py
+          python sync_fvt_metrics.py
+          python analysis_engine.py
+          python scoring.py
 
       - name: Commit and Push Database Changes
         run: |
           git config --global user.name "Quant Bot"
           git config --global user.email "bot@quant.local"
           git add tefas.db
-          git commit -m "Auto-update: TEFAS database refreshed (20m)" || echo "No changes to commit"
+          git commit -m "Auto-update: TEFAS database refreshed" || echo "No changes to commit"
           git push

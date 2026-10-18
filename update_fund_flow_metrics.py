@@ -151,24 +151,9 @@ def run():
 
         total_30 = sum(x[2] for x in daily)
 
-        # Son 7 günlük momentum hesaplaması
-        last_7 = sum(
-            x[2]
-            for x in daily
-            if x[1] >= (today - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        )
-
-        # Pozitif gün oranı hesaplaması
-        positive_ratio = (
-            sum(1 for x in daily if x[2] > 0) / len(daily) if daily else 0
-        )
-
-        # Gelişmiş Karma Nakit Akış Skoru / Metriği
-        cash_flow_value = (
-            total_30 * 0.50
-            + last_7 * 0.30
-            + (positive_ratio * 1_000_000_000) * 0.20
-        )
+        # Net 30 günlük akış (TL). Eskiden pozitif gün oranı 1 milyar TL ile
+        # çarpılıp ekleniyordu; bu her fona ~200 milyon TL yapay giriş yazıyordu.
+        cash_flow_value = total_30
 
         for _, date, value in daily:
             history_rows.append((fund_id, date, value, "FUNDFY_CASH_FLOW"))

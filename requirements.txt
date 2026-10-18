@@ -1,4 +1,8 @@
 streamlit==1.39.0
 pandas==2.2.3
 numpy==1.26.4
+# pyarrow>=18 NumPy 2 ister; sabitlenmezse st.dataframe çöküyor
+pyarrow==17.0.0
 tefas-crawler==0.6.0
+requests
+SQLAlchemy

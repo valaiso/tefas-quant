@@ -11,6 +11,20 @@ import streamlit as st
 import sqlite3
 
 from app.services import scoring_engine
+from fund_attributes import refresh_fund_attributes
+
+try:
+    from config.settings import (
+        ANOMALY_MAX_PENALTY,
+        ANOMALY_PENALTY_PER_Z,
+        ANOMALY_Z_THRESHOLD,
+        RATING_MODE,
+        STALE_PRICE_DAYS,
+    )
+except ImportError:
+    STALE_PRICE_DAYS = 7
+    ANOMALY_Z_THRESHOLD, ANOMALY_PENALTY_PER_Z, ANOMALY_MAX_PENALTY = 3.0, 2.0, 15.0
+    RATING_MODE = "relative"
 
 try:
     from tefas import Crawler
@@ -87,6 +101,9 @@ def get_db_connection():
 
 def detect_qualified_fund(title, category):
     text = f"{str(title).upper()} {str(category).upper()}"
+    # "ÖZEL SEKTÖR BORÇLANMA ARAÇLARI" fonları herkese açık; "ÖZEL" anahtar
+    # kelimesine takılıp nitelikli sayılmasınlar.
+    text = text.replace("ÖZEL SEKTÖR", "")
     qualified_keywords = [
         "SERBEST",
         "ÖZEL",
@@ -129,16 +146,72 @@ def calculate_portfolio_quality(aum, alpha):
     return min(score, 100)
 
 
+def _present(x):
+    return x is not None and not (isinstance(x, float) and np.isnan(x))
+
+
+def weighted_cash_flow(external, flow):
+    """3A %60 / 1A %30 / 1H %10; eksik dönemlerin ağırlığı kalanlara dağıtılır."""
+    parts = [
+        (external.get("flow_3m"), 0.60),
+        (external.get("flow_1m"), 0.30),
+        (external.get("flow_1w"), 0.10),
+    ]
+    parts = [(float(v), w) for v, w in parts if _present(v)]
+    if parts:
+        total_w = sum(w for _, w in parts)
+        return sum(v * w for v, w in parts) / total_w
+    value = flow.get("cash_flow")
+    return float(value) if _present(value) else 0.0
+
+
+def calculate_return_anomaly_penalty(df):
+    """Kategori içi 1Y getiri robust z-skoru eşiği aşan fonlara ceza puanı."""
+    def per_category(group):
+        r = group["r_365"].astype(float)
+        if len(r) < 5:
+            return pd.Series(0.0, index=group.index)
+        iqr = r.quantile(0.75) - r.quantile(0.25)
+        z = (r - r.median()) / max(iqr, 1e-6)
+        penalty = (z - ANOMALY_Z_THRESHOLD).clip(lower=0) * ANOMALY_PENALTY_PER_Z
+        return penalty.clip(upper=ANOMALY_MAX_PENALTY)
+
+    return pd.concat(
+        [per_category(group) for _, group in df.groupby("category")]
+    ).reindex(df.index).fillna(0.0)
+
+
+def calculate_relative_rating(percentile):
+    """Kategori içi dağılım: üst %10 A+, sonraki %22.5 A, %35 B, %22.5 C, alt %10 D."""
+    if percentile > 90:
+        return "A+", "GÜÇLÜ AL"
+    elif percentile > 67.5:
+        return "A", "AL"
+    elif percentile > 32.5:
+        return "B", "İZLE"
+    elif percentile > 10:
+        return "C", "ZAYIF"
+    else:
+        return "D", "UZAK DUR"
+
+
 def run_batch_scoring_engine(conn):
+    recategorized, newly_qualified = refresh_fund_attributes(conn)
+    print(f"Kategori düzeltilen: {recategorized} | serbest -> nitelikli: {newly_qualified}")
+
     funds_df = pd.read_sql(
         "SELECT id, code, category FROM funds WHERE status = 'ACTIVE'", con=conn
     )
     if funds_df.empty:
         return
+    funds_df["category"] = funds_df["category"].fillna("Diğer")
 
+    # fund_daily_prices'ta (fund_id, date) tekil değil; tekrarlı satırlar ve
+    # 0 fiyatlar getiri pencerelerini bozuyordu. Her gün için son kaydı al.
     prices_df = pd.read_sql(
-        "SELECT fund_id, date, price FROM fund_daily_prices ORDER BY fund_id,"
-        " date ASC",
+        "SELECT fund_id, date, price FROM fund_daily_prices WHERE id IN"
+        " (SELECT MAX(id) FROM fund_daily_prices WHERE price > 0"
+        " GROUP BY fund_id, date) ORDER BY fund_id, date ASC",
         con=conn,
     )
     if prices_df.empty:
@@ -168,7 +241,7 @@ def run_batch_scoring_engine(conn):
     info_df = pd.read_sql(
         """
     SELECT
-        f.fund_id,
+        fu.id AS fund_id,
         f.investor_count,
         f.investor_growth_1m,
         f.fund_size,
@@ -182,16 +255,16 @@ def run_batch_scoring_engine(conn):
         e.flow_1m AS external_flow_1m,
         e.flow_3m AS external_flow_3m,
         e.management_fee AS external_management_fee,
-        e.stopaj AS external_stopaj
-    FROM fund_flow_metrics f
+        e.stopaj AS external_stopaj,
+        e.trading_active AS external_trading_active
+    FROM funds fu
+    LEFT JOIN fund_flow_metrics f
+    ON f.fund_id = fu.id
+    AND f.date = (SELECT MAX(date) FROM fund_flow_metrics)
     LEFT JOIN fund_info_metrics i
-    ON f.fund_id = i.fund_id
+    ON fu.id = i.fund_id
     LEFT JOIN fund_external_metrics e
-    ON f.fund_id = e.fund_id
-    WHERE f.date = (
-        SELECT MAX(date)
-        FROM fund_flow_metrics
-    )
+    ON fu.id = e.fund_id
     """,
         con=conn,
     )
@@ -217,6 +290,10 @@ def run_batch_scoring_engine(conn):
 
     grouped = dict(tuple(prices_df.groupby("fund_id")))
     raw_data = []
+    excluded = []
+
+    universe_last_date = pd.to_datetime(prices_df["date"].max())
+    stale_cutoff = universe_last_date - datetime.timedelta(days=STALE_PRICE_DAYS)
 
     # 1. HAM VERİLERİ HAZİRLAMA (FVT Öncelikli Hiyerarşi)
     for _, row in funds_df.iterrows():
@@ -234,27 +311,40 @@ def run_batch_scoring_engine(conn):
         if len(prices) < 30:
             continue
 
+        # Fiyatı güncellenmeyen fonlar skorlanmaz. FVT'nin islem=0 bayrağı tek başına
+        # yetmez (TEFAS'ta hiç işlem görmeyen ama fiyatı yayımlanan fonlarda da 0);
+        # yalnızca nedeni ayırt etmek için kullanılır.
+        if pd.to_datetime(valid_history["date"].iloc[-1]) < stale_cutoff:
+            halted = info_map.get(f_id, {}).get("external_trading_active") == 0
+            excluded.append((
+                row["code"],
+                "TEFAS işlemi durdurulmuş, fiyat yayımlanmıyor"
+                if halted
+                else "fiyat güncel değil",
+            ))
+            continue
+
         day_count = len(prices)
-        r_30 = (prices[-1] / prices[-30] - 1) * 100 if day_count >= 30 else 0
-        r_60 = (prices[-1] / prices[-60] - 1) * 100 if day_count >= 60 else r_30
-        r_90 = (prices[-1] / prices[-90] - 1) * 100 if day_count >= 90 else r_30
-        r_180 = (prices[-1] / prices[-180] - 1) * 100 if day_count >= 180 else r_90
-        r_270 = (prices[-1] / prices[-270] - 1) * 100 if day_count >= 270 else r_180
-        r_365 = (prices[-1] / prices[-365] - 1) * 100 if day_count >= 365 else r_180
-        r_1095 = (
-            (prices[-1] / prices[-1095] - 1) * 100
-            if day_count >= 1095
-            else r_365
-        )
-        r_1825 = (
-            (prices[-1] / prices[-1825] - 1) * 100
-            if day_count >= 1825
-            else r_1095
-        )
+
+        # Fiyat serisi işlem günü bazlı: 1 ay ~ 21, 1 yıl ~ 252 işlem günü.
+        # (Eskiden 365/1825 satır geri gidiliyordu; bu ~1.45 / ~7.2 yıl ediyordu.)
+        def trailing_return(n_days, fallback):
+            if day_count > n_days:
+                return (prices[-1] / prices[-1 - n_days] - 1) * 100
+            return fallback
+
+        r_30 = trailing_return(21, 0)
+        r_60 = trailing_return(42, r_30)
+        r_90 = trailing_return(63, r_30)
+        r_180 = trailing_return(126, r_90)
+        r_270 = trailing_return(189, r_180)
+        r_365 = trailing_return(252, r_180)
+        r_1095 = trailing_return(756, r_365)
+        r_1825 = trailing_return(1260, r_1095)
 
         daily_returns = pd.Series(prices).pct_change().dropna()
         volatility = (
-            float(daily_returns.std() * (255**0.5))
+            float(daily_returns.std() * (252**0.5))
             if len(daily_returns) > 5
             else 0.2
         )
@@ -296,14 +386,11 @@ def run_batch_scoring_engine(conn):
         )
 
         if m.get("max_drawdown") is None:
+            # fund_metrics ile aynı birim: ondalık (0.15 = %15)
             cum_max = np.maximum.accumulate(prices)
             drawdowns = (prices - cum_max) / cum_max
-            mdd = float(abs(drawdowns.min()) * 100) if len(drawdowns) > 0 else 0.0
+            mdd = float(abs(drawdowns.min())) if len(drawdowns) > 0 else 0.0
 
-        valid_history = (
-            p_history[p_history["price"] > 0]
-            .sort_values("date")
-        )
         first_date = valid_history["date"].iloc[0]
         last_date = valid_history["date"].iloc[-1]
 
@@ -352,15 +439,7 @@ def run_batch_scoring_engine(conn):
                 if flow.get("source") != "PRICE_PROXY"
                 else 0
             ),
-            "cash_flow": (
-                (
-                    (external.get("flow_3m") or 0) * 0.60
-                    + (external.get("flow_1m") or 0) * 0.30
-                    + (external.get("flow_1w") or 0) * 0.10
-                )
-                if external.get("flow_3m") is not None
-                else flow.get("cash_flow", 0)
-            ),
+            "cash_flow": weighted_cash_flow(external, flow),
             "aum": (
                 external.get("aum")
                 or info.get("aum")
@@ -397,6 +476,7 @@ def run_batch_scoring_engine(conn):
         composite_dfs.append(group)
 
     df_scored = pd.concat(composite_dfs)
+    df_scored["anomaly_penalty"] = calculate_return_anomaly_penalty(df_scored)
 
     df_scored["absolute_score"] = scoring_engine.calculate_absolute_score(
         df_scored["perf_percentile"],
@@ -453,15 +533,8 @@ def run_batch_scoring_engine(conn):
         except:
             pass
 
-        print(
-            "CASH FLOW PENALTY:",
-            row["fund_id"],
-            "ratio=",
-            round(cash_ratio, 2),
-            "penalty=",
-            cash_flow_penalty,
-        )
-        raw_score = raw_score - (cash_flow_penalty * 0.50)
+        anomaly_penalty = float(row["anomaly_penalty"])
+        raw_score = raw_score - (cash_flow_penalty * 0.50) - anomaly_penalty
         final_sc = raw_score + ((conf_factor - 0.5) * 10)
         final_sc = final_sc + investor_adjustment
         final_sc = max(0, min(100, final_sc))
@@ -486,6 +559,7 @@ def run_batch_scoring_engine(conn):
         )
         breakdown = json.loads(breakdown_json)
         breakdown["penalties"]["cash_flow"] = cash_flow_penalty
+        breakdown["penalties"]["return_anomaly"] = round(anomaly_penalty, 2)
         breakdown["cash_flow_ratio"] = round(cash_ratio, 2)
         breakdown_json = json.dumps(
             breakdown,
@@ -523,18 +597,28 @@ def run_batch_scoring_engine(conn):
     ) * 100
 
     # 4. VERİTABANI KAYITLARI
-    # Determine the score date as 1260 days (5 years) before the most recent price date
-    # to ensure we have forward data for the maximum holding period in the backtest
-    max_price_date_str = prices_df["date"].max()
-    max_price_date = datetime.datetime.strptime(max_price_date_str, "%Y-%m-%d").date()
-    score_date = max_price_date - datetime.timedelta(days=1260)
-    today_str = score_date.strftime("%Y-%m-%d")
+    # Skor, hesaplamada kullanılan son fiyat gününe aittir. Tarihi geriye kaydırmak
+    # (eskiden -1260 gün) backtest'e geleceği bilen skorlar sokuyordu (look-ahead).
+    today_str = str(prices_df["date"].max())[:10]
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES ('excluded_funds', ?)",
+        (json.dumps(excluded, ensure_ascii=False),),
+    )
+    cursor.execute(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_sync', ?)",
+        (datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S"),),
+    )
+    print(f"Skorlanan: {len(df_scored)} | Dışlanan: {len(excluded)} -> {excluded[:20]}")
     db_records = []
 
     for _, row in df_scored.iterrows():
-        grade, signal = scoring_engine.calculate_rating(
-            row["final_score"], row["confidence"]
-        )
+        if RATING_MODE == "relative" and row["category_total"] >= 5:
+            grade, signal = calculate_relative_rating(row["category_percentile"])
+        else:
+            grade, signal = scoring_engine.calculate_rating(
+                row["final_score"], row["confidence"]
+            )
 
         db_records.append((
             int(row["fund_id"]),

@@ -13,7 +13,14 @@ class VectorizedBacktestEngine:
         prices_df['date'] = pd.to_datetime(prices_df['date'])
         prices_df['price'] = pd.to_numeric(prices_df['price'], errors='coerce')
         prices_df = prices_df.dropna(subset=['price'])
+        # Tekrarlı (fund_id, date) satırları ve 0 fiyatlar row_idx'i, dolayısıyla
+        # elde tutma süresini kaydırır; her gün tek bir pozitif fiyat kalsın.
+        prices_df = prices_df[prices_df['price'] > 0]
+        prices_df = prices_df.drop_duplicates(subset=['fund_id', 'date'], keep='last')
         prices_df = prices_df.sort_values(['fund_id', 'date']).reset_index(drop=True)
+
+        # Kıyas: aynı giriş/çıkış tarihlerinde tüm fon evreninin eşit ağırlıklı getirisi
+        price_matrix = prices_df.pivot(index='date', columns='fund_id', values='price')
 
         signals_df['date'] = pd.to_datetime(signals_df['date'])
         buy_signals = signals_df[
@@ -140,6 +147,18 @@ class VectorizedBacktestEngine:
                 }
                 continue
 
+            trades_clean = trades_clean.copy()
+            trades_clean['universe_return'] = [
+                float(
+                    (price_matrix.loc[d_out] / price_matrix.loc[d_in] - 1)
+                    .replace([np.inf, -np.inf], np.nan)
+                    .clip(-0.95, 10)
+                    .mean()
+                )
+                for d_in, d_out in zip(trades_clean['date_entry'], trades_clean['date_exit'])
+            ]
+            universe_avg = float(trades_clean['universe_return'].mean() * 100)
+
             analyzed = len(trades_clean)
             avg_ret = float(
                 trades_clean['return']
@@ -177,6 +196,8 @@ class VectorizedBacktestEngine:
             results[key_str] = {
                 "analyzed_signals": analyzed,
                 "average_return": avg_ret,
+                "universe_average_return": universe_avg,
+                "excess_return": avg_ret - universe_avg,
                 "hit_ratio": hit_ratio,
                 "sharpe_ratio": sharpe,
                 "max_drawdown": mdd,

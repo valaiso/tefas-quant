@@ -58,6 +58,57 @@ def get_benchmark_returns(benchmark_returns, dates_index):
 
     return bm.dropna()
 
+def estimate_risk_free_series(daily_matrix, category_of):
+    """Para piyasası fonlarının günlük medyan getirisi (zamanla değişen risksiz faiz).
+
+    Ayarda sabit RISK_FREE_RATE verilmişse None döner.
+    """
+    try:
+        from config.settings import RISK_FREE_RATE
+    except ImportError:
+        RISK_FREE_RATE = None
+    if RISK_FREE_RATE is not None:
+        return None
+    mm_ids = [
+        i for i, c in category_of.items()
+        if isinstance(c, str) and c.startswith('Para Piyasas') and i in daily_matrix.columns
+    ]
+    mm = daily_matrix[mm_ids]
+    series = mm.median(axis=1)[mm.notna().sum(axis=1) >= 5]
+    return series.clip(-0.01, 0.01)
+
+
+def fund_risk_free_rate(rf_series, returns_index, fallback):
+    """Fonun kendi tarih aralığındaki ortalama risksiz faiz (yıllık)."""
+    if rf_series is None:
+        return fallback
+    aligned = rf_series.reindex(returns_index).dropna()
+    if len(aligned) < len(returns_index) * 0.5:
+        return fallback
+    return float(aligned.mean() * metrics.TRADING_DAYS)
+
+
+def estimate_risk_free_rate(price_matrix, category_of):
+    """Ayarda sabit oran yoksa para piyasası fonlarının son 1 yıllık medyan getirisi."""
+    try:
+        from config.settings import RISK_FREE_RATE, RISK_FREE_FALLBACK
+    except ImportError:
+        RISK_FREE_RATE, RISK_FREE_FALLBACK = None, metrics.DEFAULT_RISK_FREE_RATE
+    if RISK_FREE_RATE is not None:
+        return float(RISK_FREE_RATE)
+
+    mm_ids = [
+        i for i, c in category_of.items()
+        if isinstance(c, str) and c.startswith('Para Piyasas') and i in price_matrix.columns
+    ]
+    window = price_matrix[mm_ids].iloc[-(metrics.TRADING_DAYS + 1):]
+    window = window.loc[:, window.notna().sum() >= metrics.TRADING_DAYS * 0.9]
+    if window.shape[1] < 5:
+        return float(RISK_FREE_FALLBACK)
+    yearly = window.ffill().iloc[-1] / window.bfill().iloc[0] - 1
+    return float(yearly.median())
+
+
 def run_analysis_pipeline(conn=None):
     print("ANALYSIS ENGINE BAŞLADI")
     
@@ -79,36 +130,27 @@ def run_analysis_pipeline(conn=None):
         if prices_df.empty:
             return False, "Fiyat verisi bulunamadı."
 
-        # Benchmark Cache (Tek Seferde Hazırlanır ve Güvenli Hale Getirilir)
+        # Benchmark: her kategori için fonların günlük getirilerinin eşit ağırlıklı
+        # ortalaması. (Eskiden tüm fonların FİYAT ortalaması alınıyordu; fiyat
+        # seviyeleri farklı olduğu için beta/alfa anlamsız çıkıyordu.)
         print("Benchmark hazırlanıyor...")
-        benchmark_df = pd.read_sql("""
-            SELECT date, AVG(price) as price
-            FROM fund_daily_prices
-            GROUP BY date
-        """, conn)
-        
-        benchmark_df['date'] = pd.to_datetime(
-            benchmark_df['date']
-        ).dt.normalize()
-        
-        benchmark_df = (
-            benchmark_df
-            .groupby('date')['price']
-            .mean()
-            .to_frame()
-        )
-        
-        benchmark_returns = (
-            benchmark_df['price']
-            .pct_change()
-            .dropna()
-        )
-        
-        benchmark_returns = benchmark_returns[
-            ~benchmark_returns.index.duplicated()
-        ]
-        
-        print(f"Benchmark hazır. Gün sayısı: {len(benchmark_returns)}")
+        clean = prices_df[prices_df['price'] > 0].drop_duplicates(['fund_id', 'date'], keep='last')
+        price_matrix = clean.pivot(index='date', columns='fund_id', values='price')
+        price_matrix.index = pd.to_datetime(price_matrix.index)
+        price_matrix = price_matrix.sort_index()
+        daily_matrix = price_matrix.pct_change(fill_method=None).clip(-0.5, 1.0)
+        category_of = funds_df.set_index('id')['category'].fillna('Diğer')
+
+        category_benchmarks = {}
+        for cat, ids in category_of.groupby(category_of).groups.items():
+            cols = [i for i in ids if i in daily_matrix.columns]
+            if cols:
+                category_benchmarks[cat] = daily_matrix[cols].mean(axis=1).dropna()
+        all_benchmark = daily_matrix.mean(axis=1).dropna()
+
+        current_rf = estimate_risk_free_rate(price_matrix, category_of)
+        rf_series = estimate_risk_free_series(daily_matrix, category_of)
+        print(f"Benchmark hazır. Kategori: {len(category_benchmarks)} | Güncel risksiz faiz (1Y): %{current_rf*100:.1f}")
 
         grouped_prices = dict(tuple(prices_df.groupby('fund_id')))
         today_str = datetime.date.today().strftime('%Y-%m-%d')
@@ -157,8 +199,11 @@ def run_analysis_pipeline(conn=None):
                     
                     mdd, recovery_time = metrics.calculate_drawdown_metrics(prices)
                     
-                    sharpe = metrics.calculate_sharpe_ratio(returns)
-                    sortino = metrics.calculate_sortino_ratio(returns)
+                    # Fonun kendi dönemindeki ortalama faiz: 2021-23'ün düşük ve
+                    # 2024-26'nın yüksek faizini aynı sabit oranla ölçmemek için.
+                    risk_free_rate = fund_risk_free_rate(rf_series, returns.index, current_rf)
+                    sharpe = metrics.calculate_sharpe_ratio(returns, risk_free_rate)
+                    sortino = metrics.calculate_sortino_ratio(returns, risk_free_rate)
                     calmar = metrics.calculate_calmar_ratio(ann_return, mdd)
                     
                     win_rate = metrics.calculate_win_rate(returns)
@@ -166,8 +211,13 @@ def run_analysis_pipeline(conn=None):
                     skewness = metrics.calculate_skewness(returns)
                     
                     # Benchmark & Alpha / Beta / Information Ratio
-                    bm_returns = get_benchmark_returns(benchmark_returns, prices_series.index)
-                    beta, alpha = metrics.calculate_beta_and_alpha(returns, bm_returns)
+                    benchmark_returns = category_benchmarks.get(
+                        category if pd.notna(category) else 'Diğer', all_benchmark
+                    )
+                    bm_returns = get_benchmark_returns(benchmark_returns, returns.index)
+                    beta, alpha = metrics.calculate_beta_and_alpha(
+                        returns, bm_returns, risk_free_rate
+                    )
                     info_ratio = metrics.calculate_information_ratio(returns, bm_returns)
                     print(f"DEBUG {row['code']} beta={beta} alpha={alpha} info={info_ratio}")
 

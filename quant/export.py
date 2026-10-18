@@ -129,6 +129,8 @@ def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
         "riskFree": round(result["risk_free"] * 100, 2),
         "signals": signals,
         "excluded": result["excluded"],
+        "privateSkipped": result["private_skipped"],
+        "splits": result["splits"],
         "config": {
             "model": config.MODEL_VERSION,
             "historyYears": config.HISTORY_YEARS,

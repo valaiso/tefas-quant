@@ -43,7 +43,7 @@ export async function render(app, route, store) {
     app.innerHTML = ex
       ? `<div class="card notice-card warn"><h3>${esc(ex.code)} derecelendirilmiyor</h3>
           <p>${esc(ex.name)}</p><p>Neden: <b>${esc(ex.reason)}</b> · Son fiyat: ${dateTR(ex.lastDate)}</p>
-          <p class="dim">Fiyatı ${store.meta.config.stalePriceDays} günden uzun süredir yayımlanmayan fonlar (askıya alınmış, tasfiyedeki ya da kapanmış) listeye alınmaz.</p></div>`
+          <p class="dim">İşlemleri durdurulmuş, fiyatı ${store.meta.config.stalePriceDays} günden uzun süredir yayımlanmayan ya da pay adedi ve yatırımcı sayısı donmuş fonlar alınıp satılamadığı için sıralamaya alınmaz.</p></div>`
       : `<div class="card empty"><h3>Fon bulunamadı</h3><p>${esc(route.arg || "")} kodlu fon derecelendirilen fonlar arasında yok.</p></div>`;
     return;
   }

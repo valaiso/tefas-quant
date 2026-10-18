@@ -301,6 +301,9 @@ table.ranking .fund-cell .name { max-width: 190px; }
 table.ranking .scorebar { width: 44px; }
 @media (max-width: 1500px) { table.ranking .cat-cell, table.ranking th[data-key="k"] { display: none; } }
 table.compact td, table.compact th { padding: 7px 8px; }
+table.excluded td.left { white-space: normal; }
+.show-more { margin-top: 10px; }
+.small { font-size: .8rem; margin: 10px 0 0; }
 td.pick, th.pick { width: 28px; padding-right: 0; }
 td.pick input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 td.empty { text-align: center; padding: 30px; color: var(--text-dim); }

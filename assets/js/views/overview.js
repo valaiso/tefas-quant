@@ -87,12 +87,14 @@ export function render(app, _route, store) {
 
   <div class="grid grid-2">
     <section class="card">
-      <div class="card-head"><h2>Listeden çıkarılan fonlar</h2><span class="sub">Son ${meta.config.stalePriceDays} günde fiyatı yayımlanmayanlar</span></div>
-      ${meta.excluded.length ? `<div class="table-wrap"><table class="compact">
-        <thead><tr><th>Fon</th><th>Son fiyat</th><th>Neden</th></tr></thead>
-        <tbody>${meta.excluded.map((x) => `<tr><td class="fund-cell"><b class="mono">${esc(x.code)}</b><span class="name">${esc(x.name)}</span></td>
-          <td>${dateTR(x.lastDate)}</td><td><span class="pill down">${esc(x.reason)}</span></td></tr>`).join("")}</tbody>
-      </table></div>` : `<p class="dim">Fiyatı duran fon yok.</p>`}
+      <div class="card-head"><h2>Listeden çıkarılan fonlar</h2><span class="sub">${num(meta.excluded.length, 0)} fon · işleme kapalı, fiyatı duran ya da alım-satımı donmuş</span></div>
+      ${meta.excluded.length ? `<div class="table-wrap"><table class="compact excluded">
+        <thead><tr><th>Fon</th><th>Son fiyat</th><th class="left">Neden</th></tr></thead>
+        <tbody>${meta.excluded.map((x, i) => `<tr ${i >= 12 ? 'class="more" hidden' : ""}><td class="fund-cell"><b class="mono">${esc(x.code)}</b><span class="name">${esc(x.name)}</span></td>
+          <td>${dateTR(x.lastDate)}</td><td class="left"><span class="pill down">${esc(x.reason)}</span></td></tr>`).join("")}</tbody>
+      </table></div>
+      ${meta.excluded.length > 12 ? `<button class="btn btn-sm show-more" type="button">Tümünü göster (${meta.excluded.length})</button>` : ""}
+      ${meta.privateSkipped ? `<p class="dim small">Ayrıca halka açık olmayan ${num(meta.privateSkipped, 0)} özel fon sıralamaya alınmaz.</p>` : ""}` : `<p class="dim">Fiyatı duran fon yok.</p>`}
     </section>
     <section class="card">
       <div class="card-head"><h2>Getiri anomalisi cezası alanlar</h2><span class="sub">1Y getirisi kategorisinin çok üstünde</span></div>
@@ -107,4 +109,8 @@ export function render(app, _route, store) {
 
   bindRows(app);
   bindQualified(app, () => render(app, _route, store));
+  app.querySelector(".show-more")?.addEventListener("click", (e) => {
+    app.querySelectorAll("table.excluded tr.more").forEach((tr) => (tr.hidden = false));
+    e.target.remove();
+  });
 }

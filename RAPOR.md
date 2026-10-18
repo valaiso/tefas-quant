@@ -400,3 +400,26 @@ için testten düştü (TP2/TLY gibi kayıplar ölçülmedi). Akademik bulgularl
 (Bollen & Busse 2005), ücretler en tutarlı öngörücü (Morningstar), akışlar geçmiş getiriyi kovalıyor (Frazzini & Lamont 2008),
 düşük maksimum düşüş daha iyi sonraki getiriyle ilişkili (Riley & Yan 2022), pürüzsüz getiri illikiditeye işaret ediyor
 (Getmansky, Lo & Makarov 2004). `scores` tablosu her gün birikiyor; birkaç ay sonra v2 gerçek ileri test ile yeniden doğrulanmalı.
+
+---
+
+## 12. Veri doğrulama denetimi (18.10.2026)
+
+**Ham veri:** 1.260.132 fiyat satırı, 2.068 fon, 765 işlem günü (29.09.2023 – 16.10.2026). Fiyat, pay adedi, yatırımcı ve
+büyüklük alanlarında boş ya da sıfır değer yok. Büyüklük = fiyat × pay tutarlılığı son günde 1.989/1.989 fonda ±%5 içinde.
+
+**Skor girdileri:** Hiçbir girdi sabit bir değere düşmüyor. Boş oranı en fazla %0,6 (yönetim ücreti; kategori medyanıyla
+dolduruluyor). Hiçbir kategoride bir girdi tüm fonlarda aynı değil, yani yüzdelikler gerçekten ayrım yapıyor. 1Y getirisi olmayan
+genç fonlarda (%8) 6A getiri kullanılıyor; ekranda 1Y boş gösteriliyor.
+
+**Bulunan ve düzeltilen sorunlar:**
+
+| Sorun | Etki | Düzeltme |
+|---|---|---|
+| Pay bölünmesi: TI2, TI3, TI4, TI6 (÷10.000), GA1 (÷1.000), PTE (×100) | −%99,99 sahte getiri; 3Y getiri, CAGR ve beta bozuk | Bölünme öncesi fiyat ve pay geçmişi oranlanıyor (TI2 3Y: −%99,99 → +%94,7) |
+| 493 özel fon (1–14 yatırımcı) | Halka açık değil, kategori yüzdeliklerini bozuyordu | Sıralamaya alınmıyor |
+| İşleme kapalı ve çöken fonlar (Pardus, A1 Capital, Bulls, Hedef, MT, Atlas; Ekim 2026'da gerçek %90–100 değer kaybı) | Fiyat yayımlandığı için skorlanıyordu | İşleme kapalı + son 3 ayda >%50 kayıp ya da büyüklük >%90 erime → listede nedeniyle |
+| FVT işlem bayrağı gecikmeli (71 fon "işlemde" görünüyor ama pay adedi ve yatırımcı sayısı 10 gündür donmuş) | Alınamayan fonlar sıralamada | Pay + yatırımcı 10 işlem günü değişmiyorsa (öncesinde değişiyorduysa) sıralamaya alınmıyor |
+| 11 fonda yönetim ücreti 0 | Veri boşluğu "en ucuz" sayılıyordu | 0 ücret eksik kabul, kategori medyanı |
+
+**Sonuç:** 1.194 fon skorlanıyor, 362 fon nedeniyle listede, 493 özel fon kapsam dışı.

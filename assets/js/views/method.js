@@ -13,8 +13,10 @@ export function render(app, _route, store) {
       (${dateTR(store.meta.firstDataDate)} – ${dateTR(store.meta.lastDataDate)}) tüm yatırım fonları yeniden puanlanır.
       Fonlar yalnızca <b>kendi kategorisindeki</b> fonlarla kıyaslanır; bir para piyasası fonu hisse fonuyla yarışmaz.</p>
     <ol class="steps">
-      <li><b>Evren:</b> Son ${c.stalePriceDays} günde fiyatı yayımlanmayan (askıya alınmış, tasfiyedeki, kapanmış) fonlar ve
-        60 işlem gününden kısa geçmişi olanlar dışarıda kalır.</li>
+      <li><b>Evren:</b> Sıralamaya alınmayanlar: halka açık olmayan <b>özel fonlar</b>; son ${c.stalePriceDays} günde fiyatı yayımlanmayanlar;
+        işlemleri durdurulup son 3 ayda %50'den fazla değer kaybeden ya da büyüklüğü %90'dan fazla eriyenler; pay adedi ve yatırımcı sayısı
+        10 işlem günüdür hiç değişmeyenler (alım-satım fiilen durmuş); 60 işlem gününden kısa geçmişi olanlar.
+        Pay bölünmeleri (ör. İş Portföy TI2, fiyat 10.000'e bölündü) geçmiş fiyatlar oranlanarak düzeltilir.</li>
       <li><b>Beş bileşen</b> 0–100 arası puanlanır ve ağırlıklandırılır.</li>
       <li><b>Cezalar ve ayarlar</b> uygulanır.</li>
       <li><b>Not:</b> ${c.ratingMode === "relative"

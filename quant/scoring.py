@@ -36,7 +36,37 @@ def load_panel(conn: sqlite3.Connection) -> dict[str, pd.DataFrame]:
         col: df.pivot(index="date", columns="code", values=col).sort_index()
         for col in ("price", "shares", "investors", "size")
     }
+    panel["splits"] = adjust_splits(panel)
     return panel
+
+
+def adjust_splits(panel: dict[str, pd.DataFrame]) -> list[dict]:
+    """Pay bölünmesi / birleşmesini geriye dönük düzeltir (yerinde).
+
+    Bölünmede fon büyüklüğü değişmez; fiyat 10'un bir kuvvetine bölünür, pay
+    adedi aynı oranda artar (ör. İş Portföy TI2: 1003,6 -> 0,102, pay ×10.000).
+    Düzeltilmezse -%99,99 sahte getiri oluşur. Gerçek çöküşte (ör. Pardus,
+    Ekim 2026) pay adedi değişmez, büyüklük de çöker: o durum düzeltilmez.
+    """
+    price, shares, size = panel["price"], panel["shares"], panel["size"]
+    ratio = price / price.shift(1)
+    candidates = ratio.stack()
+    candidates = candidates[(candidates < 0.2) | (candidates > 5)]
+    splits = []
+    for (day, code), r in candidates.items():
+        i = price.index.get_loc(day)
+        k = 10 ** round(np.log10(1 / r))           # bölünme oranı: 10, 100, 1000, ...
+        if abs(np.log10(1 / r) - np.log10(k)) > 0.05:
+            continue
+        sh_ratio = shares[code].iloc[i] / shares[code].iloc[i - 1]
+        size_ratio = size[code].iloc[i] / size[code].iloc[i - 1]
+        if not (0.7 < sh_ratio / k < 1.3 and 0.8 < size_ratio < 1.25):
+            continue
+        before = price.index[:i]
+        price.loc[before, code] = price.loc[before, code] / k
+        shares.loc[before, code] = shares.loc[before, code] * k
+        splits.append({"code": code, "date": day.strftime("%Y-%m-%d"), "factor": k})
+    return splits
 
 
 # TEFAS'ın "Serbest" şemsiyesi para piyasasından hisseye her stratejiyi tek
@@ -66,7 +96,11 @@ def load_funds(conn: sqlite3.Connection) -> pd.DataFrame:
         "SELECT code, name, category, category_src, fee, stopaj, trading_active, is_serbest FROM funds",
         conn,
     ).set_index("code")
+    # FVT'de 0 görünen ücret çoğunlukla eksik veri; "en ucuz" sayılmasın
+    funds.loc[funds["fee"] <= 0, "fee"] = np.nan
     funds["category"] = funds["category"].fillna(funds["name"].map(categorize))
+    # Özel fon: tek / birkaç yatırımcıya kurulmuş, halka açık değil
+    funds["private"] = funds["name"].fillna("").str.upper().str.contains("ÖZEL FON", regex=False)
     is_serbest_cat = funds["category"] == "Serbest"
     funds["category"] = [refine_category(c, n) for c, n in zip(funds["category"], funds["name"])]
     name_upper = funds["name"].fillna("").str.upper().str.replace("ÖZEL SEKTÖR", "", regex=False)
@@ -96,16 +130,46 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame) -> tupl
 
     # ---- dışlananlar
     stale_cutoff = universe_last - pd.Timedelta(days=config.STALE_PRICE_DAYS)
+    # Son 3 ayda tepeden bugüne kayıp (bölünmeler düzeltildikten sonra)
+    recent = price.iloc[-63:].ffill()
+    recent_loss = 1 - recent.iloc[-1] / recent.max()
+    size_recent = panel["size"].iloc[-63:].ffill()
+    size_loss = 1 - size_recent.iloc[-1] / size_recent.max()
+    # Pay adedi ve yatırımcı sayısı son 10 işlem gününde hiç değişmemiş ama önceki
+    # 50 günde hareketliyse alım-satım fiilen durmuştur. FVT'nin işlem bayrağı
+    # gecikebildiği için (Ekim 2026'da Pardus/Hedef/Atlas/Bulls fonları "işlemde"
+    # görünüyordu) bu kural bayraktan bağımsız uygulanır.
+    sh = panel["shares"].ffill()
+    inv_all = panel["investors"].ffill()
+    frozen = ((sh.iloc[-10:].nunique() <= 1) & (sh.iloc[-60:-10].nunique() > 1)
+              & (inv_all.iloc[-10:].nunique() <= 1))
     excluded = []
     keep = []
+    private_skipped = 0
     for code in price.columns:
+        known = code in funds.index
+        name = funds.at[code, "name"] if known else code
+        halted = known and funds.at[code, "trading_active"] == 0
+        if known and funds.at[code, "private"]:
+            private_skipped += 1
+            continue
         if last_seen[code] < stale_cutoff:
-            halted = funds.at[code, "trading_active"] == 0 if code in funds.index else False
             excluded.append({
-                "code": code,
-                "name": funds.at[code, "name"] if code in funds.index else code,
-                "lastDate": last_seen[code].strftime("%Y-%m-%d"),
+                "code": code, "name": name, "lastDate": last_seen[code].strftime("%Y-%m-%d"),
                 "reason": "TEFAS işlemi durdurulmuş" if halted else "Fiyat yayımlanmıyor",
+            })
+        elif (halted and (recent_loss.get(code, 0) > 0.5 or size_loss.get(code, 0) > 0.9)) or frozen.get(code, False):
+            # İşleme kapalı fonlar (ör. SPK kararıyla durdurulan Pardus/A1 Capital, Ekim 2026):
+            # alınıp satılamadığı için sıralamaya alınmaz ama nedeniyle listede görünür.
+            if halted and recent_loss.get(code, 0) > 0.5:
+                reason = f"İşlemleri durdurulmuş, son 3 ayda %{recent_loss[code] * 100:.0f} değer kaybı"
+            elif halted and size_loss.get(code, 0) > 0.9:
+                reason = f"İşlemleri durdurulmuş, büyüklük son 3 ayda %{size_loss[code] * 100:.0f} eridi"
+            else:
+                reason = "Pay adedi ve yatırımcı sayısı 10 gündür değişmiyor (alım-satım durmuş olabilir)"
+            excluded.append({
+                "code": code, "name": name, "lastDate": last_seen[code].strftime("%Y-%m-%d"),
+                "reason": reason,
             })
         elif n_obs[code] >= config.MIN_HISTORY_DAYS:
             keep.append(code)
@@ -117,6 +181,7 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame) -> tupl
 
     m = pd.DataFrame(index=keep)
     m["category"] = category
+    m.attrs["private_skipped"] = private_skipped
 
     # ---- getiriler
     # Ekranda gösterilen: yeterli geçmiş yoksa boş
@@ -351,13 +416,17 @@ def run(conn: sqlite3.Connection) -> dict:
         [(as_of, c, float(r.score), r.signal, r.category) for c, r in scored.iterrows()],
     )
     conn.commit()
-    print(f"[skor] {as_of}: {len(scored)} fon skorlandı, {len(excluded)} dışlandı, rf=%{rf*100:.1f}", flush=True)
+    print(f"[skor] {as_of}: {len(scored)} fon skorlandı, {len(excluded)} dışlandı,"
+          f" {metrics.attrs['private_skipped']} özel fon alınmadı, {len(panel['splits'])} pay bölünmesi düzeltildi,"
+          f" rf=%{rf*100:.1f}", flush=True)
     return {
         "as_of": as_of,
         "first_date": panel["price"].index[0].strftime("%Y-%m-%d"),
         "scored": scored,
         "excluded": excluded,
         "risk_free": rf,
+        "private_skipped": metrics.attrs["private_skipped"],
+        "splits": panel["splits"],
         "panel": panel,
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }

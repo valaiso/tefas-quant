@@ -9,7 +9,7 @@ const PERIODS = [["6a", "6A", 6], ["1y", "1Y", 12], ["all", "Tümü", null]];
 const ORDER = ["guvenli", "dengeli", "atak"];
 const TONE = { guvenli: "safe", dengeli: "mid", atak: "risk" };
 const BLURB = {
-  guvenli: "Para piyasası ve kısa vadeli borçlanma ağırlıklı; sepetin en az %60'ı banka kökenli yöneticilerde. Amaç PPF'ye yakın getiriyi en düşük dalgalanma ve yönetici riskiyle almak.",
+  guvenli: "Para piyasası ve kısa vadeli borçlanma ağırlıklı; sepetin en az %60'ı köklü kurucuların (devlet / büyük özel banka) fonlarında. Amaç PPF'ye yakın getiriyi en düşük dalgalanma ve yönetici riskiyle almak.",
   dengeli: "Sepetin %40'ı Güvenli sepetin fonları (çapa), kalanı orta oynaklıklı, son 3 yılda vergi sonrası enflasyonu yenmiş fonlar.",
   atak: "Hisse, altın, teknoloji gibi oynak fonlar; sıçramaya dayalı ve aşırı yükselmiş fonlar alınmaz. Kısa vadede değer kaybı yaşanabilir.",
 };
@@ -58,7 +58,7 @@ export async function render(app, _route, store) {
     <p>Üç risk profilinde, son <b>1-2-3 yılda vergi sonrası istikrarlı</b> getiri vermiş, TEFAS Quant notu ve risk bayrakları temiz,
       getirisi tek bir sıçramaya dayanmayan ${R.minFunds}–${R.maxFunds} fonluk ağırlıklı sepetler. Sepetler <b>2 ayda bir</b>
       (çift ayların son işlem günü) kurulur ve dönem boyunca sabit kalır; iyi kalan fonlar yeni dönemde de sepette kalabilir, ağırlıklar yeniden hesaplanır.
-      Banka kökenli portföy şirketlerine öncelik verilir.</p>
+      Köklü kurucuların (devlet bankaları ve büyük özel bankaların portföy şirketleri) fonlarına öncelik verilir.</p>
     <p class="dim">Son kurulum: ${dateTR(m.profiles[state.profile].formed)} · Sonraki yenileme: <b>${dateTR(m.nextRebalance)}</b> · Veri: ${dateTR(m.asOf)}</p>
   </section>
 
@@ -76,15 +76,15 @@ export async function render(app, _route, store) {
       <li><b>Sıçrama filtresi:</b> 2 yıllık getirinin %${num(R.spikeShare * 100, 0)}'ından fazlası tek aydan geliyorsa, son 3 ay kendi geçmişine göre aşırıysa
         (z &gt; ${num(R.spikeZ, 1)}), son 1 yılda tek günde ±%${num(R.spikeDay * 100, 0)}'ten büyük hareket varsa ya da 1 yıllık getiri profil sınırını aşıyorsa fon alınmaz.</li>
       <li><b>Puan:</b> vergi sonrası getiri (1Y/2Y/3Y), istikrar (12 aylık dönemlerde PPF'yi geçme oranı), Sharpe (2 yıl), azami düşüş, TEFAS Quant skoru,
-        yatırımcı sayısı ve yönetim ücreti; profil ağırlıkları aşağıda. Banka kökenli portföy şirketine +${num(R.bankBonus, 0)}, önceki dönem sepette olan fona
+        yatırımcı sayısı ve yönetim ücreti; profil ağırlıkları aşağıda. Köklü kurucuya +${num(R.bankBonus, 0)}, önceki dönem sepette olan fona
         +${num(R.stayBonus, 0)} süreklilik puanı.</li>
       <li><b>Çeşitlendirme:</b> aynı portföy şirketinden tek fon; kategori başına sınır; seçilmiş bir fonla haftalık getiri korelasyonu &gt; ${num(R.maxCorr, 2)}
         olan fon alınmaz (Güvenli hariç: düşük oynaklıklı fonlar faizle birlikte hareket eder).</li>
-      <li><b>Yönetici riski:</b> Güvenli sepetin en az %60'ı, Dengeli ve Atak'ın kendi fonlarının en az %50'si banka kökenli yöneticilerde; banka dışı tek fon
+      <li><b>Yönetici riski:</b> Güvenli sepetin en az %60'ı, Dengeli ve Atak'ın kendi fonlarının en az %50'si köklü kurucularda; diğer kurucuların tek fonu
         Güvenli ve Atak'ta en fazla %20, Dengeli'de %15. <span class="dim">Neden: Ekim 2026'da Pardus Portföy'ün para piyasası fonu dahil fonları
         tek seferde ~%99 değer kaybetti; kuruluş günü fon temiz görünüyordu.</span></li>
       <li><b>Ağırlık:</b> puan² / oynaklık ile orantılı; her fon %${num(R.minW * 100, 0)}–%${num(R.maxW * 100, 0)}, 5'in katlarına yuvarlanır.</li>
-      <li><b>Banka kökenli şirketler:</b> <span class="dim">${R.banks.map(esc).join(", ")}</span></li>
+      <li><b>Köklü kurucular:</b> <span class="dim">${R.banks.map(esc).join(", ")}</span></li>
     </ol>
   </section>`;
 
@@ -100,7 +100,7 @@ export async function render(app, _route, store) {
     const warnN = basket.filter((b) => b.warn).length;
     const rows = basket.map((b, i) => `<tr>
         <td class="left"><span class="mdl-swatch" style="background:${SLICE[i % SLICE.length]}"></span>${codeChip(b.c)}
-          ${b.bank ? `<span class="bank-tag" title="${esc(b.fd || "")}: banka kökenli portföy şirketi">BANKA</span>` : ""}
+          ${b.bank ? `<span class="bank-tag" title="${esc(b.fd || "")}: köklü kurucu (devlet / büyük özel banka)">KÖKLÜ</span>` : ""}
           ${b.cash ? `<span class="leg-tag" title="Güvenli sepetten gelen çapa fonu">ÇAPA</span>` : ""}
           <span class="fund-name">${esc(nameOf(store, b))}</span></td>
         <td class="left dim">${esc(b.k || "—")}</td>

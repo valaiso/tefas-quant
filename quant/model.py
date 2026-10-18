@@ -23,13 +23,13 @@ Adımlar (her profil için)
    vergi (stopaj) sonrası getiri profilin kıyas şartını sağlamalı.
 4. Puan (havuz içinde yüzdelik): vergi sonrası getiri (1Y/2Y/3Y), istikrar
    (12 aylık dönemlerde PPF'yi geçme oranı), Sharpe, düşüş, TEFAS Quant skoru,
-   yatırımcı sayısı ve yönetim ücreti; banka kökenli portföy şirketine +2,
+   yatırımcı sayısı ve yönetim ücreti; köklü kurucuya (devlet / büyük özel banka) +2,
    önceki sepette olan fona +3 süreklilik puanı.
 5. Seçim: puan sırasıyla; kategori başına sınır, aynı portföy şirketinden tek
    fon, seçilmiş fonla haftalık korelasyonu > 0,85 olan fon alınmaz; en az 3,
    en fazla 10 fon (tavan).
 6. Ağırlık ∝ puan² / oynaklık^v; her fon %5-%35, 5'in katlarına yuvarlanır.
-   Banka kökenli olmayan fon Güvenli'de en fazla %20, Dengeli'de %15 alır
+   Köklü kurucu dışındaki fon Güvenli'de en fazla %20, Dengeli'de %15 alır
    (tek bir yöneticinin çöküşü sepeti batırmasın; ör. Pardus, Ekim 2026).
 """
 from __future__ import annotations
@@ -56,12 +56,11 @@ PPF_TOLERANCE = 0.02     # Güvenli: vergi sonrası yıllık getiri PPF'nin en f
 RET_WINDOWS = {"1y": (252, 0.3), "2y": (504, 0.4), "3y": (756, 0.3)}
 CASH_CATEGORY = "Para Piyasası"
 
-# Banka (mevduat / katılım) kökenli portföy yönetim şirketleri
+# Köklü kurucular: devlet bankaları ve büyük özel bankaların portföy şirketleri
 BANK_FOUNDERS = {
-    "İŞ PORTFÖY", "AK PORTFÖY", "GARANTİ PORTFÖY", "YAPI KREDİ PORTFÖY", "ZİRAAT PORTFÖY",
-    "DENİZ PORTFÖY", "TEB PORTFÖY", "QNB PORTFÖY", "HSBC PORTFÖY", "KUVEYT TÜRK PORTFÖY",
-    "FİBA PORTFÖY", "ALBARAKA PORTFÖY", "VAKIF PORTFÖY", "HALK PORTFÖY", "VAKIF KATILIM PORTFÖY",
-    "EMLAK KATILIM PORTFÖY", "ZİRAAT KATILIM PORTFÖY", "ING PORTFÖY", "ŞEKER PORTFÖY",
+    "ZİRAAT PORTFÖY", "VAKIF PORTFÖY", "HALK PORTFÖY",            # devlet bankası kökenli
+    "İŞ PORTFÖY", "AK PORTFÖY", "GARANTİ PORTFÖY", "YAPI KREDİ PORTFÖY",
+    "QNB PORTFÖY", "KUVEYT TÜRK PORTFÖY",                           # büyük özel bankalar
 }
 
 # Profil kuralları. beat: vergi sonrası getirinin geçmesi gereken kıyas
@@ -282,7 +281,7 @@ def _gate(m: pd.DataFrame, profile: dict) -> tuple[pd.Series, pd.Series]:
 
 
 def _cap(bank: bool, profile: dict) -> float:
-    """Banka kökenli olmayan fonun ağırlık sınırı (yönetici / operasyon riski)."""
+    """Köklü kurucu dışındaki fonun ağırlık sınırı (yönetici / operasyon riski)."""
     return MAX_W if bank else profile.get("nonbank_max", MAX_W)
 
 
@@ -341,7 +340,7 @@ def pick(m: pd.DataFrame, wk: pd.DataFrame | None, profile: dict, prev: list[str
     bank_min = profile.get("bank_min", 0.0)
     legs = {}  # fon -> ayağın sepetteki payı içindeki grup ("bank" / "all")
     if bank_min and len(pool) and pool["bank"].any():
-        # Güvenli: sepetin en az bank_min'i banka kökenli fonlarda (karşı taraf / yönetici riski)
+        # Güvenli: sepetin en az bank_min'i köklü kurucuların fonlarında (karşı taraf / yönetici riski)
         b_pool = pool[pool["bank"]]
         risky_b = _choose(b_pool, wk, profile, MAX_FUNDS - len(safe_funds), taken=taken, founders=founders,
                           cap_room=bank_min * (1 - share), against=list(taken))

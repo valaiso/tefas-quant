@@ -62,7 +62,7 @@ export const COMPONENT_LABELS = {
   portfolio: "Portföy Kalitesi",
 };
 
-export const RETURN_LABELS = { "1g": "1 Gün", "1a": "1 Ay", "2a": "2 Ay", "3a": "3 Ay", "6a": "6 Ay", "1y": "1 Yıl", "3y": "3 Yıl" };
+export const RETURN_LABELS = { "1g": "1 Gün", "1a": "1 Ay", "2a": "2 Ay", "3a": "3 Ay", "6a": "6 Ay", "1y": "1 Yıl", "3y": "3 Yıl", "5y": "5 Yıl" };
 
 export function debounce(fn, ms = 200) {
   let t;

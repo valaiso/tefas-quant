@@ -299,7 +299,7 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame,
     days_since = (universe_last - last_seen[keep]).dt.days
     span_days = price.index.get_indexer(last_seen[keep]) - price.index.get_indexer(first_seen[keep]) + 1
     density = (n_obs[keep] / pd.Series(span_days, index=keep)).clip(upper=1) * 100
-    age = (n_obs[keep] / (config.HISTORY_YEARS * TRADING_DAYS) * 100).clip(upper=100)
+    age = (n_obs[keep] / (config.CONFIDENCE_FULL_YEARS * TRADING_DAYS) * 100).clip(upper=100)
     recency = np.where(days_since <= 3, 100, np.maximum(100 - days_since * 5, 10))
     maturity = pd.cut(n_obs[keep], [-1, 20, 62, 125, 251, 10**6], labels=[10, 25, 50, 75, 100]).astype(float)
     m["confidence"] = (age * 0.35 + density * 0.25 + recency * 0.20 + maturity * 0.20).round(1)

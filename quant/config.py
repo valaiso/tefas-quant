@@ -2,7 +2,9 @@
 
 # ------------------------------------------------------------------ veri
 # Saklanan geçmiş (yıl). Tüm metrikler ve skorlar bu pencereden hesaplanır.
-HISTORY_YEARS = 3
+HISTORY_YEARS = 5
+# Veri güveninde "geçmiş uzunluğu" bu kadar yılda tam puan alır (saklama süresinden bağımsız)
+CONFIDENCE_FULL_YEARS = 3
 # Budama sırasında pencerenin başına eklenen tampon (3Y getirisi için 756.
 # işlem gününden önceki fiyat da gerekir).
 RETENTION_BUFFER_DAYS = 20
@@ -45,7 +47,7 @@ PERFORMANCE_WINDOWS = {
     "1y": (252, 0.35),
 }
 # Ekranda gösterilen getiri dönemleri (skora girmeyenler dahil)
-DISPLAY_WINDOWS = {"1a": 21, "2a": 42, "3a": 63, "6a": 126, "1y": 252, "3y": 756}
+DISPLAY_WINDOWS = {"1a": 21, "2a": 42, "3a": 63, "6a": 126, "1y": 252, "3y": 756, "5y": 1260}
 
 # Risk (son 252 işlem günü): metrik -> (ağırlık, yüksek değer iyi mi)
 RISK_METRICS = {

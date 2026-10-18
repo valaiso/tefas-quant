@@ -21,24 +21,46 @@ STALE_PRICE_DAYS = 7
 # Göreli notlama ve anomali için kategoride gereken en az fon.
 MIN_CATEGORY_SIZE = 5
 
-# ------------------------------------------------------------- skor
+# ------------------------------------------------------------- skor (model v2)
+# v2, 3 yıllık TEFAS verisinde point-in-time test edildi (2024-10 – 2026-07,
+# 22 ay, kategori içi rank IC, 3 aylık ileri getiri, T+2 giriş): v1 0,243 ->
+# v2 0,273. Bütün alt metrikler kategori içi yüzdeliğe çevrilir.
+MODEL_VERSION = "v2"
+
 # Nihai kalite skoru ağırlıkları (toplam 1.0)
 COMPONENT_WEIGHTS = {
-    "performance": 0.35,
-    "risk": 0.25,
-    "investor": 0.20,
-    "cost": 0.10,
-    "portfolio": 0.10,
+    "performance": 0.40,
+    "risk": 0.30,
+    "cost": 0.15,
+    "investor": 0.10,
+    "portfolio": 0.05,
 }
 
-# Performans: işlem günü penceresi -> ağırlık (kategori içi yüzdelik)
+# Performans: işlem günü penceresi -> ağırlık. Testte 6A ve 1Y getiri en güçlü
+# öngörücüydü; 2A ve 3Y ek bilgi katmadı (3Y yalnızca gösterilir).
 PERFORMANCE_WINDOWS = {
     "1a": (21, 0.10),
-    "2a": (42, 0.15),
     "3a": (63, 0.20),
-    "6a": (126, 0.25),
-    "1y": (252, 0.20),
-    "3y": (756, 0.10),
+    "6a": (126, 0.35),
+    "1y": (252, 0.35),
+}
+# Ekranda gösterilen getiri dönemleri (skora girmeyenler dahil)
+DISPLAY_WINDOWS = {"1a": 21, "2a": 42, "3a": 63, "6a": 126, "1y": 252, "3y": 756}
+
+# Risk (son 252 işlem günü): metrik -> (ağırlık, yüksek değer iyi mi)
+RISK_METRICS = {
+    "sharpe": (0.40, True),
+    "mdd": (0.30, False),      # maksimum düşüş: düşük iyi
+    "sortino": (0.20, True),
+    "smoothness": (0.10, False),  # günlük getiri otokorelasyonu: pürüzsüz fiyat şüpheli
+}
+RISK_WINDOW_DAYS = 252
+
+# Yatırımcı & akış: testte zayıf öngörücü (akış geçmiş getiriyi kovalıyor),
+# bu yüzden düşük ağırlık; büyük çıkışlar ayrıca ceza olarak işlenir.
+INVESTOR_METRICS = {
+    "aum_growth_1m": 0.50,   # 1 aylık büyüklük değişimi
+    "flow_3m_ratio": 0.50,   # 3 aylık net akış / büyüklük
 }
 
 # Risksiz faiz: None ise para piyasası fonlarının günlük medyan getirisi

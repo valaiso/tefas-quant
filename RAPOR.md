@@ -359,3 +359,44 @@ python -m http.server 8000 -d dist
 
 **Yayına almak için tek seferlik ayar:** GitHub → Settings → Pages → Source: **GitHub Actions**.
 İlk çalıştırmada cache boş olduğu için 3 yıllık veri baştan çekilir (~10–15 dk).
+
+---
+
+## 11. Skor modeli v2 (18.10.2026)
+
+Ağırlıklar ve alt metrikler, 3 yıllık TEFAS verisinde o günün verisiyle (point-in-time) yapılan testlere göre yeniden ayarlandı.
+Test ayarları: Ekim 2024 – Temmuz 2026 arası 22 ay; her ay kategori içi sıralama, 3 aylık ileri getiri, T+2 giriş, ≥10 fonluk kategoriler.
+
+| Metrik (kategori içi) | Rank IC | t | Pozitif ay |
+|---|---|---|---|
+| 1Y getiri | 0,255 | 10,2 | %95 |
+| 6A getiri | 0,254 | 9,2 | %95 |
+| Sharpe (1Y) | 0,229 | 9,3 | %100 |
+| 1A getiri | 0,196 | 6,7 | %91 |
+| Sortino (1Y) | 0,182 | 6,7 | %86 |
+| 3A getiri | 0,171 | 5,2 | %86 |
+| Maks. düşüş (yüksek = kötü) | −0,137 | −4,2 | – |
+| Pürüzsüzlük (otokorelasyon) | −0,081 | −2,6 | – |
+| Düşük yönetim ücreti | 0,068 | 5,5 | %91 |
+| 1A büyüklük değişimi | 0,050 | 2,5 | %73 |
+| 3A akış / büyüklük | 0,028 | 2,0 | %68 |
+| 1A yatırımcı değişimi | 0,013 | 0,6 | %50 |
+| Yatırımcı sayısı | −0,029 | −2,2 | – |
+
+| Model | IC (tüm dönem) | IC 1. yarı | IC 2. yarı | Üst %20 fazla getiri (3A) |
+|---|---|---|---|---|
+| v1 (önceki) | 0,243 | 0,233 | 0,254 | +%1,20 |
+| Taslak öneri (Perf 40 / Risk 15 / Akış 25 / Maliyet 10 / Portföy 10) | 0,237 | 0,233 | 0,240 | +%1,35 |
+| **v2** | **0,273** | **0,283** | **0,262** | **+%1,51** |
+
+**v2:** Performans %40 (1A 10, 3A 20, 6A 35, 1Y 35) · Risk %30 (Sharpe 40, maks. düşüş 30, Sortino 20,
+pürüzsüzlük 10; son 252 gün) · Maliyet %15 (yönetim ücreti) · Yatırımcı & akış %10 (1A büyüklük değişimi 50,
+3A akış 50) · Portföy %5 (büyüklük). Tüm alt metrikler kategori içi yüzdelik. Cezalar (az yatırımcı, nakit çıkışı,
+getiri anomalisi), veri güveni ayarı ve göreli notlama aynen korundu.
+
+**Sınırlar:** Test dönemi kısa (22 ay, örtüşen 3 aylık pencereler). v2 faktör sonuçları görüldükten sonra
+kurulduğu için kısmen örneklem içi; ikinci yarıdaki üstünlüğü küçük. İşlemi duran fonlar ileri fiyatı olmadığı
+için testten düştü (TP2/TLY gibi kayıplar ölçülmedi). Akademik bulgularla uyumlu: getiri sürekliliği kısa vadeli
+(Bollen & Busse 2005), ücretler en tutarlı öngörücü (Morningstar), akışlar geçmiş getiriyi kovalıyor (Frazzini & Lamont 2008),
+düşük maksimum düşüş daha iyi sonraki getiriyle ilişkili (Riley & Yan 2022), pürüzsüz getiri illikiditeye işaret ediyor
+(Getmansky, Lo & Makarov 2004). `scores` tablosu her gün birikiyor; birkaç ay sonra v2 gerçek ileri test ile yeniden doğrulanmalı.

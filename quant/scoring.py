@@ -118,12 +118,14 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame) -> tupl
     m = pd.DataFrame(index=keep)
     m["category"] = category
 
-    # ---- getiriler (fallback zinciri: eksik uzun dönem bir kısa dönemle doldurulur)
-    windows = config.PERFORMANCE_WINDOWS
+    # ---- getiriler
+    # Ekranda gösterilen: yeterli geçmiş yoksa boş
+    for label, n in config.DISPLAY_WINDOWS.items():
+        m[f"raw_r_{label}"] = _trailing_return(px, n)
+    # Skorda kullanılan: eksik uzun dönem bir kısa dönemle doldurulur
     prev = None
-    for label, (n, _w) in windows.items():
+    for label, (n, _w) in config.PERFORMANCE_WINDOWS.items():
         r = _trailing_return(px, n)
-        m[f"raw_r_{label}"] = r  # ekranda gösterilen: yeterli geçmiş yoksa boş
         if prev is not None:
             r = r.fillna(m[prev])
         m[f"r_{label}"] = r
@@ -140,20 +142,25 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame) -> tupl
     rf_daily = rf_daily.reindex(rets.index).ffill().bfill()
     rf_current = float(rf_daily.iloc[-TRADING_DAYS:].mean() * TRADING_DAYS)
 
-    # ---- risk / getiri
-    excess = rets.sub(rf_daily, axis=0)
-    vol = rets.std() * np.sqrt(TRADING_DAYS)
+    # ---- risk: son RISK_WINDOW_DAYS işlem günü (v2 testindeki pencere)
+    w = config.RISK_WINDOW_DAYS
+    r_win = rets.iloc[-w:]
+    excess = r_win.sub(rf_daily.iloc[-w:], axis=0)
+    vol = r_win.std() * np.sqrt(TRADING_DAYS)
     m["volatility"] = vol
     m["sharpe"] = (excess.mean() * TRADING_DAYS) / vol.replace(0, np.nan)
     downside = excess.where(excess < 0).std() * np.sqrt(TRADING_DAYS)
     m["sortino"] = (excess.mean() * TRADING_DAYS) / downside.replace(0, np.nan)
-    m["mdd"] = 1 - (px / px.cummax()).min()
+    px_win = px.iloc[-(w + 1):]
+    m["mdd"] = 1 - (px_win / px_win.cummax()).min()
+    # Pürüzsüzlük: günlük getirilerin 1. derece otokorelasyonu (Getmansky-Lo-Makarov).
+    # Değerlemesi zor / likit olmayan varlık taşıyan fonlarda yüksek çıkar.
+    m["smoothness"] = r_win.apply(lambda s: s.autocorr(1) if s.notna().sum() > 30 else np.nan)
 
     obs = rets.notna().sum()
     first_px = px.apply(lambda s: s.dropna().iloc[0])
-    cagr = (px.iloc[-1] / first_px) ** (TRADING_DAYS / obs.clip(lower=1)) - 1
-    m["cagr"] = cagr
-    m["calmar"] = (cagr / m["mdd"].replace(0, np.nan)).clip(-10, 10)
+    m["cagr"] = (px.iloc[-1] / first_px) ** (TRADING_DAYS / obs.clip(lower=1)) - 1
+    m["calmar"] = (m["r_1y"] / 100 / m["mdd"].replace(0, np.nan)).clip(-10, 10)
 
     # ---- kategori benchmark'ı: eşit ağırlıklı günlük getiri
     beta, alpha, info = {}, {}, {}
@@ -179,12 +186,14 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame) -> tupl
     m["investors"] = inv.iloc[-1]
     m["aum"] = size.iloc[-1]
     m["investor_growth_1m"] = (inv.iloc[-1] / inv.iloc[-22] - 1) * 100 if len(inv) > 22 else np.nan
+    m["aum_growth_1m"] = (size.iloc[-1] / size.iloc[-22] - 1) * 100 if len(size) > 22 else np.nan
     flow = shares.diff() * px
     m["flow_1w"] = flow.iloc[-5:].sum(min_count=1)
     m["flow_1m"] = flow.iloc[-21:].sum(min_count=1)
     m["flow_3m"] = flow.iloc[-63:].sum(min_count=1)
     weighted = m["flow_3m"].fillna(0) * 0.6 + m["flow_1m"].fillna(0) * 0.3 + m["flow_1w"].fillna(0) * 0.1
     m["flow_ratio"] = (weighted / m["aum"].replace(0, np.nan) * 100).clip(-100, 100)
+    m["flow_3m_ratio"] = (m["flow_3m"] / m["aum"].replace(0, np.nan) * 100).clip(-100, 100)
 
     # ---- maliyet
     fee = funds["fee"].reindex(keep)
@@ -213,61 +222,35 @@ def _pct_rank(s: pd.Series) -> pd.Series:
     return s.fillna(s.median()).rank(pct=True) * 100
 
 
-def _clip(x):
-    return x.clip(0, 100)
-
-
-def _band(value, bands, default):
-    """bands: [(üst_sınır, puan), ...] artan sırada; son puan üstü için."""
-    if pd.isna(value):
-        return default
-    for limit, pts in bands[:-1]:
-        if value < limit:
-            return pts
-    return bands[-1][1]
-
-
 def performance_score(g: pd.DataFrame) -> pd.Series:
     total = sum(w for _, w in config.PERFORMANCE_WINDOWS.values())
     return sum(_pct_rank(g[f"r_{k}"]) * w for k, (_, w) in config.PERFORMANCE_WINDOWS.items()) / total
 
 
 def risk_score(g: pd.DataFrame) -> pd.Series:
-    # Mutlak ölçekler: düşük oynaklık/düşüş ve yüksek riske göre getiri ödüllenir
-    vol = _clip(100 - g["volatility"].fillna(0.2) * 150)
-    mdd = _clip(100 - g["mdd"].fillna(0.2) * 150)
-    sharpe = _clip(g["sharpe"].fillna(0) / 2 * 100 + 50)
-    sortino = _clip(g["sortino"].fillna(0) / 3 * 100 + 50)
-    calmar = _clip(g["calmar"].fillna(0) / 4 * 100)
-    beta = _clip(100 - (g["beta"].fillna(1) - 1).abs() * 50)
-    return vol * 0.25 + mdd * 0.25 + sharpe * 0.20 + sortino * 0.15 + calmar * 0.10 + beta * 0.05
+    """Sharpe, maksimum düşüş, Sortino, pürüzsüzlük — kategori içi yüzdelik."""
+    total = sum(w for w, _ in config.RISK_METRICS.values())
+    parts = []
+    for key, (w, higher_better) in config.RISK_METRICS.items():
+        pct = _pct_rank(g[key])
+        parts.append((pct if higher_better else 100 - pct + 100 / len(g)) * w)
+    return sum(parts) / total
 
 
 def investor_score(g: pd.DataFrame) -> pd.Series:
-    base = g["investors"].map(lambda x: _band(x, [(1000, 20), (5000, 50), (20000, 75), (None, 100)], 20))
-    growth = g["investor_growth_1m"].map(lambda x: _band(x, [(-10, 0), (0, 40), (5, 70), (None, 100)], 50))
-    flow = g["flow_ratio"].map(
-        lambda x: _band(x, [(-20, 0), (-10, 10), (-5, 25), (0, 50), (10, 70), (None, 100)], 50)
-    )
-    return base * 0.55 + growth * 0.15 + flow * 0.30
+    """Büyüklük değişimi ve net akış — kategori içi yüzdelik."""
+    total = sum(config.INVESTOR_METRICS.values())
+    return sum(_pct_rank(g[k]) * w for k, w in config.INVESTOR_METRICS.items()) / total
 
 
 def cost_score(g: pd.DataFrame) -> pd.Series:
-    fee = g["fee"]
-    spread = fee.max() - fee.min()
-    if not spread or pd.isna(spread):
-        return pd.Series(75.0, index=g.index)
-    return (100 - (fee - fee.min()) / spread * 50).clip(50, 100)
+    """Yönetim ücreti: kategorideki en ucuz fon ~100, en pahalı ~0."""
+    return 100 - _pct_rank(g["fee"]) + 100 / len(g)
 
 
 def portfolio_score(g: pd.DataFrame) -> pd.Series:
-    aum_pts = g["aum"].map(
-        lambda x: _band(x, [(10e6, 10), (100e6, 25), (500e6, 40), (1e9, 50), (None, 60)], 10)
-    )
-    alpha_pct = g["alpha"].fillna(0) * 100
-    alpha_pts = alpha_pct.map(lambda x: _band(x, [(0, 5), (2, 20), (5, 30), (None, 40)], 5))
-    quality = (aum_pts + alpha_pts).clip(upper=100)
-    return _pct_rank(quality) * 0.6 + _pct_rank(g["aum"]) * 0.2 + _pct_rank(g["alpha"]) * 0.2
+    """Fon büyüklüğü (kategori içi yüzdelik)."""
+    return _pct_rank(g["aum"])
 
 
 def anomaly_penalty(g: pd.DataFrame) -> pd.Series:

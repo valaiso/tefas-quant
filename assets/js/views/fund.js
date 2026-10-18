@@ -96,14 +96,15 @@ export async function render(app, route, store) {
         <tr><td>Yıllık bileşik (CAGR)</td><td>${pctCell(f.m.cagr)}</td></tr></table>
     </section>
     <section class="card">
-      <div class="card-head"><h2>Risk</h2><span class="sub">${store.meta.config.historyYears} yıllık pencere</span></div>
+      <div class="card-head"><h2>Risk</h2><span class="sub">Son 1 yıl</span></div>
       <table class="kv">
         <tr><td>Volatilite (yıllık)</td><td>%${num(f.m.vol, 1)}</td></tr>
         <tr><td>Maksimum düşüş</td><td class="down">−%${num(f.m.mdd, 1)}</td></tr>
         <tr><td>Sharpe</td><td>${num(f.m.sharpe)}</td></tr>
         <tr><td>Sortino</td><td>${num(f.m.sortino)}</td></tr>
         <tr><td>Calmar</td><td>${num(f.m.calmar)}</td></tr>
-        <tr><td>Beta (kategoriye göre)</td><td>${num(f.m.beta)}</td></tr>
+        <tr><td title="Günlük getirilerin otokorelasyonu; yüksekse fiyat olağan dışı pürüzsüz">Pürüzsüzlük (otokorelasyon)</td><td>${num(f.m.ac1)}</td></tr>
+        <tr><td>Beta (kategoriye göre, ${store.meta.config.historyYears}Y)</td><td>${num(f.m.beta)}</td></tr>
         <tr><td>Alfa (yıllık)</td><td>${pctCell(f.m.alpha)}</td></tr>
         <tr><td>Bilgi oranı</td><td>${num(f.m.ir)}</td></tr>
       </table>
@@ -116,7 +117,8 @@ export async function render(app, route, store) {
         <tr><td>Net akış (1 hafta)</td><td class="${f.fl["1w"] >= 0 ? "up" : "down"}">${money(f.fl["1w"])}</td></tr>
         <tr><td>Net akış (1 ay)</td><td class="${f.fl["1m"] >= 0 ? "up" : "down"}">${money(f.fl["1m"])}</td></tr>
         <tr><td>Net akış (3 ay)</td><td class="${f.fl["3m"] >= 0 ? "up" : "down"}">${money(f.fl["3m"])}</td></tr>
-        <tr><td>Akış / büyüklük</td><td>${pctCell(f.fr, 1)}</td></tr>
+        <tr><td>Büyüklük değişimi (1A)</td><td>${pctCell(f.ag, 1)}</td></tr>
+        <tr><td>3A akış / büyüklük</td><td>${pctCell(f.fr3, 1)}</td></tr>
         <tr><td>Yönetim ücreti</td><td>%${num(f.fee)}</td></tr>
         <tr><td>Stopaj</td><td>${f.st == null ? "—" : "%" + num(f.st, 1)}</td></tr>
       </table>

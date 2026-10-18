@@ -4,10 +4,11 @@ export function render(app, _route, store) {
   const c = store.meta.config;
   const w = c.weights;
   const pw = c.performanceWindows;
+  const maxW = Math.max(...Object.values(w));
 
   app.innerHTML = `
   <section class="method-intro card">
-    <h2>TEFAS Quant nasıl puanlıyor?</h2>
+    <h2>TEFAS Quant nasıl puanlıyor? <span class="model-tag">Model ${c.model || "v1"}</span></h2>
     <p>Her işlem günü TEFAS fiyatları yayımlandıktan sonra son <b>${c.historyYears} yıllık</b> veriyle
       (${dateTR(store.meta.firstDataDate)} – ${dateTR(store.meta.lastDataDate)}) tüm yatırım fonları yeniden puanlanır.
       Fonlar yalnızca <b>kendi kategorisindeki</b> fonlarla kıyaslanır; bir para piyasası fonu hisse fonuyla yarışmaz.</p>
@@ -26,18 +27,22 @@ export function render(app, _route, store) {
     <section class="card">
       <div class="card-head"><h2>Bileşen ağırlıkları</h2></div>
       <div class="weights">${Object.entries(w).map(([k, v]) => `
-        <div class="weight-row"><span>${COMPONENT_LABELS[k]}</span><span class="scorebar"><i style="width:${v * 100 / 0.35}%"></i></span><b>%${num(v * 100, 0)}</b></div>`).join("")}
+        <div class="weight-row"><span>${COMPONENT_LABELS[k]}</span><span class="scorebar"><i style="width:${(v / maxW) * 100}%"></i></span><b>%${num(v * 100, 0)}</b></div>`).join("")}
       </div>
       <dl class="defs">
         <dt>Performans</dt><dd>${Object.entries(pw).map(([k, x]) => `${RETURN_LABELS[k]} %${num(x.weight * 100, 0)}`).join(" · ")} —
           her dönemin getirisi kategori içi yüzdeliğe çevrilir. Pencereler işlem günüdür (1 yıl = 252 gün).</dd>
-        <dt>Risk</dt><dd>Volatilite %25, maksimum düşüş %25, Sharpe %20, Sortino %15, Calmar %10, beta %5.
-          Sharpe/Sortino risksiz faize göre hesaplanır: para piyasası fonlarının günlük medyan getirisi (bugün yıllık %${num(store.meta.riskFree, 1)}).</dd>
-        <dt>Yatırımcı & akış</dt><dd>Yatırımcı tabanı %55, 1 aylık yatırımcı değişimi %15, net akış/büyüklük %30.
-          Net akış TEFAS pay adedi değişimi × fiyattan hesaplanır (3A %60, 1A %30, 1H %10).</dd>
-        <dt>Maliyet</dt><dd>Yönetim ücreti kategori içinde; en pahalı fon bile 50 puanın altına düşmez.</dd>
-        <dt>Portföy kalitesi</dt><dd>Büyüklük kademesi ve kategori benchmark'ına göre alfa.</dd>
+        <dt>Risk <span class="dim">(son ${c.riskWindowDays} işlem günü)</span></dt><dd>Sharpe %40, maksimum düşüş %30, Sortino %20, pürüzsüzlük %10.
+          Sharpe/Sortino risksiz faize göre hesaplanır: para piyasası fonlarının günlük medyan getirisi (bugün yıllık %${num(store.meta.riskFree, 1)}).
+          Pürüzsüzlük, günlük getirilerin otokorelasyonudur; fiyatı olağan dışı düzgün ilerleyen fonlar (değerlemesi zor ya da likit olmayan varlıklar) puan kaybeder.</dd>
+        <dt>Maliyet</dt><dd>Yönetim ücreti, kategori içinde: en ucuz fon ~100, en pahalı ~0. Stopaj kategoriye göre neredeyse sabit olduğu için ayrım yapmaz; skora girmez, fon sayfasında gösterilir.</dd>
+        <dt>Yatırımcı & akış</dt><dd>1 aylık büyüklük değişimi %50, 3 aylık net akış / büyüklük %50. Akışlar geçmiş getiriyi kovaladığı için düşük ağırlıklıdır; büyük çıkışlar ayrıca cezalandırılır.</dd>
+        <dt>Portföy kalitesi</dt><dd>Kategori içinde fon büyüklüğü.</dd>
       </dl>
+      <div class="notice"><b>Neden bu ağırlıklar?</b> v2, 3 yıllık TEFAS verisinde geriye dönük ama o günün verisiyle (point-in-time) test edildi:
+        Ekim 2024 – Temmuz 2026 arasında her ay fonlar kategori içinde sıralandı ve sonraki 3 ayın getirisiyle karşılaştırıldı (T+2 giriş).
+        Önceki modelin sıra korelasyonu (rank IC) 0,243 iken v2'ninki 0,273. En güçlü öngörücüler 6 aylık ve 1 yıllık getiri ile Sharpe oranıydı;
+        yatırımcı sayısı ve akışın öngörü gücü sıfıra yakındı. Geçmiş performans geleceği garanti etmez.</div>
     </section>
 
     <section class="card">

@@ -85,3 +85,24 @@ OUTFLOW_PENALTIES = [(-30, 8), (-20, 5), (-10, 3), (-5, 1)]
 # "relative": notlar kategori içi dağılımla verilir (Morningstar benzeri
 # %10 / %22.5 / %35 / %22.5 / %10). "absolute": sabit eşikler (85/75/65/55).
 RATING_MODE = "relative"
+
+# ------------------------------------------------------------- GÜÇLÜ AL
+# A+ / GÜÇLÜ AL yalnızca şu şartların hepsini sağlayan fonlara verilir; diğer
+# kategori üst %10 fonları A / AL olur. Backtest (Ara 2023 – Eyl 2026, nitelikli
+# fonlar hariç): ayda ~60 yerine ~24 fon, 6A'da kategori medyanını geçme %63 ->
+# %70, 1Y'de %65 -> %72, 1 yılda %20'den fazla kaybettiren A+ oranı %0,25 -> %0.
+STRONG_BUY = {
+    "top_percentile": 95,     # kategori içi yüzdelik > 95 (üst %5)
+    "min_history_days": 252,  # en az 1 yıllık fiyat geçmişi
+    "min_investors": 1000,
+    "min_aum": 100e6,         # en az 100 mn ₺ büyüklük
+    "streak_months": 2,       # önceki 2 ay sonunda da A veya A+
+}
+
+# ------------------------------------------------------------- kurucu riski
+# Bir portföy şirketinin halka açık fonlarının en az %30'u (en az 3 fon)
+# işleme kapalı / çökmüş / fiyatı durmuşsa, şirketin kalan fonları işaretlenir,
+# ceza alır ve notu İZLE'nin (B) üstüne çıkamaz. Ekim 2026'da Tera, Pardus,
+# A1 Capital, Hedef, Atlas ve Bulls fonları grup halinde durdu; aynı kurucunun
+# işlem gören fonları da sıçrama (spillover) riski taşır.
+FOUNDER_RISK = {"min_share": 0.30, "min_funds": 3, "penalty": 10.0, "max_grade": "B"}

@@ -24,6 +24,7 @@ function waterfall(f, weights) {
     ["Az yatırımcı cezası", -f.p.investor],
     ["Net nakit çıkışı cezası", -f.p.outflow],
     ["Getiri anomalisi cezası", -f.p.anomaly],
+    ["Kurucu riski cezası", -(f.p.founder || 0)],
     ["Veri güveni ayarı", f.adj.confidence],
     ["Yatırımcı istikrarı ayarı", f.adj.stability],
   ].map(([label, v]) =>
@@ -51,13 +52,28 @@ export async function render(app, route, store) {
   const peers = store.funds.filter((x) => x.k === f.k).sort((a, b) => a.rk - b.rk);
   const around = peers.slice(0, 8);
   if (!around.includes(f)) around.push(f);
-  const totalPenalty = f.p.investor + f.p.outflow + f.p.anomaly;
+  const totalPenalty = f.p.investor + f.p.outflow + f.p.anomaly + (f.p.founder || 0);
+  const sbc = store.meta.config.strongBuy || {};
+  const SB_LABELS = [
+    ["top", `Kategorisinde en üst %${100 - (sbc.top_percentile ?? 95)}`],
+    ["history", `En az ${Math.round((sbc.min_history_days ?? 252) / 21)} ay fiyat geçmişi`],
+    ["investors", `En az ${num(sbc.min_investors ?? 1000, 0)} yatırımcı`],
+    ["aum", `En az ${money(sbc.min_aum ?? 1e8)} büyüklük`],
+    ["anomaly", "Getiri anomalisi cezası yok"],
+    ["streak", `Önceki ${sbc.streak_months ?? 2} ay sonunda da A veya A+`],
+    ["founder", "Kurucu riski yok"],
+  ];
+  const sbList = f.sb && Object.keys(f.sb).length
+    ? `<section class="card"><div class="card-head"><h2>GÜÇLÜ AL kriterleri</h2>
+        <span class="sub">${f.g === "A+" ? "Tüm şartlar sağlanıyor" : "A+ / GÜÇLÜ AL için hepsi gerekli"}</span></div>
+        <ul class="checklist">${SB_LABELS.map(([k, l]) => `<li class="${f.sb[k] ? "ok" : "no"}"><span>${f.sb[k] ? "✓" : "✗"}</span>${l}</li>`).join("")}</ul></section>`
+    : "";
 
   app.innerHTML = `
   <section class="fund-hero">
     <div class="fund-hero-main">
       <div class="fund-hero-tags"><span class="tag">${esc(f.k)}</span>${f.q ? `<span class="tag tag-warn">Nitelikli yatırımcı</span>` : ""}
-        ${signalPill(f.sig)}</div>
+        ${signalPill(f.sig)}${f.fk ? `<span class="tag tag-danger">Kurucu riski</span>` : ""}</div>
       <h2><span class="mono">${esc(f.c)}</span> ${esc(f.n)}</h2>
       <div class="fund-hero-figs">
         <div><span>Kategori sırası</span><b>${f.rk} / ${f.ct}</b></div>
@@ -70,6 +86,10 @@ export async function render(app, route, store) {
     </div>
     <div class="fund-hero-score">${ring(f.s)}<div class="fund-grade">${gradeBadge(f)}<span>${esc(f.sig)}</span></div></div>
   </section>
+
+  ${f.fk ? `<div class="notice danger">⛔ <b>Kurucu riski (${esc(f.fd || "portföy şirketi")}):</b> bu şirketin halka açık
+    ${store.meta.founderRisk?.[f.fd]?.total ?? "?"} fonundan ${store.meta.founderRisk?.[f.fd]?.problem ?? "birçoğu"} tanesi işleme kapalı, çökmüş ya da fiyatı durmuş.
+    Aynı kurucunun işlem gören fonları da benzer riski taşıyabilir; bu fon −${num(f.p.founder, 0)} puan ceza aldı ve notu en fazla İZLE olabilir.</div>` : ""}
 
   ${f.p.anomaly > 0 ? `<div class="notice warn">⚠ <b>Getiri anomalisi:</b> 1 yıllık getirisi (${pct(f.r["1y"], 1)}) kategorisinin çok üstünde,
     bu yüzden −${num(f.p.anomaly, 1)} puan ceza aldı. Pürüzsüz ve olağan dışı yüksek getiri, değerlemesi zor ya da likit olmayan
@@ -88,6 +108,8 @@ export async function render(app, route, store) {
       <p class="chart-note dim">Haftalık kapanış, dönem başı = 100. Kesik çizgi: ${esc(f.k)} kategorisi eşit ağırlıklı ortalaması.</p>
     </section>
   </div>
+
+  ${sbList}
 
   <div class="grid grid-3">
     <section class="card">

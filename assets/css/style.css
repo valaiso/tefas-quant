@@ -242,6 +242,7 @@ select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 .pill.down { background: var(--down-soft); color: var(--down); }
 .tag { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .74rem; font-weight: 600; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); color: #fff; }
 .tag-warn { background: rgba(255,196,87,.18); border-color: rgba(255,196,87,.45); }
+.tag-danger { background: rgba(229,72,77,.28); border-color: rgba(255,140,140,.6); }
 
 .code-chip {
   font-family: var(--mono); font-weight: 700; font-size: .8rem; color: var(--text);
@@ -357,6 +358,14 @@ table.compare td.best { background: var(--up-soft); font-weight: 700; }
 
 .notice { border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: var(--radius-sm); padding: 11px 13px; font-size: .86rem; color: var(--text); }
 .notice.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+.notice.danger { border-left-color: var(--down); background: var(--down-soft); }
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 18px; font-size: .88rem; }
+.checklist li { display: flex; gap: 8px; align-items: center; }
+.checklist li span { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: .72rem; font-weight: 800; flex: none; }
+.checklist li.ok span { background: var(--up-soft); color: var(--up); }
+.checklist li.no { color: var(--text-dim); }
+.checklist li.no span { background: var(--down-soft); color: var(--down); }
+.mini-flag { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 5px; border-radius: 50%; background: var(--down); color: #fff; font-size: .62rem; font-weight: 800; vertical-align: middle; }
 .notice-card.warn { border-left: 4px solid var(--warn); }
 .notice-card p { margin: 6px 0 0; }
 

@@ -59,6 +59,7 @@ def _fund_record(code: str, f: pd.Series) -> dict:
             "investor": _r(f["p_investor"], 1),
             "outflow": _r(f["p_outflow"], 1),
             "anomaly": _r(f["p_anomaly"], 1),
+            "founder": _r(f.get("p_founder", 0), 1),
         },
         "adj": {"confidence": _r(f["adj_confidence"], 1), "stability": _r(f["adj_stability"], 1)},
         "r": {"1g": _r(f["r_1g"]), **{k: _r(f[f"raw_r_{k}"]) for k in config.DISPLAY_WINDOWS}},
@@ -82,6 +83,10 @@ def _fund_record(code: str, f: pd.Series) -> dict:
         "ag": _r(f["aum_growth_1m"]),
         "fl": {k: _r(f[f"flow_{k}"], 0) for k in ("1w", "1m", "3m")},
         "fee": _r(f["fee"]),
+        "fd": f["founder"] if isinstance(f.get("founder"), str) else None,
+        "fk": bool(f.get("founder_risk", False)),
+        "sb": {k: bool(f[f"sb_{k}"]) for k in ("top", "history", "investors", "aum", "anomaly", "streak", "founder")
+               if f"sb_{k}" in f},
         "st": _r(f["stopaj"]),
         "d0": f["first_date"],
         "hd": int(f["history_days"]),
@@ -135,6 +140,7 @@ def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
         "excluded": result["excluded"],
         "privateSkipped": result["private_skipped"],
         "splits": result["splits"],
+        "founderRisk": result.get("founder_risk", {}),
         "config": {
             "model": config.MODEL_VERSION,
             "historyYears": config.HISTORY_YEARS,
@@ -152,6 +158,8 @@ def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
             "outflowPenalties": config.OUTFLOW_PENALTIES,
             "stalePriceDays": config.STALE_PRICE_DAYS,
             "ratingMode": config.RATING_MODE,
+            "strongBuy": config.STRONG_BUY,
+            "founderRisk": config.FOUNDER_RISK,
         },
     }
     _write(data_dir / "meta.json", meta)

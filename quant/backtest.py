@@ -13,6 +13,8 @@ Sınırlar
 --------
 * Yönetim ücreti ve kategori bugünkü değerdir (geçmiş kopyası yok).
 * FVT'nin işlem durumu bayrağı geçmişte bilinemeyeceği için kullanılmaz.
+* A+ canlı skorla aynı sıkı kuralla verilir (üst %5, kalite kapıları, 2 ay
+  süreklilik, kurucu riski yok); ilk iki ayda süreklilik ölçülemediği için A+ yok.
 * Fiyat yayımı duran bir fon son yayımlanan fiyatla değerlenir (gerçekte
   çıkış mümkün olmayabilir; kayıp eksik ölçülebilir).
 """
@@ -27,13 +29,6 @@ HORIZONS = {"1a": 21, "3a": 63, "6a": 126, "1y": 252, "2y": 504, "3y": 756}
 MIN_HISTORY = 63  # ilk sinyal için evrende gereken işlem günü
 
 
-def _month_ends(index: pd.DatetimeIndex) -> list[int]:
-    """Her ayın son işlem gününün satır numarası (son, eksik ay hariç)."""
-    s = pd.Series(range(len(index)), index=index)
-    last = s.groupby(index.to_period("M")).max()
-    return [int(i) for i in last.values[:-1]]
-
-
 GRADES = ["A+", "A", "B", "C", "D"]
 
 
@@ -45,11 +40,16 @@ def run(panel: dict, funds: pd.DataFrame, grade: str = "A+") -> dict:
     funds_pit["trading_active"] = np.nan  # geçmişte bilinemeyen bayrak
 
     obs = []
-    signal_dates = [i for i in _month_ends(dates) if i >= MIN_HISTORY and i + 1 < len(dates)]
+    prev_base: list[pd.Series] = []  # önceki ay sonlarının temel notları (süreklilik şartı)
+    signal_dates = [i for i in scoring.month_ends(dates) if i >= MIN_HISTORY and i + 1 < len(dates)]
     for i in signal_dates:
         sub = {k: v.iloc[: i + 1] for k, v in panel.items() if isinstance(v, pd.DataFrame)}
-        m, _excluded, _rf = scoring.compute_metrics(sub, funds_pit, light=True)
-        s = scoring.score_funds(m)
+        m, excluded_then, _rf = scoring.compute_metrics(sub, funds_pit, light=True)
+        # Canlı skorla aynı kurallar: o tarihteki kurucu riski + sıkı GÜÇLÜ AL
+        risky = scoring.founder_risk(funds, m.index, excluded_then)
+        flag = funds["founder"].reindex(m.index).isin(risky)
+        s = scoring.score_funds(m, founder_flag=flag, prev_grades=prev_base)
+        prev_base.append(scoring.score_funds(m)["base_grade"])
         entry = i + 1  # T+1: emir ertesi işlem günü fiyatından gerçekleşir
         p0 = px.iloc[entry].reindex(s.index)
         row = {"date": dates[i], "code": s.index, "category": s["category"].values,

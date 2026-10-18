@@ -45,7 +45,9 @@ export async function render(app, _route, store) {
     <p>Her ay sonunda (${dateTR(bt.signalDates[0])} – ${dateTR(bt.signalDates[bt.signalDates.length - 1])}, ${bt.signalDates.length} ay)
       skorlar <b>yalnızca o güne kadar bilinen veriyle</b> yeniden üretildi. O tarihte A+ notu alan her fon, sonradan notu düşse,
       çökse ya da listeden çıksa bile, ertesi işlem günü fiyatından (T+1) alınmış sayılıp sonraki getirisi ölçüldü.
-      Toplam ${num(bt.observations, 0)} A+ gözlemi. Kıyas ölçüsü: aynı ay, aynı kategorideki tüm fonların medyan getirisi.</p>
+      Toplam ${num(bt.observations, 0)} A+ gözlemi. Kıyas ölçüsü: aynı ay, aynı kategorideki tüm fonların medyan getirisi.
+      A+ canlı sitedeki sıkı kuralla verildi (üst %5, kalite şartları, 2 ay süreklilik, kurucu riski yok); 1 yıllık geçmiş şartı
+      nedeniyle ilk A+ sinyalleri Ekim 2024'te başlıyor.</p>
   </section>
 
   <div class="grid bt-grid">${hs.map((h) => kpi(h, bt.overall[h])).join("")}</div>

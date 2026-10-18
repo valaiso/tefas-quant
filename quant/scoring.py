@@ -24,6 +24,7 @@ from . import config
 from .categorize import categorize
 
 TRADING_DAYS = 252
+MIN_HISTORY_FOR_GRADES = 63  # not üretmek için evrende gereken işlem günü
 QUALIFIED_RE = re.compile(r"SERBEST|N[İI]TEL[İI]KL[İI]|G[İI]R[İI][ŞS][İI]M SERMAYES[İI]|GAYR[İI]MENKUL")
 
 
@@ -91,6 +92,18 @@ def refine_category(category: str, name: str) -> str:
     return "Serbest · Çoklu Varlık"
 
 
+FOUNDER_RE = re.compile(r"^(.*?\b(?:PORTFÖY|PORTFOY|PYŞ|PYS)\b)", re.IGNORECASE)
+
+
+def founder_of(name) -> str:
+    """Ünvandan portföy şirketi: "PARDUS PORTFÖY İKİNCİ ..." -> "PARDUS PORTFÖY"."""
+    text = str(name or "").upper().strip()
+    m = FOUNDER_RE.match(text)
+    if not m:
+        return " ".join(text.split()[:2])
+    return m.group(1).replace("PYŞ", "PORTFÖY").replace("PYS", "PORTFÖY").replace("PORTFOY", "PORTFÖY").strip()
+
+
 def load_funds(conn: sqlite3.Connection) -> pd.DataFrame:
     funds = pd.read_sql(
         "SELECT code, name, category, category_src, fee, stopaj, trading_active, is_serbest FROM funds",
@@ -101,6 +114,7 @@ def load_funds(conn: sqlite3.Connection) -> pd.DataFrame:
     funds["category"] = funds["category"].fillna(funds["name"].map(categorize))
     # Özel fon: tek / birkaç yatırımcıya kurulmuş, halka açık değil
     funds["private"] = funds["name"].fillna("").str.upper().str.contains("ÖZEL FON", regex=False)
+    funds["founder"] = funds["name"].map(founder_of)
     is_serbest_cat = funds["category"] == "Serbest"
     funds["category"] = [refine_category(c, n) for c, n in zip(funds["category"], funds["name"])]
     name_upper = funds["name"].fillna("").str.upper().str.replace("ÖZEL SEKTÖR", "", regex=False)
@@ -378,7 +392,28 @@ def rating(percentile: float, score: float, category_size: int) -> tuple[str, st
     return "D", "UZAK DUR"
 
 
-def score_funds(m: pd.DataFrame) -> pd.DataFrame:
+def founder_risk(funds: pd.DataFrame, scored_codes, excluded: list) -> dict:
+    """Halka açık fonlarının en az %30'u (en az 3) sorunlu olan portföy şirketleri.
+
+    Sorunlu: işleme kapalı, çökmüş, alım-satımı donmuş ya da fiyatı durmuş (dışlanan).
+    """
+    cfg = config.FOUNDER_RISK
+    bad = {x["code"] for x in excluded}
+    public = set(scored_codes) | bad
+    founder = funds["founder"].reindex(list(public))
+    out = {}
+    for name, codes in founder.groupby(founder).groups.items():
+        k = sum(c in bad for c in codes)
+        if k >= cfg["min_funds"] and k / len(codes) >= cfg["min_share"]:
+            out[name] = {"problem": int(k), "total": int(len(codes))}
+    return out
+
+
+def score_funds(m: pd.DataFrame, founder_flag: pd.Series | None = None,
+                prev_grades: list[pd.Series] | None = None) -> pd.DataFrame:
+    """founder_flag: kurucu riski taşıyan fonlar (True); prev_grades: önceki ay
+    sonlarının temel notları (süreklilik şartı için). İkisi de verilmezse
+    yalnızca temel (göreli) notlar üretilir."""
     parts = []
     for _cat, g in m.groupby("category"):
         g = g.copy()
@@ -403,23 +438,84 @@ def score_funds(m: pd.DataFrame) -> pd.DataFrame:
     ).clip(0, 100)
     # Hesaplanamayan skor (eksik veri) nötr 50 sayılır; iş çökmesin, fon listeden düşmesin
     s["score"] = s["score"].fillna(50.0)
+    flag = (founder_flag.reindex(s.index).fillna(False).astype(bool)
+            if founder_flag is not None else pd.Series(False, index=s.index))
+    s["founder_risk"] = flag
+    s["p_founder"] = np.where(flag, config.FOUNDER_RISK["penalty"], 0.0)
+    s["score"] = (s["score"] - s["p_founder"]).clip(0, 100)
 
     s["rank"] = s.groupby("category")["score"].rank(ascending=False, method="min").astype(int)
     s["cat_size"] = s.groupby("category")["score"].transform("count").astype(int)
     s["percentile"] = (s["cat_size"] - s["rank"] + 1) / s["cat_size"] * 100
     graded = [rating(p, sc, n) for p, sc, n in zip(s["percentile"], s["score"], s["cat_size"])]
-    s["grade"] = [g for g, _ in graded]
+    s["base_grade"] = [g for g, _ in graded]
+    s["grade"] = s["base_grade"]
     s["signal"] = [sig for _, sig in graded]
+    if prev_grades is not None:
+        apply_strong_buy(s, prev_grades)
     s["overall_rank"] = s["score"].rank(ascending=False, method="min").astype(int)
     return s.sort_values("score", ascending=False)
+
+
+GRADE_SIGNAL = {"A+": "GÜÇLÜ AL", "A": "AL", "B": "İZLE", "C": "ZAYIF", "D": "UZAK DUR"}
+GRADE_ORDER = ["A+", "A", "B", "C", "D"]
+
+
+def apply_strong_buy(s: pd.DataFrame, prev_grades: list[pd.Series]) -> None:
+    """A+ / GÜÇLÜ AL için ek şartlar; sağlamayan üst fonlar A / AL olur.
+    Kurucu riski olan fonların notu en fazla B / İZLE olabilir. (Yerinde değiştirir.)"""
+    cfg = config.STRONG_BUY
+    s["sb_top"] = s["percentile"] > cfg["top_percentile"]
+    s["sb_history"] = s["history_days"] >= cfg["min_history_days"]
+    s["sb_investors"] = s["investors"].fillna(0) >= cfg["min_investors"]
+    s["sb_aum"] = s["aum"].fillna(0) >= cfg["min_aum"]
+    s["sb_anomaly"] = s["p_anomaly"] <= 0
+    streak = pd.Series(len(prev_grades) >= cfg["streak_months"], index=s.index)
+    for g in prev_grades[-cfg["streak_months"]:]:
+        streak &= g.reindex(s.index).isin(["A+", "A"])
+    s["sb_streak"] = streak
+    s["sb_founder"] = ~s["founder_risk"]
+    ok = (s["sb_top"] & s["sb_history"] & s["sb_investors"] & s["sb_aum"]
+          & s["sb_anomaly"] & s["sb_streak"] & s["sb_founder"])
+    grade = s["base_grade"].where(s["base_grade"] != "A+", "A")
+    grade = grade.mask(ok, "A+")
+    cap = config.FOUNDER_RISK["max_grade"]
+    capped = s["founder_risk"] & grade.map(GRADE_ORDER.index).lt(GRADE_ORDER.index(cap))
+    grade = grade.mask(capped, cap)
+    s["grade"] = grade
+    s["signal"] = grade.map(GRADE_SIGNAL)
+
+
+def month_ends(index: pd.DatetimeIndex) -> list[int]:
+    """Her tamamlanmış ayın son işlem gününün satır numarası (son, süren ay hariç)."""
+    pos = pd.Series(range(len(index)), index=index)
+    last = pos.groupby(index.to_period("M")).max()
+    return [int(i) for i in last.values[:-1]]
+
+
+def base_grades_at(panel: dict, funds: pd.DataFrame, i: int) -> pd.Series:
+    """i. işlem gününde yalnızca o güne kadarki veriyle temel (göreli) notlar."""
+    sub = {k: v.iloc[: i + 1] for k, v in panel.items() if isinstance(v, pd.DataFrame)}
+    m, _, _ = compute_metrics(sub, funds, light=True)
+    return score_funds(m)["base_grade"]
 
 
 def run(conn: sqlite3.Connection) -> dict:
     panel = load_panel(conn)
     funds = load_funds(conn)
     metrics, excluded, rf = compute_metrics(panel, funds)
-    scored = score_funds(metrics)
-    scored = scored.join(funds[["name", "qualified", "category_src"]], how="left")
+
+    # Süreklilik: önceki tamamlanmış ay sonlarındaki temel notlar (o günün verisiyle;
+    # FVT işlem bayrağı geçmişte bilinemeyeceği için kullanılmaz)
+    funds_pit = funds.copy()
+    funds_pit["trading_active"] = np.nan
+    ends = [i for i in month_ends(panel["price"].index) if i >= MIN_HISTORY_FOR_GRADES]
+    prev = [base_grades_at(panel, funds_pit, i) for i in ends[-config.STRONG_BUY["streak_months"]:]]
+
+    risky = founder_risk(funds, metrics.index, excluded)
+    flag = funds["founder"].reindex(metrics.index).isin(risky)
+    scored = score_funds(metrics, founder_flag=flag, prev_grades=prev)
+    scored = scored.join(funds[["name", "qualified", "category_src", "founder"]], how="left")
 
     as_of = panel["price"].index[-1].strftime("%Y-%m-%d")
     conn.executemany(
@@ -436,6 +532,7 @@ def run(conn: sqlite3.Connection) -> dict:
         "scored": scored,
         "excluded": excluded,
         "risk_free": rf,
+        "founder_risk": risky,
         "private_skipped": metrics.attrs["private_skipped"],
         "splits": panel["splits"],
         "panel": panel,

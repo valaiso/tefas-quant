@@ -19,9 +19,10 @@ export function render(app, _route, store) {
         Pay bölünmeleri (ör. İş Portföy TI2, fiyat 10.000'e bölündü) geçmiş fiyatlar oranlanarak düzeltilir.</li>
       <li><b>Beş bileşen</b> 0–100 arası puanlanır ve ağırlıklandırılır.</li>
       <li><b>Cezalar ve ayarlar</b> uygulanır.</li>
-      <li><b>Not:</b> ${c.ratingMode === "relative"
-        ? "kategori içi sıraya göre verilir: üst %10 A+ (Güçlü Al), sonraki %22,5 A (Al), %35 B (İzle), %22,5 C (Zayıf), alt %10 D (Uzak Dur)."
-        : "sabit skor eşikleriyle verilir (85 / 75 / 65 / 55)."}</li>
+      <li><b>Not:</b> kategori içi sıraya göre verilir: üst %32,5 A (Al), sonraki %35 B (İzle), %22,5 C (Zayıf), alt %10 D (Uzak Dur).
+        <b>A+ (Güçlü Al)</b> yalnızca şu şartların hepsini sağlayan fonlara verilir: kategorisinde en üst %${100 - (c.strongBuy?.top_percentile ?? 95)},
+        en az 1 yıllık geçmiş, en az ${num(c.strongBuy?.min_investors ?? 1000, 0)} yatırımcı, en az ${num((c.strongBuy?.min_aum ?? 1e8) / 1e6, 0)} mn ₺ büyüklük,
+        getiri anomalisi cezası yok, önceki ${c.strongBuy?.streak_months ?? 2} ay sonunda da A veya A+ ve kurucu riski yok.</li>
     </ol>
   </section>
 
@@ -57,6 +58,8 @@ export function render(app, _route, store) {
         <tr><th colspan="2">Getiri anomalisi cezası</th></tr>
         <tr><td>1Y getirinin kategori içi robust z-skoru (medyan / IQR) ${num(c.anomaly.z, 0)}'ü aştığında her birim için</td><td class="down">−${num(c.anomaly.perZ, 0)}</td></tr>
         <tr><td>Üst sınır</td><td class="down">−${num(c.anomaly.max, 0)}</td></tr>
+        <tr><th colspan="2">Kurucu riski</th></tr>
+        <tr><td>Portföy şirketinin halka açık fonlarının en az %${num((c.founderRisk?.min_share ?? 0.3) * 100, 0)}'u (en az ${c.founderRisk?.min_funds ?? 3}) işleme kapalı, çökmüş ya da fiyatı durmuşsa kalan fonlarına; not en fazla İZLE</td><td class="down">−${num(c.founderRisk?.penalty ?? 10, 0)}</td></tr>
         <tr><th colspan="2">Ayarlar</th></tr>
         <tr><td>Veri güveni (geçmiş uzunluğu, süreklilik, güncellik)</td><td>−5 … +5</td></tr>
         <tr><td>Yatırımcı istikrarı (yatırımcı sayısı kademesi)</td><td>−5 … +3</td></tr>

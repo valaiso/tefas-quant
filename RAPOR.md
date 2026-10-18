@@ -423,3 +423,31 @@ genç fonlarda (%8) 6A getiri kullanılıyor; ekranda 1Y boş gösteriliyor.
 | 11 fonda yönetim ücreti 0 | Veri boşluğu "en ucuz" sayılıyordu | 0 ücret eksik kabul, kategori medyanı |
 
 **Sonuç:** 1.194 fon skorlanıyor, 362 fon nedeniyle listede, 493 özel fon kapsam dışı.
+
+---
+
+## 13. Sıkı GÜÇLÜ AL ve kurucu riski (18.10.2026)
+
+**Sorun:** Göreli notlama her kategorinin üst %10'una A+ veriyordu; nitelikli fonlar hariç 656 fondan 70'i GÜÇLÜ AL'dı.
+Yabancı örneklerde en üst not daha seçici ya da ek şartlara bağlı (Citywire AAA ≈ yöneticilerin %2,5'i ve süreklilik;
+FE 5 Crown üst %10 ama 3 yıl geçmiş şartı; Morningstar madalyalılar %30 → %23).
+
+**Backtest (nitelikli fonlar hariç, Ara 2023 – Eyl 2026, kategori medyanını geçme oranı):**
+
+| Kural | Ayda fon | 3A | 6A | 1Y | 1Y'de >%20 kayıp |
+|---|---|---|---|---|---|
+| Eski A+ (üst %10) | 60 | %58,6 | %62,7 | %65,1 | %0,25 |
+| Yalnız üst %5 | 32 | %57,5 | %62,8 | %63,0 | %0,46 |
+| A+ + kalite kapıları | 50 | %60,1 | %66,1 | %72,7 | %0 |
+| **Üst %5 + kapılar + 2 ay süreklilik** | **24** | **%63,2** | **%70,1** | **%71,6** | **%0** |
+
+Yalnızca eşiği daraltmak işe yaramıyor; fark kalite kapılarından ve süreklilikten geliyor.
+
+**Uygulanan kural:** A+ / GÜÇLÜ AL = kategori üst %5 + ≥1 yıl geçmiş + ≥1.000 yatırımcı + ≥100 mn ₺ + anomali cezası yok +
+önceki 2 ay sonunda A/A+ + kurucu riski yok. Sağlamayan üst fonlar A / AL. Sonuç: nitelikli hariç 70 → 34, tümünde 51.
+
+**Kurucu riski:** Halka açık fonlarının ≥%30'u (≥3) işleme kapalı/çökmüş/fiyatı durmuş portföy şirketlerinin kalan fonları −10 puan
+ve en fazla İZLE (Sialm & Tham 2016: kurucu sıkıntısı bağlı fonlara sıçrar). Şu an: Tera, Pardus, A1 Capital, Hedef, Atlas, Bulls,
+Pusula, MT, Sparta — 28 fon işaretli.
+
+Backtest sayfası da aynı kuralla hesaplanıyor; 1 yıllık geçmiş şartı nedeniyle ilk A+ sinyali Ekim 2024'te, 2Y sonucu henüz yok.

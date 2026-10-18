@@ -42,7 +42,7 @@ export function render(app, _route, store) {
   <div class="toolbar">${qualifiedToggle()}</div>
 
   <section class="card">
-    <div class="card-head"><h2>Not dağılımı</h2><span class="sub">Kategori içi göreli not: üst %10 A+, sonraki %22,5 A, %35 B, %22,5 C, alt %10 D</span></div>
+    <div class="card-head"><h2>Not dağılımı</h2><span class="sub">A+ yalnızca sıkı şartları sağlayan kategori üst %5'ine; diğer üst fonlar A, sonra %35 B, %22,5 C, alt %10 D</span></div>
     <div class="dist-bar">${SIGNALS.map((s) =>
       `<span class="${s.cls}" style="flex:${counts[s.key] || 0.0001}" title="${s.key}: ${counts[s.key]}"></span>`).join("")}</div>
     <div class="dist-legend">${SIGNALS.map((s) =>

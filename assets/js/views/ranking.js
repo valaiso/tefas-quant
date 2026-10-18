@@ -79,7 +79,7 @@ export function render(app, route, store) {
       <tr class="row-link" data-href="#/fon/${encodeURIComponent(f.c)}">
         <td class="pick"><input type="checkbox" data-code="${esc(f.c)}" ${state.picked.has(f.c) ? "checked" : ""} aria-label="${esc(f.c)} karşılaştır"></td>
         <td class="num"><b>${f.rk}</b><span class="dim">/${f.ct}</span></td>
-        <td class="fund-cell left">${codeChip(f.c)}<span class="name">${esc(f.n)}</span></td>
+        <td class="fund-cell left">${codeChip(f.c)}${f.fk ? `<span class="mini-flag" title="Kurucu riski: ${esc(f.fd || "")}">!</span>` : ""}<span class="name">${esc(f.n)}</span></td>
         <td class="left dim cat-cell">${esc(f.k)}</td>
         <td>${gradeBadge(f)}</td>
         <td class="score-cell">${scoreBar(f.s)}</td>

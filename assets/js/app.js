@@ -17,7 +17,7 @@ const VIEWS = {
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
   backtest: { mod: backtest, title: "QuantBacktest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
   simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ" },
-  model: { mod: model, title: "Model Portföy", eyebrow: "İSTİKRARLI GETİRİ SEPETİ" },
+  model: { mod: model, title: "Model Portföyler", eyebrow: "GÜVENLİ · DENGELİ · ATAK" },
   rapor: { mod: report, title: "Rapor", eyebrow: "HAFTALIK · AYLIK AKIŞ" },
   metodoloji: { mod: method, title: "Metodoloji", eyebrow: "PUANLAMA & CEZALAR" },
 };

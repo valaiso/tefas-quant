@@ -412,6 +412,31 @@ table.compare td.best { background: var(--up-soft); font-weight: 700; }
 .model-table tfoot td { border-top: 1px solid var(--border); }
 .hold-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 3px; border: 1px solid var(--border); border-radius: 999px; font-size: .84rem; }
 .rule-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: .9rem; line-height: 1.5; }
+.profile-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.profile-card { text-align: left; display: grid; gap: 3px; padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); cursor: pointer; border-top: 4px solid var(--pc, var(--brand-3)); font: inherit; }
+.profile-card[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--pc, var(--brand-3)); background: var(--surface-2); }
+.profile-card.tone-safe { --pc: #0f766e; }
+.profile-card.tone-mid { --pc: #2563eb; }
+.profile-card.tone-risk { --pc: #c2410c; }
+.pc-label { font-size: .74rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--pc); }
+.pc-main { font-size: 1.5rem; font-weight: 760; letter-spacing: -.02em; }
+.pc-sub { font-size: .78rem; color: var(--text-dim); }
+.kpi-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 10px 0 14px; }
+.kpi-row > div { display: grid; gap: 2px; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.kpi-row span { font-size: .72rem; color: var(--text-dim); }
+.kpi-row b { font-size: 1.05rem; }
+.bank-tag, .leg-tag, .warn-tag { display: inline-block; font-size: .64rem; font-weight: 800; letter-spacing: .05em; padding: 1px 6px; border-radius: 999px; vertical-align: middle; margin-left: 4px; }
+.bank-tag { background: var(--accent-soft); color: var(--accent); }
+.leg-tag { background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border); }
+.warn-tag { background: var(--warn-soft); color: var(--warn); letter-spacing: 0; font-size: .74rem; font-weight: 650; margin: 0; }
+@media (max-width: 640px) {
+  .profile-cards { grid-template-columns: 1fr; gap: 8px; }
+  .profile-card { grid-template-columns: auto 1fr; column-gap: 12px; align-items: baseline; padding: 10px 12px; }
+  .pc-label { grid-column: 1 / -1; }
+  .pc-sub { grid-column: 1 / -1; }
+  .kpi-row { grid-template-columns: 1fr 1fr; }
+}
 
 /* ------------------------------------------------------------- metodoloji */
 

@@ -58,6 +58,8 @@ def run(panel: dict, funds: pd.DataFrame, grade: str = "A+") -> dict:
             "aplus_public": list(s.index[(s["grade"] == "A+") & ~qualified]),
             "universe": list(s.index),
             "universe_public": list(s.index[~qualified]),
+            # model portföy: o günkü skor, not ve risk bayrakları
+            "scores": s[["score", "grade", "p_anomaly", "flag_tail", "flag_hot", "founder_risk"]].copy(),
         })
         entry = i + 1  # T+1: emir ertesi işlem günü fiyatından gerçekleşir
         p0 = px.iloc[entry].reindex(s.index)

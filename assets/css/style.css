@@ -114,6 +114,9 @@ button, select, input { font: inherit; color: inherit; }
 .page-heading { display: grid; gap: 1px; min-width: 0; }
 .page-heading h1 { font-size: 1.14rem; font-weight: 680; letter-spacing: -.025em; }
 .topbar-actions { display: flex; align-items: center; gap: 9px; }
+.topbar-logo, .topbar-brand { display: none; }
+.topbar-logo img { display: block; width: 34px; height: 34px; border-radius: 9px; object-fit: cover; box-shadow: 0 0 0 1px var(--border); }
+.topbar-brand { font-size: .95rem; font-weight: 750; letter-spacing: -.025em; line-height: 1.15; }
 .search { position: relative; }
 .search input { width: 260px; }
 
@@ -454,6 +457,13 @@ table.bt-grades td { white-space: nowrap; }
 @media (max-width: 900px) {
   /* Telefonda alt menü kalabalık olmasın: Metodoloji ve Karşılaştır yalnızca masaüstünde */
   .tab[data-view="metodoloji"], .tab[data-view="karsilastir"] { display: none; }
+  /* Telefonda sol üstte sayfa etiketi yerine logo ve marka adı */
+  .topbar-logo { display: block; flex: none; margin-right: -6px; }
+  .topbar-brand { display: block; }
+  .page-eyebrow { display: none; }
+  .page-heading { flex: 1; }
+  .page-heading h1 { font-size: .8rem; font-weight: 600; color: var(--text-dim); letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar-brand { white-space: nowrap; }
   .app-shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar {
     position: fixed; inset: auto 0 0; width: 100%; height: auto; padding: 0 8px env(safe-area-inset-bottom);
@@ -474,7 +484,6 @@ table.bt-grades td { white-space: nowrap; }
 @media (max-width: 640px) {
   .app { padding: 14px 12px 24px; gap: 12px; }
   .topbar-inner { min-height: 64px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
-  .page-heading h1 { font-size: 1rem; }
   .search input { width: 140px; }
   .card { padding: 13px; }
   .hero { padding: 22px 18px; }

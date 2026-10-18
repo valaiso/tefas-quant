@@ -318,3 +318,44 @@ tarihli) %86 isabet veriyor. Ancak aynı tarihlerde fon evreni ortalaması %2,21
 yani **fazla getiri yalnızca +%0,07**. İsabet oranının tek başına neden yanıltıcı olduğunu bu sonuç
 açıkça gösteriyor. Gerçek bir değerlendirme için tarihsel skorların o günün verisiyle üretilmesi gerekiyor
 (bölüm 7, madde 1).
+
+---
+
+## 10. Yeni mimari (18.10.2026, 3. oturum)
+
+> Bölüm 3–9'da adı geçen Streamlit uygulaması (`app.py`) ve eski betikler kaldırıldı. Proje artık
+> Portföy Analiz'le aynı yapıda çalışan statik bir site.
+
+```
+TEFAS /api/funds (fiyat, pay, yatırımcı, büyüklük; tek istekte tüm fonlar, 28 günlük parçalar)
+FVT (ücret, stopaj, işlem durumu; haftada bir)
+        │  quant/fetch.py  → data/tefas.sqlite  (yalnızca son 3 yıl; git'e girmez, Actions cache'inde)
+        ▼
+quant/scoring.py   → metrikler, 5 bileşen, cezalar, göreli not   (ayarlar: quant/config.py)
+        ▼
+quant/export.py    → dist/data/*.json  (meta, funds, categories, haftalık fon geçmişi)
+        ▼
+index.html + assets/  → GitHub Pages
+```
+
+| Konu | Önce | Şimdi |
+|---|---|---|
+| Depodaki veri | `tefas.db` 76,5 MB, her gün commit'leniyordu | Depoda veri yok; ham veri Actions cache'inde. Yayın ~10 MB JSON |
+| Geçmiş | 5 yıl, tekrarlı satırlar | **3 yıl**, her çalışmada budanıyor. 3Y getiri ağırlığı %10, 5Y kaldırıldı |
+| Güncelleme | Her 20 dk (hatalı) / günlük commit | **İşlem günü akşamı tek derleme** (19:00 TR, atlanırsa 21:00); hafta sonu ve tatilde derleme yok |
+| Veri kaynağı | tefas-crawler (fon başına istek) + Fundfy (429) + FVT | TEFAS resmî API (toplu) + FVT (haftalık) |
+| Akış ve yatırımcı | FVT 30 günlük geçmiş | TEFAS pay adedi × fiyat; 1H / 1A / 3A akış ve 1A yatırımcı değişimi |
+| Kategori | TEFAS dışı karışık adlar | TEFAS resmî şemsiye türleri; "Serbest" ünvandan alt sınıflara ayrıldı (Para Piyasası, Döviz, Hisse, Katılım, Kıymetli Madenler, Fon Sepeti, Çoklu Varlık) |
+| Arayüz | Streamlit | Kurumsal statik site: Genel Bakış, Sıralama (filtre, sıralama, sayfalama), Fon Detayı (puan dökümü, grafik), Karşılaştır, Metodoloji; açık/koyu tema, mobil uyumlu |
+| Skor geçmişi | Yok | `scores` tablosu her günün skorunu saklıyor; ileride gerçek (point-in-time) backtest için |
+
+**Yerel çalıştırma**
+
+```bash
+pip install -r requirements.txt
+python scripts/update.py          # artımlı güncelle + skorla + dist/ üret
+python -m http.server 8000 -d dist
+```
+
+**Yayına almak için tek seferlik ayar:** GitHub → Settings → Pages → Source: **GitHub Actions**.
+İlk çalıştırmada cache boş olduğu için 3 yıllık veri baştan çekilir (~10–15 dk).

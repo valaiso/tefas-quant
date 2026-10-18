@@ -1,43 +1,113 @@
-name: TEFAS Data Pipeline
+name: Günlük derecelendirme ve yayın
 
-# Eskiden her 20 dakikada var olmayan collector.py'yi çalıştırıp başarısız oluyordu.
-# TEFAS fiyatları günde bir kez yayınlandığı için hafta içi akşam bir kez yeterli.
+# Her işlem günü akşamı, günün kapanış fiyatlarıyla bir kez çalışır:
+# TEFAS'tan son günleri çek -> 3 yıla buda -> skorla -> statik siteyi
+# GitHub Pages'e yayınla. Gün içinde saatlik/dakikalık güncelleme yapılmaz.
+#
+# Ham veri (data/tefas.sqlite) depoya commit edilmez; çalıştırmalar arasında
+# Actions cache'inde taşınır. Böylece depo küçük kalır, her gün yalnızca eksik
+# günler çekilir.
+
 on:
   schedule:
-    - cron: '0 18 * * 1-5' # 21:00 TSİ
+    # 19:00 TR (16:00 UTC). GitHub zamanlanmış işleri geciktirebildiği ya da
+    # atlayabildiği için 21:00 TR'de ikinci deneme var; site zaten güncelse
+    # `kontrol` adımı derlemeyi atlar, yani gün başına tek derleme olur.
+    - cron: '0 16 * * 1-5'
+    - cron: '0 18 * * 1-5'
   workflow_dispatch:
+    inputs:
+      full:
+        description: '3 yıllık veriyi baştan çek (cache yok sayılır)'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'assets/**'
+      - 'quant/**'
+      - 'scripts/**'
+      - '.github/workflows/update.yml'
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  update-data:
+  kontrol:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.karar.outputs.run }}
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
+      - id: karar
+        env:
+          SITE_URL: ${{ format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+          PYTHONIOENCODING: utf-8
+        run: python scripts/check_fresh.py --site-url "${SITE_URL}"
 
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+  build:
+    needs: kontrol
+    # Zamanlanmış çalışmada yalnızca yeni kapanış varsa; elle ve kod değişikliğinde her zaman.
+    if: ${{ github.event_name != 'schedule' || needs.kontrol.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Bağımlılıklar
+        run: pip install -r requirements.txt
 
-      - name: Run Data Pipeline
-        run: |
-          python fetch_recent_prices.py
-          python sync_fvt_metrics.py
-          python analysis_engine.py
-          python scoring.py
+      - name: Veri deposunu geri yükle
+        if: ${{ github.event.inputs.full != 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: tefas-quant-db-${{ github.run_id }}
+          restore-keys: tefas-quant-db-
 
-      - name: Commit and Push Database Changes
+      - name: JavaScript sözdizimi denetimi
         run: |
-          git config --global user.name "Quant Bot"
-          git config --global user.email "bot@quant.local"
-          git add tefas.db
-          git commit -m "Auto-update: TEFAS database refreshed" || echo "No changes to commit"
-          git push
+          set -e
+          mkdir -p /tmp/esm
+          for f in assets/js/*.js assets/js/views/*.js; do cp "$f" "/tmp/esm/$(basename "${f%.js}").mjs"; done
+          for f in /tmp/esm/*.mjs; do node --check "$f"; done
+
+      - name: Veriyi güncelle, skorla, siteyi üret
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python scripts/update.py --delay 3.0 ${{ github.event.inputs.full == 'true' && '--full' || '' }}
+
+      - name: Veri deposunu kaydet
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: tefas-quant-db-${{ github.run_id }}
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

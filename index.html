@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="TEFAS yatırım fonlarını kendi puanlama ve cezalandırma yöntemimizle kategori içinde sıralayan kantitatif analiz paneli.">
+<meta name="theme-color" content="#0b2a5b">
+<title>TEFAS Quant</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b2a5b'/%3E%3Cpath d='M14 44l10-12 8 7 18-21' fill='none' stroke='%23fff' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Ana gezinme">
+    <a class="sidebar-brand" href="#/genel">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14"/><path d="M14 44l10-12 8 7 18-21"/></svg>
+      </span>
+      <span class="brand-copy">
+        <span class="brand-text">TEFAS Quant</span>
+        <span class="brand-caption">FON DERECELENDİRME</span>
+      </span>
+    </a>
+
+    <nav class="sidebar-nav" id="tabs" aria-label="Sayfalar">
+      <div class="nav-section">
+        <span class="nav-heading">PİYASA</span>
+        <a class="tab" data-view="genel" href="#/genel"><span class="nav-icon">▦</span><span>Genel Bakış</span></a>
+        <a class="tab" data-view="siralama" href="#/siralama"><span class="nav-icon">≡</span><span>Sıralama</span></a>
+      </div>
+      <div class="nav-section">
+        <span class="nav-heading">ANALİZ</span>
+        <a class="tab" data-view="karsilastir" href="#/karsilastir"><span class="nav-icon">⇄</span><span>Karşılaştır</span></a>
+        <a class="tab" data-view="metodoloji" href="#/metodoloji"><span class="nav-icon">◎</span><span>Metodoloji</span></a>
+      </div>
+    </nav>
+
+    <div class="sidebar-status"><span class="status-dot"></span><span id="sideStatus">TEFAS · günlük</span></div>
+  </aside>
+
+  <div class="main-column">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="page-heading">
+          <span class="page-eyebrow" id="pageEyebrow">TEFAS QUANT</span>
+          <h1 id="pageTitle">Genel Bakış</h1>
+        </div>
+        <div class="topbar-actions">
+          <label class="search">
+            <span class="sr-only">Fon ara</span>
+            <input id="globalSearch" type="search" placeholder="Fon kodu veya adı…" autocomplete="off">
+            <div class="ac-list" id="searchResults" hidden></div>
+          </label>
+          <button id="themeBtn" class="icon-btn" type="button" title="Tema değiştir" aria-label="Tema değiştir">◐</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="app" class="app">
+      <div class="loading"><div class="spinner" aria-hidden="true"></div><p>Fon verileri yükleniyor…</p></div>
+    </main>
+
+    <footer class="footer">
+      <p id="dataStatus">—</p>
+      <p class="disclaimer">
+        TEFAS Quant, TEFAS'ın herkese açık verilerinden kendi puanlama ve cezalandırma kurallarıyla
+        üretilmiş bir sıralamadır; yatırım tavsiyesi değildir. Geçmiş performans gelecekteki sonuçların
+        göstergesi değildir. Fiyatlar her işlem günü TEFAS yayımladıktan sonra bir kez güncellenir.
+      </p>
+    </footer>
+  </div>
+</div>
+
+<script type="module" src="assets/js/app.js"></script>
+</body>
+</html>

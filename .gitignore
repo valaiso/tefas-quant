@@ -1,8 +1,22 @@
-venv/
+# Ham veri deposu (GitHub Actions cache'inde taşınır, depoya girmez)
+data/
+
+# Üretilen site (Pages'e artifact olarak yüklenir)
+dist/
+
+# Eski SQLite dosyaları (artık kullanılmıyor)
+*.db
+*.db.bak
+tefas.db.before_*
+*.sqlite
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+venv/
+.venv/
+
+# Yerel
+.claude/
 *.csv
 *.xlsx
-tefas.db
-tefas.db.bak
-tefas.db.before_*

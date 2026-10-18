@@ -402,6 +402,17 @@ table.compare td.best { background: var(--up-soft); font-weight: 700; }
 .tooltip .t-row { display: flex; justify-content: space-between; gap: 12px; }
 .tooltip .sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; }
 
+/* ------------------------------------------------------------- model */
+.weight-bar { display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin: 2px 0 14px; gap: 2px; }
+.weight-bar span { display: flex; align-items: center; justify-content: center; min-width: 4px; color: #fff; font-size: .74rem; font-weight: 700; white-space: nowrap; overflow: hidden; }
+@media (max-width: 640px) { table.model-table td .fund-name { max-width: 150px; } }
+.mdl-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: middle; }
+.model-table td .fund-name, .compact .fund-name { display: block; font-size: .76rem; color: var(--text-dim); max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.model-table .weight { font-size: 1rem; }
+.model-table tfoot td { border-top: 1px solid var(--border); }
+.hold-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 3px; border: 1px solid var(--border); border-radius: 999px; font-size: .84rem; }
+.rule-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: .9rem; line-height: 1.5; }
+
 /* ------------------------------------------------------------- metodoloji */
 
 .weights { display: grid; gap: 9px; margin-bottom: 14px; }

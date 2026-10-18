@@ -10,7 +10,7 @@ const state = { qualified: false, cat: null, month: null, period: "all" };
 const PERIODS = [["1a", "1A", 1], ["3a", "3A", 3], ["6a", "6A", 6], ["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["all", "Tümü", null]];
 
 /** Seçilen dönemin başlangıç noktası (aylık noktalar; son nokta bugün). */
-function startIndex(dates, months) {
+export function startIndex(dates, months) {
   if (!months) return 0;
   const end = new Date(dates[dates.length - 1]);
   const from = new Date(end); from.setMonth(from.getMonth() - months);
@@ -21,13 +21,13 @@ function startIndex(dates, months) {
 }
 
 /** Seriyi i0'dan itibaren 100'e oranlar. */
-function windowed(v, i0) {
+export function windowed(v, i0) {
   const base = v[i0];
   return v.slice(i0).map((x) => (x == null || !base ? null : (x / base) * 100));
 }
 
 /** Pencere için istatistikler (aylık noktalardan). */
-function windowStats(dates, lvl, ppf) {
+export function windowStats(dates, lvl, ppf) {
   const pts = lvl.map((v, i) => [dates[i], v]).filter(([, v]) => v != null);
   if (pts.length < 2) return null;
   const first = pts[0][1], last = pts[pts.length - 1][1];
@@ -61,7 +61,7 @@ async function load() {
   return cache;
 }
 
-const statRow = (label, st, cls = "") => !st ? "" : `<tr class="${cls}">
+export const statRow = (label, st, cls = "") => !st ? "" : `<tr class="${cls}">
   <td class="left">${label}</td>
   <td class="${st.total >= 0 ? "up" : "down"}"><b>${pct(st.total, 1)}</b></td>
   <td>${pct(st.cagr, 1)}</td>

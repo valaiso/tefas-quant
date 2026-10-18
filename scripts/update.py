@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from quant import backtest, benchmarks, export, fetch, scoring, simulation  # noqa: E402
+from quant import backtest, benchmarks, export, fetch, model, scoring, simulation  # noqa: E402
 from quant.db import DEFAULT_DB, ROOT, open_db  # noqa: E402
 
 
@@ -53,6 +53,11 @@ def main() -> int:
         st = sim["stats"]["aplus_public"]
         print(f"[simülasyon] {sim['dates'][0]} – {sim['dates'][-1]}: A+ sepeti %{st['total']}, "
               f"PPF %{sim['stats']['ppf']['total']}", flush=True)
+    mdl = model.run(result["panel"], funds, result["scored"], bench)
+    export.write_json(Path(args.out) / "data" / "model.json", mdl)
+    print(f"[model] {len(mdl['basket'])} fon: "
+          + ", ".join(f"{b['c']} %{b['w']}" for b in mdl["basket"])
+          + f" · {len(mdl['history'])} aylık geçmiş", flush=True)
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.close()
     print(

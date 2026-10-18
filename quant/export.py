@@ -79,6 +79,8 @@ def _fund_record(code: str, f: pd.Series) -> dict:
         "aum": _r(f["aum"], 0),
         "inv": None if pd.isna(f["investors"]) else int(f["investors"]),
         "ig": _r(f["investor_growth_1m"]),
+        "ivd": {k: (None if pd.isna(f.get(f"investor_delta_{k}")) else int(f[f"investor_delta_{k}"])) for k in ("1w", "1m")},
+        "ivp": {k: _r(f.get(f"investor_pct_{k}")) for k in ("1w", "1m")},
         "fr": _r(f["flow_ratio"]),
         "fr3": _r(f["flow_3m_ratio"]),
         "ag": _r(f["aum_growth_1m"]),
@@ -156,6 +158,11 @@ def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
     signals = scored["signal"].value_counts().to_dict()
     meta = {
         "lastDataDate": result["as_of"],
+        # Rapor dönemleri: akış ve yatırımcı değişimi bu iki gün arasında ölçülür
+        "periods": {
+            key: {"from": price.index[-1 - n].strftime("%Y-%m-%d"), "to": price.index[-1].strftime("%Y-%m-%d")}
+            for key, n in (("1w", 5), ("1m", 21)) if len(price) > n
+        },
         "firstDataDate": result["first_date"],
         "generated": result["generated"],
         "fundCount": len(funds),

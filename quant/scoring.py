@@ -273,6 +273,14 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame,
     m["aum"] = size.iloc[-1]
     m["investor_growth_1m"] = (inv.iloc[-1] / inv.iloc[-22] - 1) * 100 if len(inv) > 22 else np.nan
     m["aum_growth_1m"] = (size.iloc[-1] / size.iloc[-22] - 1) * 100 if len(size) > 22 else np.nan
+    # Rapor için: haftalık (5 işlem günü) ve aylık (21) yatırımcı değişimi, kişi ve %
+    for key, n in (("1w", 5), ("1m", 21)):
+        if len(inv) > n:
+            m[f"investor_delta_{key}"] = inv.iloc[-1] - inv.iloc[-1 - n]
+            m[f"investor_pct_{key}"] = (inv.iloc[-1] / inv.iloc[-1 - n] - 1) * 100
+        else:
+            m[f"investor_delta_{key}"] = np.nan
+            m[f"investor_pct_{key}"] = np.nan
     flow = shares.diff() * px
     m["flow_1w"] = flow.iloc[-5:].sum(min_count=1)
     m["flow_1m"] = flow.iloc[-21:].sum(min_count=1)

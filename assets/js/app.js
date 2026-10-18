@@ -7,6 +7,7 @@ import * as compare from "./views/compare.js";
 import * as method from "./views/method.js";
 import * as backtest from "./views/backtest.js";
 import * as simulation from "./views/simulation.js";
+import * as report from "./views/report.js";
 
 const VIEWS = {
   genel: { mod: overview, title: "Genel Bakış", eyebrow: "PİYASA ÖZETİ" },
@@ -15,6 +16,7 @@ const VIEWS = {
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
   backtest: { mod: backtest, title: "QuantBacktest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
   simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ" },
+  rapor: { mod: report, title: "Rapor", eyebrow: "HAFTALIK · AYLIK AKIŞ" },
   metodoloji: { mod: method, title: "Metodoloji", eyebrow: "PUANLAMA & CEZALAR" },
 };
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from pathlib import Path
 import sqlite3
 import time
 import urllib.error
@@ -99,6 +100,32 @@ def sync_categories(conn: sqlite3.Connection, client: Tefas, end: dt.date, force
 # ------------------------------------------------------------------- FVT
 
 FVT_URL = "https://fvt.com.tr/api/funds/{code}"
+# FVT'nin depoya giren küçük kopyası. GitHub Actions sunucularından FVT'ye
+# ulaşılamayabiliyor; o durumda ücret/stopaj/işlem durumu buradan gelir.
+FVT_SNAPSHOT = Path(__file__).resolve().parent / "fund_info.json"
+FVT_FIELDS = ("fee", "stopaj", "trading_active", "is_serbest", "fvt_updated")
+
+
+def save_fvt_snapshot(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        f"SELECT code, {', '.join(FVT_FIELDS)} FROM funds WHERE fvt_updated IS NOT NULL ORDER BY code"
+    ).fetchall()
+    data = {r[0]: dict(zip(FVT_FIELDS, r[1:])) for r in rows}
+    FVT_SNAPSHOT.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    return len(data)
+
+
+def load_fvt_snapshot(conn: sqlite3.Connection) -> int:
+    """Depodaki kopyayı, FVT bilgisi olmayan fonlara uygular."""
+    if not FVT_SNAPSHOT.exists():
+        return 0
+    data = json.loads(FVT_SNAPSHOT.read_text(encoding="utf-8"))
+    cur = conn.executemany(
+        f"UPDATE funds SET {', '.join(f'{k} = ?' for k in FVT_FIELDS)} WHERE code = ? AND fvt_updated IS NULL",
+        [tuple(v.get(k) for k in FVT_FIELDS) + (code,) for code, v in data.items()],
+    )
+    conn.commit()
+    return cur.rowcount
 
 
 def _fvt_fund(code: str) -> dict | None:
@@ -183,10 +210,14 @@ def sync_fvt(conn: sqlite3.Connection, end: dt.date, force: bool = False,
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
     conn.commit()
-    # Fonların çoğu güncellendiyse haftalık tur tamam sayılır
+    # Fonların çoğu güncellendiyse haftalık tur tamam sayılır ve kopya yenilenir
     if codes and updated >= len(codes) * 0.8:
         meta_set(conn, "fvt_sync", end.isoformat())
+        print(f"[fvt] depo kopyası yenilendi: {save_fvt_snapshot(conn)} fon", flush=True)
     print(f"[fvt] {updated}/{len(codes)} fon güncellendi", flush=True)
+    filled = load_fvt_snapshot(conn)
+    if filled:
+        print(f"[fvt] {filled} fon için bilgi depo kopyasından alındı", flush=True)
     return updated
 
 

@@ -282,8 +282,13 @@ def compute_metrics(panel: dict[str, pd.DataFrame], funds: pd.DataFrame) -> tupl
 # ================================================================== skorlar
 
 def _pct_rank(s: pd.Series) -> pd.Series:
-    """Kategori içi yüzdelik (0-100]; eksik değer kategori medyanı sayılır."""
+    """Kategori içi yüzdelik (0-100]; eksik değer kategori medyanı sayılır.
+
+    Kategoride hiç değer yoksa (ör. FVT'ye ulaşılamadı, ücret yok) herkes nötr 50 alır.
+    """
     s = pd.to_numeric(s, errors="coerce")
+    if s.notna().sum() == 0:
+        return pd.Series(50.0, index=s.index)
     return s.fillna(s.median()).rank(pct=True) * 100
 
 
@@ -310,6 +315,8 @@ def investor_score(g: pd.DataFrame) -> pd.Series:
 
 def cost_score(g: pd.DataFrame) -> pd.Series:
     """Yönetim ücreti: kategorideki en ucuz fon ~100, en pahalı ~0."""
+    if g["fee"].notna().sum() == 0:
+        return pd.Series(50.0, index=g.index)
     return 100 - _pct_rank(g["fee"]) + 100 / len(g)
 
 
@@ -392,6 +399,8 @@ def score_funds(m: pd.DataFrame) -> pd.DataFrame:
         s["absolute"] - s["p_investor"] - s["p_outflow"] - s["p_anomaly"]
         + s["adj_confidence"] + s["adj_stability"]
     ).clip(0, 100)
+    # Hesaplanamayan skor (eksik veri) nötr 50 sayılır; iş çökmesin, fon listeden düşmesin
+    s["score"] = s["score"].fillna(50.0)
 
     s["rank"] = s.groupby("category")["score"].rank(ascending=False, method="min").astype(int)
     s["cat_size"] = s.groupby("category")["score"].transform("count").astype(int)

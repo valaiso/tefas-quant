@@ -1,4 +1,4 @@
-"""TEFAS ve FVT'den veri çekme, kategori eşleme ve 3 yıllık budama."""
+"""TEFAS ve FVT'den veri çekme, kategori eşleme ve 5 yıllık budama."""
 from __future__ import annotations
 
 import datetime as dt
@@ -237,7 +237,7 @@ def update(conn: sqlite3.Connection, delay: float = 3.0, full: bool = False,
 
     budget_min verilirse geçmiş doldurma bu süre dolunca durur; site yine de
     güncel fiyatla yayınlanır, kalan geçmiş sonraki çalışmalarda tamamlanır.
-    İlk kurulumda 3 yıl tek seferde değil, birkaç çalışmaya yayılarak dolar.
+    İlk kurulumda geçmiş tek seferde değil, birkaç çalışmaya yayılarak dolar.
     """
     started = time.monotonic()
     out_of_time = lambda: budget_min is not None and time.monotonic() - started > budget_min * 60  # noqa: E731
@@ -259,7 +259,7 @@ def update(conn: sqlite3.Connection, delay: float = 3.0, full: bool = False,
         n = fetch_window(conn, client, s, e)
         print(f"[fiyat] {s} -> {e}: {n} kayıt", flush=True)
 
-    # 2) Geçmiş doldurma: en eski kayıttan geriye, 3 yıllık pencerenin başına kadar
+    # 2) Geçmiş doldurma: en eski kayıttan geriye, 3 yıllık pencerenin başına kadar (HISTORY_YEARS)
     lo = conn.execute("SELECT MIN(date) FROM prices").fetchone()[0]
     oldest = dt.date.fromisoformat(lo) if lo else recent_start
     if oldest > cutoff + dt.timedelta(days=7):
@@ -270,7 +270,7 @@ def update(conn: sqlite3.Connection, delay: float = 3.0, full: bool = False,
             n = fetch_window(conn, client, s, e)
             print(f"[geçmiş] {s} -> {e}: {n} kayıt", flush=True)
     else:
-        print("[geçmiş] 3 yıllık pencere tamam", flush=True)
+        print("[geçmiş] saklama penceresi tamam", flush=True)
 
     sync_categories(conn, client, today, force=full)
     sync_fvt(conn, today, force=full)

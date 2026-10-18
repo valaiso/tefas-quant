@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Günlük veri hattı: TEFAS'tan çek -> 3 yıla buda -> skorla -> statik siteyi üret.
+"""Günlük veri hattı: TEFAS'tan çek -> 5 yıla buda -> skorla -> statik siteyi üret.
 
 Kullanım
 --------
     python scripts/update.py               # artımlı güncelleme + site
-    python scripts/update.py --full        # 3 yılı baştan çek
+    python scripts/update.py --full        # tüm pencereyi baştan çek
     python scripts/update.py --skip-fetch  # yalnızca skor ve site
     python scripts/update.py --budget-min 20  # geçmiş doldurmayı 20 dk ile sınırla
 """

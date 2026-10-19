@@ -11,10 +11,9 @@ import { esc, num, dateTR, monthLabel } from "../util.js";
 import { lineChart } from "../chart.js";
 import * as R from "./modelreport.js";
 import * as PR from "../portfolio-report.js";
+import { supabaseClient } from "../supabase.js";
 
 const ANALIZ = new URL("/Analiz/", "https://valaiso.github.io").href;
-const SUPABASE_URL = "https://jqmfvinbzgqyitqquzdc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_uw979hCwS6xyLRTexQX55A_ZqgWidDs";  // tarayıcı anahtarı; veriyi RLS korur
 const LOCAL_KEY = "tefas-portfoy-v1";
 const MODEL_COLORS = { guvenli: "#0b7a45", dengeli: "#1f5fbf", atak: "#db2777", bes: "#0891b2",
   bes_koruyucu: "#64748b", bes_dengeli: "#0891b2", bes_buyume: "#7c2d12" };
@@ -33,8 +32,7 @@ function portfolioState() {
     let local = null;
     try { local = JSON.parse(localStorage.getItem(LOCAL_KEY)); } catch { /* özel pencere */ }
     try {
-      const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.117.2");
-      const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
+      const sb = await supabaseClient();
       const { data: { session } } = await sb.auth.getSession();
       if (session) {
         const { data, error } = await sb.from("portfolio_state").select("state_json, updated_at").eq("user_id", session.user.id).maybeSingle();

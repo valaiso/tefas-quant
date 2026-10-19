@@ -1,5 +1,6 @@
 // TEFAS Quant - uygulama girişi: veri yükleme, yönlendirme, tema, arama
 import { esc, dateTR } from "./util.js";
+import { initPush } from "./push.js";
 import * as overview from "./views/overview.js";
 import * as ranking from "./views/ranking.js";
 import * as fund from "./views/fund.js";
@@ -109,6 +110,7 @@ document.getElementById("themeBtn").addEventListener("click", () => {
 });
 
 window.addEventListener("hashchange", render);
+initPush().catch((err) => console.warn("bildirim kurulumu", err));
 load().then(render).catch((err) => {
   app.innerHTML = `<div class="card empty"><h3>Veriler yüklenemedi</h3><p>${esc(err.message)}</p></div>`;
 });

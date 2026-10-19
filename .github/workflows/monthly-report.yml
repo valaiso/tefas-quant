@@ -1,9 +1,11 @@
 name: Aylık Model Rapor e-postası
 
-# Her ayın 1'inde 17:15 TR (14:15 UTC): yayındaki sitenin Model Rapor sayfası PDF'e
-# basılır ve e-postayla gönderilir. Site önceki akşam ayın son işlem günüyle
-# güncellendiği için rapor biten ayı kapsar. GitHub zamanlanmış işleri biraz
-# geciktirebildiği için 18:00'den önce başlatılır.
+# Her ayın 1'inde 17:15 TR: yayındaki sitenin Model Rapor sayfası PDF'e basılır ve e-postayla
+# gönderilir (18:00'e kadar ulaşır). Site önceki akşam ayın son işlem günüyle güncellendiği için
+# rapor biten ayı kapsar. GitHub sırası yoğunken çalışma saatlerce gecikebilir ya da hiç başlamayabilir;
+# bu yüzden iş 13:00'te başlar ve 17:15'e kadar hazır bekler (ilki başlamazsa 14:30 ve 17:15
+# başlangıçları devreye girer). 18:30 ve 19:30'daki yedek çalışmalar e-posta gitmediyse gönderir,
+# gittiyse hiçbir şey yapmaz (önbellekteki işaret).
 #
 # Gerekli secret'lar: MAIL_USER (gönderen Gmail), MAIL_APP_PASSWORD (Gmail uygulama şifresi),
 # MAIL_TO (alıcı). Kişisel Portföy Raporu (ikinci PDF) için ayrıca SUPABASE_SERVICE_ROLE_KEY
@@ -12,26 +14,57 @@ name: Aylık Model Rapor e-postası
 
 on:
   schedule:
-    - cron: '15 14 1 * *'
+    - cron: '0 10 1 * *'     # hazırlık 13:00 TR, 17:15'e kadar bekler
+    - cron: '30 11 1 * *'    # hazırlık 14:30 TR
+    - cron: '15 14 1 * *'    # 17:15 TR
+    - cron: '30 15 1 * *'    # yedek 18:30 TR
+    - cron: '30 16 1 * *'    # yedek 19:30 TR
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Aynı anda tek çalışma: sıradaki, önceki bitince başlar ve işareti görür.
+concurrency:
+  group: aylik-rapor-eposta
+  cancel-in-progress: false
+
 jobs:
   mail:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 350   # 13:00'te başlayıp 17:15'e kadar bekleyebilmesi için
     env:
       SITE_URL: ${{ format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
       PYTHONIOENCODING: utf-8
     steps:
+      - name: Ay (TR)
+        id: ay
+        run: echo "ay=$(TZ=Europe/Istanbul date +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Bu ayın e-postası gönderildi mi?
+        id: isaret
+        if: github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: mail-sent.flag
+          key: mail-sent-${{ steps.ay.outputs.ay }}
+      - name: Zaten gönderildi
+        if: steps.isaret.outputs.cache-hit == 'true'
+        run: echo "Bu ayın raporu daha önce gönderildi; bu çalışma bir şey yapmıyor."
+      - name: 17:15'e kadar bekle
+        if: github.event_name == 'schedule' && steps.isaret.outputs.cache-hit != 'true'
+        run: |
+          now=$(date -u +%s); target=$(date -u -d "$(date -u +%F) 14:15" +%s)
+          if [ "$target" -gt "$now" ]; then echo "$(( (target - now) / 60 )) dk bekleniyor"; sleep $(( target - now )); fi
+
       - uses: actions/checkout@v5
+        if: steps.isaret.outputs.cache-hit != 'true'
       - uses: actions/setup-python@v6
+        if: steps.isaret.outputs.cache-hit != 'true'
         with:
           python-version: '3.12'
 
       - name: Raporu PDF'e bas
+        if: steps.isaret.outputs.cache-hit != 'true'
         run: |
           google-chrome --headless=new --no-sandbox --disable-gpu --no-pdf-header-footer \
             --run-all-compositor-stages-before-draw --virtual-time-budget=20000 \
@@ -40,6 +73,7 @@ jobs:
 
       # Portföy yalnızca bu adımda tarayıcıya verilir ve PDF'e basılır; siteye ya da depoya yazılmaz.
       - name: Kişisel portföy raporunu PDF'e bas
+        if: steps.isaret.outputs.cache-hit != 'true'
         continue-on-error: true
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -50,8 +84,17 @@ jobs:
           python scripts/portfolio_pdf.py --site-url "${SITE_URL}" --out portfoy-rapor.pdf
 
       - name: E-postayı gönder
+        if: steps.isaret.outputs.cache-hit != 'true'
         env:
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python scripts/send_report.py --site-url "${SITE_URL}" --pdf model-rapor.pdf --portfolio-pdf portfoy-rapor.pdf
+        run: |
+          python scripts/send_report.py --site-url "${SITE_URL}" --pdf model-rapor.pdf --portfolio-pdf portfoy-rapor.pdf
+          date +%F > mail-sent.flag
+      - name: Gönderildi işaretini kaydet
+        if: github.event_name == 'schedule' && steps.isaret.outputs.cache-hit != 'true' && hashFiles('mail-sent.flag') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: mail-sent.flag
+          key: mail-sent-${{ steps.ay.outputs.ay }}

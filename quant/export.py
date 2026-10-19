@@ -12,7 +12,7 @@ import pandas as pd
 from . import config
 from .db import ROOT
 
-SITE_FILES = ["index.html", "assets"]
+SITE_FILES = ["index.html", "assets", "sw.js", "manifest.webmanifest"]
 
 
 def _clean(value):

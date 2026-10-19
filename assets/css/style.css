@@ -815,3 +815,12 @@ table.bt-grades td { white-space: nowrap; }
     break-after: page; page-break-after: always; margin: 0; }
   .rp-page:last-child { break-after: auto; page-break-after: auto; }
 }
+
+/* Aylık bildirim kurulum kartı (yalnızca ana ekran uygulamasında, kurulum bitene kadar) */
+.push-setup { padding: 16px 28px 0; }
+.push-card h2 { font-size: 1rem; margin: 0 0 6px; }
+.push-card p { margin: 0 0 10px; }
+.push-login { display: grid; gap: 8px; max-width: 360px; }
+.push-login label { display: grid; gap: 4px; font-size: .85rem; }
+.push-err { color: var(--down, #d6404a); font-size: .85rem; margin-top: 6px; }
+@media (max-width: 640px) { .push-setup { padding: 12px 12px 0; } }

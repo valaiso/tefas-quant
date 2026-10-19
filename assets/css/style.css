@@ -824,3 +824,13 @@ table.bt-grades td { white-space: nowrap; }
 .push-login label { display: grid; gap: 4px; font-size: .85rem; }
 .push-err { color: var(--down, #d6404a); font-size: .85rem; margin-top: 6px; }
 @media (max-width: 640px) { .push-setup { padding: 12px 12px 0; } }
+/* Bildirim zili: yalnızca telefonda, tema düğmesinin solunda; açıkken dolu ve renkli */
+.push-btn { display: none; color: var(--text-dim); }
+.push-btn.is-on { color: var(--brand); }
+.push-btn svg { display: block; margin: auto; }
+@media (max-width: 900px) { .push-btn { display: inline-flex; align-items: center; justify-content: center; } }
+.push-card h2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.push-close { width: 30px; height: 30px; min-height: 30px; font-size: .8rem; }
+.push-toast { position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50;
+  max-width: calc(100vw - 32px); padding: 10px 14px; border-radius: 10px; background: #12233d; color: #fff; font-size: .85rem;
+  box-shadow: 0 6px 24px rgba(0,0,0,.25); }

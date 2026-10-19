@@ -10,11 +10,13 @@ import * as simulation from "./views/simulation.js";
 import * as report from "./views/report.js";
 import * as model from "./views/model.js";
 import * as bes from "./views/bes.js";
+import * as deger from "./views/deger.js";
 
 const VIEWS = {
   genel: { mod: overview, title: "Genel Bakış", eyebrow: "PİYASA ÖZETİ" },
   siralama: { mod: ranking, title: "Fon Sıralaması", eyebrow: "KATEGORİ İÇİ DERECELENDİRME" },
   bes: { mod: bes, title: "BES", eyebrow: "BİREYSEL EMEKLİLİK FONLARI" },
+  deger: { mod: deger, title: "Değer", eyebrow: "FON + BES DAĞILIMI DEĞERLENDİRME" },
   fon: { mod: fund, title: "Fon Detayı", eyebrow: "FON ANALİZİ", nav: "siralama" },
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
   backtest: { mod: backtest, title: "QuantBacktest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },

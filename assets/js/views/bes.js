@@ -1,10 +1,12 @@
 import { esc, num, pct, pctCell, money, dateTR, gradeBadge, scoreBar, SIGNALS, trUpper, debounce } from "../util.js";
 import { lineChart } from "../chart.js";
 import { startIndex, windowed, windowStats, statRow } from "./simulation.js";
+import { besHistory, benchData, basketSeries, rebaseFrom, weeklyStats } from "../portfolio.js";
+import * as fund from "./fund.js";
 
 const PAGE = 50;
 const TEFAS = (c) => `https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod=${encodeURIComponent(c)}`;
-const chip = (c) => `<a class="code-chip" href="${TEFAS(c)}" target="_blank" rel="noopener" title="TEFAS'ta aç">${esc(c)}</a>`;
+const chip = (c) => `<a class="code-chip" href="#/bes/${encodeURIComponent(c)}" title="Fon detayı">${esc(c)}</a>`;
 const ACCESS = {
   DK: "Devlet katkısı fonu: katkı payı otomatik yatırılır, serbestçe seçilemez",
   OKS: "Otomatik katılım (OKS) fonu: yalnızca işveren üzerinden otomatik katılım sözleşmesinde",
@@ -49,10 +51,28 @@ function badges(f) {
   return out;
 }
 
-export async function render(app, route) {
+let cacheCats = null;
+
+/** Fon detay sayfası (fund.js) için BES verisiyle kurulmuş store. */
+async function besStore(main) {
+  if (!cacheCats) cacheCats = await get("data/bes_categories.json").catch(() => ({}));
+  const { meta, funds } = cacheFunds;
+  return {
+    meta: { ...main.meta, ...meta, config: main.meta.config },
+    funds, byCode: new Map(funds.map((f) => [f.c, f])), categories: cacheCats,
+    history: (c) => besHistory(c), benchmarks: () => main.benchmarks(),
+  };
+}
+
+export async function render(app, route, main) {
   app.innerHTML = `<div class="loading"><div class="spinner"></div><p>BES fonları yükleniyor…</p></div>`;
   if (route.params.has("tab")) state.tab = route.params.get("tab");
   if (!cacheFunds) cacheFunds = await get("data/bes.json").catch(() => null);
+  if (cacheFunds && route.arg) {
+    document.getElementById("pageTitle").textContent = route.arg;
+    await fund.render(app, route, await besStore(main), { base: "#/bes/", bes: true });
+    return;
+  }
   if (!cacheFunds) {
     app.innerHTML = `<div class="card empty"><h3>BES verisi henüz hazır değil</h3><p>Emeklilik fonlarının geçmişi ilk çalışmalarda dolduruluyor.</p></div>`;
     return;
@@ -197,8 +217,6 @@ function renderRanking(body, funds) {
 // Kullanıcının kendi BES dağılımı ile BEFAS modelini haftalık fiyatlardan karşılaştırır.
 const CMP_KEY = "tq_bes_compare";
 const CMP_PERIODS = [["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["5y", "5Y", 60]];
-const histCache = new Map();
-let benchCache = null;
 
 function loadCmp() {
   try {
@@ -210,64 +228,6 @@ function loadCmp() {
 function saveCmp(v) {
   try { localStorage.setItem(CMP_KEY, JSON.stringify(v)); } catch { /* yok say */ }
 }
-async function besHistory(code) {
-  if (!histCache.has(code)) {
-    histCache.set(code, fetch(`data/bes_history/${encodeURIComponent(code)}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
-  }
-  return histCache.get(code);
-}
-async function benchData() {
-  if (!benchCache) benchCache = fetch("data/benchmarks.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  return benchCache;
-}
-
-/** Haftalık fiyatlardan sabit hedef ağırlıklı sepet; rebalWeeks=0 ise al-tut. */
-function basketSeries(weights, hists, from, rebalWeeks) {
-  const codes = Object.keys(weights).filter((c) => hists[c]);
-  if (!codes.length) return null;
-  const maps = Object.fromEntries(codes.map((c) => [c, new Map(hists[c].d.map((d, i) => [d, hists[c].p[i]]))]));
-  const start = [from, ...codes.map((c) => hists[c].d[0])].sort().pop();
-  const dates = [...new Set(codes.flatMap((c) => hists[c].d))].filter((d) => d >= start).sort();
-  if (dates.length < 2) return null;
-  const last = Object.fromEntries(codes.map((c) => [c, null]));
-  const tw = codes.reduce((a, c) => a + weights[c], 0);
-  let units = null, value = 100;
-  const out = { d: [], v: [], start };
-  dates.forEach((d, k) => {
-    codes.forEach((c) => { const p = maps[c].get(d); if (p != null) last[c] = p; });
-    if (codes.some((c) => last[c] == null)) return;
-    if (units) value = codes.reduce((a, c) => a + units[c] * last[c], 0);
-    if (!units || (rebalWeeks && k % rebalWeeks === 0)) {
-      units = Object.fromEntries(codes.map((c) => [c, (value * weights[c] / tw) / last[c]]));
-    }
-    out.d.push(d);
-    out.v.push(value);
-  });
-  return out.d.length >= 2 ? out : null;
-}
-
-function rebaseFrom(d, v, from) {
-  const i0 = d.findIndex((x) => x >= from);
-  if (i0 < 0) return null;
-  const base = v.slice(i0).find((x) => x != null);
-  return base ? { d: d.slice(i0), v: v.slice(i0).map((x) => (x == null ? null : (x / base) * 100)) } : null;
-}
-
-function weeklyStats(s) {
-  const pts = s.d.map((d, i) => [d, s.v[i]]).filter(([, v]) => v != null);
-  if (pts.length < 2) return null;
-  const first = pts[0][1], last = pts[pts.length - 1][1];
-  const years = (Date.parse(pts[pts.length - 1][0]) - Date.parse(pts[0][0])) / (365.25 * 86400000);
-  let peak = -Infinity, mdd = 0;
-  for (const [, v] of pts) { peak = Math.max(peak, v); mdd = Math.min(mdd, (v / peak - 1) * 100); }
-  const rets = pts.slice(1).map(([, v], i) => v / pts[i][1] - 1);
-  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
-  const sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / Math.max(1, rets.length - 1));
-  const perYear = rets.length / Math.max(years, 1e-6);  // seri sıklığı (haftalık ~52, 2 aylık ~6)
-  const cagr = years > 0.95 ? ((last / first) ** (1 / years) - 1) * 100 : null;
-  return { total: (last / first - 1) * 100, cagr, mdd, vol: sd * Math.sqrt(perYear) * 100, from: pts[0][0] };
-}
-
 function comparatorHtml(cmp, funds) {
   const opts = funds.map((f) => `<option value="${esc(f.c)}">${esc(f.c)} · ${esc(f.co)} · ${esc(f.n.replace(/^.*?A\.Ş\.\s*/, "").slice(0, 60))}</option>`).join("");
   return `<section class="card">

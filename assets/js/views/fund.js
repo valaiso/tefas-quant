@@ -6,6 +6,7 @@ const PERIODS = [
   { key: "6a", label: "6A", days: 182 },
   { key: "1y", label: "1Y", days: 365 },
   { key: "3y", label: "3Y", days: 1100 },
+  { key: "5y", label: "5Y", days: 1830 },
 ];
 
 function ring(score) {
@@ -38,7 +39,10 @@ function waterfall(f, weights) {
     </tbody></table>`;
 }
 
-export async function render(app, route, store) {
+export async function render(app, route, store, opts = {}) {
+  const base = opts.base || "#/fon/";
+  const bes = !!opts.bes;
+  const chip = (c) => `<a class="code-chip" href="${base}${encodeURIComponent(c)}">${esc(c)}</a>`;
   const f = store.byCode.get(route.arg);
   if (!f) {
     const ex = store.meta.excluded.find((x) => x.code === route.arg);
@@ -78,6 +82,8 @@ export async function render(app, route, store) {
   <section class="fund-hero">
     <div class="fund-hero-main">
       <div class="fund-hero-tags"><span class="tag">${esc(f.k)}</span>${f.q ? `<span class="tag tag-warn">Nitelikli yatırımcı</span>` : ""}
+        ${bes ? `<span class="tag">${esc(f.co)}</span>${f.bf ? `<span class="tag tag-warn" title="${esc(f.bf)}">Şirket içi (BEFAS'ta yok)</span>` : `<span class="tag">BEFAS'a açık</span>`}
+          <a class="tag" href="https://www.tefas.gov.tr/FonAnaliz.aspx?FonKod=${encodeURIComponent(f.c)}" target="_blank" rel="noopener">TEFAS ↗</a>` : ""}
         ${signalPill(f.sig)}${f.fk ? `<span class="tag tag-danger">Kurucu riski</span>` : ""}</div>
       <h2><span class="mono">${esc(f.c)}</span> ${esc(f.n)}</h2>
       <div class="fund-hero-figs">
@@ -86,7 +92,7 @@ export async function render(app, route, store) {
         <div><span>Kategori yüzdeliği</span><b>%${num(f.pc, 0)}</b></div>
         <div><span>Veri güveni</span><b>%${num(f.cf, 0)}</b></div>
         <div><span>Fon büyüklüğü</span><b>${money(f.aum)}</b></div>
-        <div><span>Yatırımcı</span><b>${num(f.inv, 0)}</b></div>
+        <div><span>${bes ? "Katılımcı" : "Yatırımcı"}</span><b>${num(f.inv, 0)}</b></div>
       </div>
     </div>
     <div class="fund-hero-score">${ring(f.s)}<div class="fund-grade">${gradeBadge(f)}<span>${esc(f.sig)}</span></div></div>
@@ -155,19 +161,20 @@ export async function render(app, route, store) {
         <tr><td>Net akış (3 ay)</td><td class="${f.fl["3m"] >= 0 ? "up" : "down"}">${money(f.fl["3m"])}</td></tr>
         <tr><td>Büyüklük değişimi (1A)</td><td>${pctCell(f.ag, 1)}</td></tr>
         <tr><td>3A akış / büyüklük</td><td>${pctCell(f.fr3, 1)}</td></tr>
-        <tr><td>Yönetim ücreti</td><td>%${num(f.fee)}</td></tr>
-        <tr><td>Stopaj</td><td>${f.st == null ? "—" : "%" + num(f.st, 1)}</td></tr>
+        ${bes ? `<tr><td>Fon işletim gideri</td><td>fiyata yansır</td></tr>
+        <tr><td>Stopaj</td><td>birikimde yok (çıkışta %15 / %10 / %5)</td></tr>` : `<tr><td>Yönetim ücreti</td><td>%${num(f.fee)}</td></tr>
+        <tr><td>Stopaj</td><td>${f.st == null ? "—" : "%" + num(f.st, 1)}</td></tr>`}
       </table>
     </section>
   </div>
 
   <section class="card">
     <div class="card-head"><h2>${esc(f.k)} kategorisinde ilk sıralar</h2>
-      <a class="btn btn-sm" href="#/karsilastir?f=${[f.c, ...peers.filter((x) => x !== f).slice(0, 2).map((x) => x.c)].join(",")}">Liderlerle karşılaştır →</a></div>
+      ${bes ? "" : `<a class="btn btn-sm" href="#/karsilastir?f=${[f.c, ...peers.filter((x) => x !== f).slice(0, 2).map((x) => x.c)].join(",")}">Liderlerle karşılaştır →</a>`}</div>
     <div class="table-wrap"><table>
       <thead><tr><th>Sıra</th><th class="left">Fon</th><th>Not</th><th>Skor</th><th>3 Ay</th><th>1 Yıl</th><th>Volatilite</th></tr></thead>
-      <tbody>${around.map((x) => `<tr class="row-link ${x === f ? "is-self" : ""}" data-href="#/fon/${encodeURIComponent(x.c)}">
-        <td>${x.rk}</td><td class="fund-cell left">${codeChip(x.c)}<span class="name">${esc(x.n)}</span></td>
+      <tbody>${around.map((x) => `<tr class="row-link ${x === f ? "is-self" : ""}" data-href="${base}${encodeURIComponent(x.c)}">
+        <td>${x.rk}</td><td class="fund-cell left">${chip(x.c)}<span class="name">${esc(x.n)}</span></td>
         <td>${gradeBadge(x)}</td><td class="score-cell">${scoreBar(x.s)}</td>
         <td>${pctCell(x.r["3a"])}</td><td>${pctCell(x.r["1y"])}</td><td>%${num(x.m.vol, 1)}</td></tr>`).join("")}
       </tbody></table></div>

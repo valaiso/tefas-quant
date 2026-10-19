@@ -426,6 +426,7 @@ button.dist-item[aria-pressed="true"] { border-color: var(--accent); background:
 p.small, .small { font-size: .8rem; }
 @media (max-width: 900px) { .calc-grid { grid-template-columns: 1fr 1fr; } }
 tr.group-row td { background: var(--surface-2); font-size: .82rem; padding-top: 8px; }
+.danger-tag { background: var(--down-soft); color: var(--down); }
 .cmp-rows { display: grid; gap: 6px; margin: 8px 0; }
 .cmp-row { display: grid; grid-template-columns: 110px 80px 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .cmp-row input { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
@@ -518,8 +519,8 @@ table.bt-grades td { white-space: nowrap; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
-  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır ve BES yalnızca masaüstünde */
-  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"] { display: none; }
+  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES ve Değer yalnızca masaüstünde */
+  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"], .tab[data-view="deger"] { display: none; }
   /* Telefonda sol üstte sayfa etiketi yerine logo ve marka adı */
   .topbar-logo { display: block; flex: none; margin-right: -6px; }
   .topbar-brand { display: block; }

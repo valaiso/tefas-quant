@@ -151,6 +151,14 @@ def write_bes(res: dict, out_dir: Path = ROOT / "dist") -> dict:
                     for key, n in (("1w", 5), ("1m", 21)) if len(price) > n},
     }
     _write(out_dir / "data" / "bes.json", {"meta": meta, "funds": records})
+    # Fon detayındaki kategori çizgisi: kategori içi eşit ağırlıklı haftalık endeks
+    rets = price[scored.index].pct_change(fill_method=None).clip(-0.5, 1.0)
+    cats = {}
+    for cat, codes in scored.groupby("category").groups.items():
+        idx = (1 + rets[list(codes)].mean(axis=1).fillna(0)).cumprod() * 100
+        wk = _weekly(idx)
+        cats[cat] = {"d": [d.strftime("%Y-%m-%d") for d in wk.index], "v": [round(float(v), 3) for v in wk.values]}
+    _write(out_dir / "data" / "bes_categories.json", cats)
     # Portföy karşılaştırma aracı için fon başına haftalık fiyat (5 yıla kadar)
     for code in price.columns:
         w = _weekly(price[code])

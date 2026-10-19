@@ -49,11 +49,11 @@ function investorTable(rows, key) {
   return `<section class="rp-block">
     <h3><span class="rp-dot brand"></span>En çok yatırımcı kazanan 10 fon</h3>
     <table class="rp-table rp-inv">
-      <thead><tr><th>#</th><th>Fon</th><th>Kategori</th><th class="r">Yeni yatırımcı</th><th class="r">Değişim</th><th class="r">Toplam</th><th class="r">Not</th><th class="bar-col"></th></tr></thead>
+      <thead><tr><th>#</th><th>Fon</th><th class="cat-col">Kategori</th><th class="r">Yeni yatırımcı</th><th class="r">Değişim</th><th class="r">Toplam</th><th class="r">Not</th><th class="bar-col"></th></tr></thead>
       <tbody>${rows.map((f, i) => `<tr>
         <td class="rk">${i + 1}</td>
         <td><b class="mono">${esc(f.c)}</b> <span class="nm">${esc(short(f.n, 40))}</span></td>
-        <td class="ct-cell">${esc(f.k)}</td>
+        <td class="ct-cell cat-col">${esc(f.k)}</td>
         <td class="r num up">${signedNum(f.ivd[key])}</td>
         <td class="r num">${pctS(f.ivp[key])}</td>
         <td class="r num">${num(f.inv, 0)}</td>

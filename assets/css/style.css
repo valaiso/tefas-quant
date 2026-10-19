@@ -672,6 +672,10 @@ table.bt-grades td { white-space: nowrap; }
 
 /* Model Rapor */
 .mr-note { margin: 4px 0 0; font-size: 8px; color: var(--rp-dim); }
+.rp-kpis.mr-kpis6 { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.rp-kpis.mr-kpis6 > div { padding: 8px 9px; }
+.rp-kpis.mr-kpis6 b { font-size: 14px; }
+.rp-kpis.mr-kpis6 em { font-size: 8.5px; }
 .mr-tag { display: inline-block; font-size: 7px; font-weight: 800; letter-spacing: .05em; padding: 0 4px; border-radius: 3px;
   background: var(--rp-soft); color: var(--rp-brand); border: 1px solid var(--rp-line); vertical-align: 1px; }
 .rp-page .dim { color: var(--rp-dim); }
@@ -714,7 +718,10 @@ table.bt-grades td { white-space: nowrap; }
   .rp-two { grid-template-columns: 1fr; }
   .rp-two .rp-block:first-child, .rp-two .rp-block:last-child { padding: 8px 14px 0; }
   .rp-cats { grid-template-columns: 1fr; }
-  .rp-table .bar-col, .rp-table .ct-cell { display: none; }
+  .rp-table .bar-col, .rp-table .ct-cell, .rp-table .cat-col { display: none; }
+  /* Telefonda kategori sütunu başlığıyla birlikte gizlenir; fon kodu ve adı için yer kalır */
+  .rp-inv th:nth-child(4), .rp-inv th:nth-child(5), .rp-inv th:nth-child(6) { width: 54px; }
+  .rp-inv th:nth-child(7) { width: 28px; }
 }
 
 /* Yazdırma / PDF: yalnızca rapor sayfaları, her biri bir A4 */

@@ -90,6 +90,10 @@ def run(panel: dict, funds: pd.DataFrame, grade: str = "A+") -> dict:
                 "median": round(float(x[h].median()), 2),
                 "cat": round(float(x[f"{h}_cat"].median()), 2),
                 "excess": round(float((x[h] - x[f"{h}_cat"]).median()), 2),
+                # Aynı gözlemlerde eşleştirilmiş kıyas: A+ ortalaması - kategori medyanlarının ortalaması.
+                # Ortalama ile aynı ölçekte olduğu için kartlardaki renk ve fark buna göre verilir.
+                "catMean": round(float(x[f"{h}_cat"].mean()), 2),
+                "excessMean": round(float((x[h] - x[f"{h}_cat"]).mean()), 2),
                 "hit": round(float((x[h] > x[f"{h}_cat"]).mean() * 100), 1),
                 "pos": round(float((x[h] > 0).mean() * 100), 1),
                 "n": int(len(x)),
@@ -102,9 +106,13 @@ def run(panel: dict, funds: pd.DataFrame, grade: str = "A+") -> dict:
     by_grade = {g: summary(data[data["grade"] == g]) for g in GRADES}
     by_date = []
     for d, g in sel.groupby("date"):
+        cats = data[(data["date"] == d) & data["category"].isin(g["category"].unique())].groupby("category")[
+            [f"{h}_cat" for h in HORIZONS]].first()
         by_date.append({
             "date": d.strftime("%Y-%m-%d"),
             "n": int(len(g)),
+            # aynı tarih, aynı kategorideki tüm fonların medyan getirisi (vade sırasıyla)
+            "cat": {k: [None if pd.isna(v) else round(float(v), 2) for v in r] for k, r in zip(cats.index, cats.values)},
             "funds": [
                 [c, k, *[None if pd.isna(v) else round(float(v), 2) for v in r]]
                 for c, k, r in zip(g["code"], g["category"], g[list(HORIZONS)].values)

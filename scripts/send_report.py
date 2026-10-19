@@ -1,4 +1,4 @@
-"""Aylık Model Rapor e-postası: yayındaki siteden özet tablo + PDF eki.
+"""Aylık Model Rapor e-postası: resmi yazı + PDF eki + siteye bağlantı.
 
     python scripts/send_report.py --site-url https://valaiso.github.io/tefas-quant --pdf model-rapor.pdf
 
@@ -21,7 +21,6 @@ from email.message import EmailMessage
 from pathlib import Path
 
 MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
-BENCH = [("ppf", "PPF ortalaması"), ("tufe", "TÜFE"), ("gold", "Gram altın"), ("usd", "Dolar/TL"), ("sp500", "S&P 500 (TL)")]
 
 
 def _today_tr() -> dt.date:
@@ -37,60 +36,47 @@ def _last_full(dates: list[str]) -> int:
     return n - 1
 
 
-def _ret(s: list, i0: int, i1: int) -> float | None:
-    if i0 < 0 or s[i0] is None or s[i1] is None:
-        return None
-    return (s[i1] / s[i0] - 1) * 100
-
-
-def _pct(v: float | None) -> str:
-    if v is None:
-        return "—"
-    sign = "+" if v > 0 else "−" if v < 0 else ""
-    return f"{sign}%{abs(v):.1f}".replace(".", ",")
-
-
-def _cell(v: float | None, bold: bool = False) -> str:
-    color = "#0f8a50" if (v or 0) > 0 else "#d6404a" if (v or 0) < 0 else "#475569"
-    txt = f"<b>{_pct(v)}</b>" if bold else _pct(v)
-    return f'<td style="padding:6px 10px;text-align:right;color:{color};border-bottom:1px solid #e3e9f2">{txt}</td>'
-
-
-def build_html(rep: dict, site_url: str) -> tuple[str, str]:
+def _letter(rep: dict, site_url: str) -> tuple[str, str, str]:
+    """Resmi yazı: konu etiketi, HTML gövde ve düz metin gövde (tablo yok; ayrıntılar PDF ekinde)."""
     models = rep["models"]
     ref = next((m for m in models if m["kind"] == "fon"), models[0])
     e = _last_full(ref["dates"])
     month = ref["dates"][e - 1]
     label = f"{MONTHS[int(month[5:7]) - 1]} {month[:4]}"
-
-    def row(name: str, dates: list[str], s: list, self_row: bool) -> str:
-        eM = _last_full(dates)
-        bg = "#ffffff" if self_row else "#f8fafd"
-        return (f'<tr style="background:{bg}"><td style="padding:6px 10px;border-bottom:1px solid #e3e9f2">'
-                f'{"<b>" + name + "</b>" if self_row else name}</td>'
-                f"{_cell(_ret(s, eM - 1, eM), self_row)}{_cell(_ret(s, eM - 3, eM))}{_cell(_ret(s, eM - 12, eM))}</tr>")
-
-    rows = [row(m["label"], m["dates"], m["series"]["model"], True) for m in models]
-    rows += [row(lbl, ref["dates"], ref["series"][k], False) for k, lbl in BENCH if k in ref["series"]]
-    th = 'style="padding:7px 10px;text-align:right;font-size:11px;letter-spacing:.05em;background:#0b2a5b;color:#fff"'
-    html = f"""<div style="font-family:Segoe UI,Arial,sans-serif;color:#12233d;max-width:640px">
-  <div style="background:linear-gradient(120deg,#0b2a5b,#1f5fbf);color:#fff;padding:20px 24px;border-radius:10px 10px 0 0">
-    <div style="font-size:12px;letter-spacing:.14em;opacity:.8">TEFAS QUANT · AYLIK RAPOR</div>
-    <div style="font-size:22px;font-weight:700;margin-top:6px">Model Performans Raporu · {label}</div>
+    today = _today_tr()
+    date_txt = f"{today.day} {MONTHS[today.month - 1]} {today.year}"
+    link = f"{site_url}/#/modelrapor"
+    paras = [
+        "Sayın İlgili,",
+        f"TEFAS Quant model portföylerinin {label} dönemine ait aylık performans raporu ekte bilgilerinize sunulmuştur.",
+        "Raporda Güvenli, Dengeli ve Atak fon modelleri ile BES Öneri modelinin aylık getirileri; para piyasası fonları "
+        "ortalaması (PPF), TÜFE, gram altın, dolar/TL ve S&P 500 (TL) ile karşılaştırmalı olarak yer almaktadır. Özet "
+        "bölümünde son 12 aylık dönemsel getiriler ve aylık getiri ısı haritası, model sayfalarında ise birikimli getiri, "
+        "kıyaslara göre farklar ve ay ay getiri tabloları bulunmaktadır.",
+        "Raporun güncel hâline aşağıdaki bağlantıdan da ulaşabilirsiniz.",
+        "Bilgilerinize sunar, iyi çalışmalar dileriz.",
+    ]
+    note = ("Model getirileri fon fiyatlarından, vergi öncesi ve geriye dönük test olarak hesaplanmıştır; geçmiş getiri "
+            "gelecekteki sonuçların göstergesi değildir. Bu e-posta ve eki yatırım tavsiyesi niteliği taşımaz.")
+    p_html = "".join(f'<p style="margin:0 0 14px;line-height:1.6">{t}</p>' for t in paras)
+    html = f"""<div style="font-family:Segoe UI,Arial,sans-serif;color:#12233d;max-width:620px;font-size:14px">
+  <div style="border-bottom:3px solid #1f5fbf;padding:0 0 12px;margin-bottom:18px">
+    <div style="font-size:18px;font-weight:700;color:#0b2a5b">TEFAS Quant</div>
+    <div style="font-size:11px;letter-spacing:.14em;color:#64748b">MODEL PORTFÖY RAPORU</div>
   </div>
-  <div style="padding:16px 4px">
-    <p style="margin:0 0 12px">{label} sonu itibarıyla fon modelleri (Güvenli, Dengeli, Atak) ve BES Öneri'nin getirileri,
-      PPF, TÜFE, altın, dolar ve S&amp;P 500 ile karşılaştırmalı. Ayrıntılı rapor ekteki PDF'te.</p>
-    <table style="border-collapse:collapse;width:100%;font-size:13px">
-      <thead><tr><th style="padding:7px 10px;text-align:left;font-size:11px;letter-spacing:.05em;background:#0b2a5b;color:#fff">MODEL / KIYAS</th>
-        <th {th}>{MONTHS[int(month[5:7]) - 1].upper()}</th><th {th}>3 AY</th><th {th}>12 AY</th></tr></thead>
-      <tbody>{"".join(rows)}</tbody>
-    </table>
-    <p style="margin:16px 0 0"><a href="{site_url}/#/modelrapor" style="color:#1f5fbf;font-weight:700">Raporu sitede aç →</a></p>
-    <p style="margin:14px 0 0;font-size:11px;color:#64748b">Getiriler vergi öncesi, geriye dönük testtir; geçmiş getiri geleceği göstermez. Yatırım tavsiyesi değildir.</p>
-  </div>
+  <p style="margin:0 0 4px;text-align:right;color:#475569">{date_txt}</p>
+  <p style="margin:0 0 18px"><b>Konu:</b> {label} Model Performans Raporu</p>
+  {p_html}
+  <p style="margin:4px 0 22px"><a href="{link}" style="display:inline-block;background:#1f5fbf;color:#fff;text-decoration:none;
+    font-weight:700;padding:10px 18px;border-radius:6px">Raporu sitede aç →</a></p>
+  <p style="margin:0 0 2px">Saygılarımızla,</p>
+  <p style="margin:0 0 22px"><b>TEFAS Quant</b></p>
+  <p style="margin:0;padding-top:12px;border-top:1px solid #e3e9f2;font-size:11px;color:#64748b;line-height:1.5">
+    <b>Ek:</b> TEFAS Quant Model Performans Raporu – {label} (PDF)<br>{note}</p>
 </div>"""
-    return label, html
+    text = (f"{date_txt}\n\nKonu: {label} Model Performans Raporu\n\n" + "\n\n".join(paras)
+            + f"\n\nRaporu sitede aç: {link}\n\nSaygılarımızla,\nTEFAS Quant\n\nEk: TEFAS Quant Model Performans Raporu – {label} (PDF)\n{note}\n")
+    return label, html, text
 
 
 def main() -> int:
@@ -106,7 +92,7 @@ def main() -> int:
     if not rep.get("models"):
         print("model_report.json boş; e-posta gönderilmedi", file=sys.stderr)
         return 1
-    label, html = build_html(rep, site)
+    label, html, text = _letter(rep, site)
     if args.dry_run:
         print(html)
         return 0
@@ -119,10 +105,10 @@ def main() -> int:
         return 1
 
     msg = EmailMessage()
-    msg["Subject"] = f"TEFAS Quant · Model Raporu · {label}"
+    msg["Subject"] = f"TEFAS Quant | {label} Model Performans Raporu"
     msg["From"] = f"TEFAS Quant <{user}>"
     msg["To"] = ", ".join(to)
-    msg.set_content(f"TEFAS Quant Model Performans Raporu ({label}). Rapor: {site}/#/modelrapor")
+    msg.set_content(text)
     msg.add_alternative(html, subtype="html")
     if args.pdf and Path(args.pdf).exists() and Path(args.pdf).stat().st_size > 10_000:
         msg.add_attachment(Path(args.pdf).read_bytes(), maintype="application", subtype="pdf",

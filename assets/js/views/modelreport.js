@@ -230,14 +230,28 @@ function modelPage(m, asOf, pageNo, total) {
   });
   const maxDiff = Math.max(...cmp.map((c) => Math.abs(c.diff || 0)), 1);
 
+  // Uzun dönem birikimli getiri: son tamamlanmış aydan geriye 24 / 36 ay. Süreye en fazla 3 ay kalmışsa
+  // başlangıçtan bugüne gösterilir (ay sayısıyla); daha kısa geçmişte boş kalır.
+  const eF = lastFull(m);
+  const longRet = (months) => {
+    const head = `<span>${months / 12} yıl birikimli</span>`;
+    if (eF < months - 3) return `<div>${head}<b>—</b><em>Geçmiş ${eF} ay, ${months / 12} yıl dolmadı</em></div>`;
+    const i0 = Math.max(0, eF - months);
+    const r = ret(m.series.model, i0, eF), p = ret(m.series.ppf, i0, eF);
+    const note = eF < months ? `Başlangıçtan ${eF} ay` : `${monthLong(m.dates[i0])} başından`;
+    return `<div class="${tone(r)}">${head}<b>${pctS(r)}</b><em>${note} · PPF ${pctS(p)}</em></div>`;
+  };
+
   return `<article class="rp-page">
     ${cover(isBes ? "BES MODELİ" : "FON MODELİ", `${esc(m.label)}${isBes ? "" : " Model"} · Aylık Performans`,
       `Son 12 ay: ${dateTR(y.dates[0])} – ${dateTR(y.dates[n])} · ${esc(desc)}`)}
-    <div class="rp-kpis">
+    <div class="rp-kpis mr-kpis6">
       <div class="${tone(tot)}"><span>Son 12 ay getirisi</span><b>${pctS(tot)}</b><em>${monthLong(y.dates[0])} başından</em></div>
-      <div><span>Pozitif ay · son 12 ay</span><b>${pos} / ${yFull.length}</b><em>%${num((pos / Math.max(yFull.length, 1)) * 100, 0)} isabet</em></div>
-      <div class="up"><span>En iyi ay</span><b>${pctS(best?.r.model)}</b><em>${best ? monthLong(best.start) : "—"}</em></div>
-      <div class="down"><span>En kötü ay</span><b>${pctS(worst?.r.model)}</b><em>${worst ? monthLong(worst.start) : "—"}</em></div>
+      <div><span>Pozitif ay (12 ay)</span><b>${pos} / ${yFull.length}</b><em>%${num((pos / Math.max(yFull.length, 1)) * 100, 0)} isabet</em></div>
+      <div class="${tone(best?.r.model)}"><span>En iyi ay</span><b>${pctS(best?.r.model)}</b><em>${best ? monthLong(best.start) : "—"}</em></div>
+      <div class="${tone(worst?.r.model)}"><span>En kötü ay</span><b>${pctS(worst?.r.model)}</b><em>${worst ? monthLong(worst.start) : "—"}</em></div>
+      ${longRet(24)}
+      ${longRet(36)}
     </div>
 
     <div class="rp-two mr-two">

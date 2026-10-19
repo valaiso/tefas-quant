@@ -248,8 +248,8 @@ function modelPage(m, asOf, pageNo, total) {
     <div class="rp-kpis mr-kpis6">
       <div class="${tone(tot)}"><span>Son 12 ay getirisi</span><b>${pctS(tot)}</b><em>${monthLong(y.dates[0])} başından</em></div>
       <div><span>Pozitif ay (12 ay)</span><b>${pos} / ${yFull.length}</b><em>%${num((pos / Math.max(yFull.length, 1)) * 100, 0)} isabet</em></div>
-      <div class="${tone(best?.r.model)}"><span>En iyi ay</span><b>${pctS(best?.r.model)}</b><em>${best ? monthLong(best.start) : "—"}</em></div>
-      <div class="${tone(worst?.r.model)}"><span>En kötü ay</span><b>${pctS(worst?.r.model)}</b><em>${worst ? monthLong(worst.start) : "—"}</em></div>
+      <div class="up"><span>En iyi ay</span><b>${pctS(best?.r.model)}</b><em>${best ? monthLong(best.start) : "—"}</em></div>
+      <div class="down"><span>En kötü ay</span><b>${pctS(worst?.r.model)}</b><em>${worst ? monthLong(worst.start) : "—"}</em></div>
       ${longRet(24)}
       ${longRet(36)}
     </div>

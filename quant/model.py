@@ -43,6 +43,9 @@ from .simulation import _stats
 
 MIN_FUNDS, MAX_FUNDS = 3, 10
 MIN_HISTORY = 756          # 3 yıl işlem günü (1Y/2Y/3Y getirisi ölçülebilsin)
+# Geçmiş test 2 yıllık veriyle başlar: verinin ilk yıllarında 3 yıllık pencere henüz yoktur, o dönemlerde
+# getiri kuralları ve puan mevcut pencerelerle (1Y, 2Y) verilir. Bugünkü sepet her zaman 3 yıllık kuralla kurulur.
+EARLY_HISTORY = 504
 RISK_DAYS = 504            # Sharpe, düşüş ve sıçrama ölçüleri: son 2 yıl
 MIN_AUM, MIN_INVESTORS = 100e6, 1000
 OK_GRADES = ("A+", "A", "B")
@@ -119,7 +122,12 @@ def _metrics(px: pd.DataFrame, ppf: pd.Series, tufe: pd.Series | None, stopaj: p
     out = pd.DataFrame(index=px.columns)
     tax = stopaj.reindex(px.columns).fillna(17.5).clip(0, 100) / 100
     bench = {}
+    windows = [k for k, (n, _) in RET_WINDOWS.items() if len(px) > n]
     for k, (n, _) in RET_WINDOWS.items():
+        if k not in windows:
+            out[f"cagr_{k}"] = out[f"net_{k}"] = np.nan
+            bench[k] = {"ppf": np.nan, "ppf_net": np.nan, "tufe": np.nan}
+            continue
         gross = _cagr(px, n)
         out[f"cagr_{k}"] = gross
         # Stopaj kazanç üzerinden: toplam kazanç × (1 - oran), sonra yıllığa çevrilir
@@ -172,6 +180,7 @@ def _metrics(px: pd.DataFrame, ppf: pd.Series, tufe: pd.Series | None, stopaj: p
     else:
         out["mom6x"] = np.nan
     out.attrs["bench"] = bench
+    out.attrs["windows"] = windows
     return out
 
 
@@ -189,14 +198,16 @@ def _spike_reason(r: pd.Series, max_1y: float) -> str | None:
 
 def _beats(m: pd.DataFrame, rule: str) -> pd.Series:
     b = m.attrs["bench"]
+    wins = m.attrs.get("windows", list(RET_WINDOWS))  # ölçülebilen pencereler
     if rule == "ppf_all":
-        return np.logical_and.reduce([m[f"net_{k}"] > b[k]["ppf_net"] for k in RET_WINDOWS])
+        return np.logical_and.reduce([m[f"net_{k}"] > b[k]["ppf_net"] for k in wins])
     if rule == "ppf_near":  # PPF'ye yakın: her pencerede en fazla PPF_TOLERANCE altında
-        return np.logical_and.reduce([m[f"net_{k}"] > b[k]["ppf_net"] - PPF_TOLERANCE for k in RET_WINDOWS])
+        return np.logical_and.reduce([m[f"net_{k}"] > b[k]["ppf_net"] - PPF_TOLERANCE for k in wins])
     if rule == "ppf_3y":
-        tufe_ok = [m[f"net_{k}"] > b[k]["tufe"] for k in ("1y", "2y") if pd.notna(b[k]["tufe"])]
-        return np.logical_and.reduce([m["net_3y"] > b["3y"]["ppf_net"], *tufe_ok])
-    tufe_ok = [m[f"net_{k}"] > b[k]["tufe"] for k in RET_WINDOWS if pd.notna(b[k]["tufe"])]
+        longest = wins[-1]
+        tufe_ok = [m[f"net_{k}"] > b[k]["tufe"] for k in ("1y", "2y") if k in wins and pd.notna(b[k]["tufe"])]
+        return np.logical_and.reduce([m[f"net_{longest}"] > b[longest]["ppf_net"], *tufe_ok])
+    tufe_ok = [m[f"net_{k}"] > b[k]["tufe"] for k in wins if pd.notna(b[k]["tufe"])]
     return np.logical_and.reduce(tufe_ok) if tufe_ok else pd.Series(True, index=m.index)
 
 
@@ -205,7 +216,9 @@ def _pct(s: pd.Series, higher=True) -> pd.Series:
 
 
 def _score(m: pd.DataFrame, w: dict) -> pd.Series:
-    ret = sum(_pct(m[f"net_{k}"]).fillna(50) * wt for k, (_, wt) in RET_WINDOWS.items())
+    wins = m.attrs.get("windows", list(RET_WINDOWS))
+    tw = sum(wt for k, (_, wt) in RET_WINDOWS.items() if k in wins) or 1.0
+    ret = sum(_pct(m[f"net_{k}"]).fillna(50) * wt for k, (_, wt) in RET_WINDOWS.items() if k in wins) / tw
     parts = {
         "ret": ret,
         "win": _pct(m["win"]).fillna(50),
@@ -263,7 +276,7 @@ def universe(price: pd.DataFrame, panel: dict, funds: pd.DataFrame, ppf: pd.Seri
     size, inv = panel["size"].iloc[i], panel["investors"].iloc[i]
     public = ~(funds["qualified"].fillna(0).astype(bool) | funds["private"].fillna(False))
     public = set(funds.index[public])
-    hist = px_all.iloc[-MIN_HISTORY - 1]
+    hist = px_all.iloc[-min(MIN_HISTORY, len(px_all) - 1) - 1]  # erken dönemde verinin başı
     recent = px_all.iloc[-10:]
     fresh = recent.notna().any() & (recent.max() != recent.min())
     grades = scores["grade"] if scores is not None else pd.Series(dtype=object)
@@ -444,7 +457,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
     scores_at = {b["signal"]: b["scores"] for b in (baskets or []) if "scores" in b}
 
     # Her dönem kurulan sepetler (point-in-time), son kurulan = bugünkü sepet
-    forms = [i for i in formation_days(dates) if i >= MIN_HISTORY and i + 1 < len(dates) and (not scores_at or i in scores_at)]
+    forms = [i for i in formation_days(dates) if i >= EARLY_HISTORY and i + 1 < len(dates) and (not scores_at or i in scores_at)]
     history = {k: [] for k in PROFILES}
     last = {}
     for i in forms:

@@ -45,13 +45,22 @@ export async function render(app, _route, store) {
 
   app.innerHTML = `
   <section class="method-intro card">
-    <h2>QuantBacktest <span class="model-tag">A+ · GÜÇLÜ AL</span></h2>
-    <p>Her ay sonunda (${dateTR(bt.signalDates[0])} – ${dateTR(bt.signalDates[bt.signalDates.length - 1])}, ${bt.signalDates.length} ay)
-      skorlar <b>yalnızca o güne kadar bilinen veriyle</b> yeniden üretildi. O tarihte A+ notu alan her fon, sonradan notu düşse,
+    <h2>Quant / Backtest <span class="model-tag">A+ · GÜÇLÜ AL</span></h2>
+    <p>O tarihte A+ notu alan her fon, sonradan notu düşse,
       çökse ya da listeden çıksa bile, ertesi işlem günü fiyatından (T+1) alınmış sayılıp sonraki getirisi ölçüldü.
       Toplam ${num(bt.observations, 0)} A+ gözlemi. Kıyas ölçüsü: aynı ay, aynı kategorideki tüm fonların medyan getirisi.
       A+ canlı sitedeki sıkı kuralla verildi (üst %5, kalite şartları, 2 ay süreklilik, kurucu riski yok); ilk A+ sinyali
       ${dateTR(bt.byDate[0]?.date)}. Renkler kategoriye göredir: kategori kıyasının altında kalan sonuç kırmızı gösterilir.</p>
+    <dl class="bt-terms">
+      <div><dt>A+ ortalaması</dt><dd>A+ notu aldığı ay alınan fonların, kartta yazan süre sonundaki getirilerinin ortalaması (medyanı da altında).</dd></div>
+      <div><dt>Kategori kıyası</dt><dd>Her A+ fonun aynı ay, aynı kategorideki tüm fonların medyan getirisiyle eşleştirilip bu medyanların ortalaması.
+        A+ fonlar yerine kategorinin "ortadaki" fonunu alsaydın ortalama ne kazanırdın sorusunun cevabı.</dd></div>
+      <div><dt>Kategoriye göre fark</dt><dd>A+ ortalaması eksi kategori kıyası (puan). Artıysa A+ fonlar kendi kategorisini geçmiş, eksiyse geride kalmıştır.</dd></div>
+      <div><dt>Kategoriyi geçme</dt><dd>A+ gözlemlerinin yüzde kaçı kendi kategori medyanından fazla kazandı. %50 yazı tura demektir;
+        %55 üstü yeşil, %50 altı kırmızı gösterilir.</dd></div>
+      <div><dt>Gözlem</dt><dd>Kaç A+ alımının sonucu ölçülebildi · bu alımların kaç farklı aydan geldiği. Uzun vadelerde ölçüm için
+        yeterli süre geçmiş aylar azaldığından gözlem düşer; az gözlemli sonuçlar daha az güvenilirdir.</dd></div>
+    </dl>
     <div class="btn-row"><a class="btn" href="#/simulasyon">◫ Portföy Simülasyonu: aylık A+ sepetinin geçmişi →</a></div>
   </section>
 

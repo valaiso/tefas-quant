@@ -19,7 +19,7 @@ const VIEWS = {
   siralama: { mod: ranking, title: "Fon Sıralaması", eyebrow: "KATEGORİ İÇİ DERECELENDİRME" },
   bes: { mod: bes, title: "BES Genel Bakış", eyebrow: "BİREYSEL EMEKLİLİK FONLARI" },
   deger: { mod: deger, title: "Değer", eyebrow: "FON + BES DAĞILIMI DEĞERLENDİRME" },
-  fon: { mod: fund, title: "Fon Detayı", eyebrow: "FON ANALİZİ", nav: "siralama" },
+  fon: { mod: fund, title: "Fon Detayı", eyebrow: "FON ANALİZİ", nav: "genel" },
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
   backtest: { mod: backtest, title: "Quant / Backtest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
   simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ", nav: "backtest" },

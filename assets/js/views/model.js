@@ -190,7 +190,7 @@ export async function render(app, _route, store) {
       <div class="table-wrap"><table id="mdlStats"></table></div>
       <div class="notice">Her dönem başında sepet <b>yalnızca o gün bilinen verilerle</b> (o günkü not, bayraklar, fiyatlar) aynı kurallarla yeniden kuruldu,
         ertesi işlem günü (T+1) alındı ve bir ay tutuldu. Getiriler stopaj öncesidir (kıyaslarla aynı).
-        Model 3 yıllık geçmiş istediği için ${dateTR(bt.dates[0])} tarihinde başlıyor; ${p.history.length} aylık kısa bir test, sonuçlar dikkatle okunmalı.</div>
+        Veri 5 yıllık olduğu için test ${dateTR(bt.dates[0])} tarihinde, 2 yıllık geçmişle başlıyor; ilk dönemlerde 3 yıllık pencere henüz yokken kurallar 1 ve 2 yıllık pencerelerle uygulandı (bugünkü sepet her zaman 3 yıllık kuralla kurulur). ${p.history.length} aylık bir test, sonuçlar dikkatle okunmalı.</div>
     </section>` : ""}
 
     ${months.length ? `<section class="card">

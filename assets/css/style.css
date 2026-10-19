@@ -427,6 +427,11 @@ p.small, .small { font-size: .8rem; }
 @media (max-width: 900px) { .calc-grid { grid-template-columns: 1fr 1fr; } }
 tr.group-row td { background: var(--surface-2); font-size: .82rem; padding-top: 8px; }
 .danger-tag { background: var(--down-soft); color: var(--down); }
+.cmp-row.out-scope { opacity: .45; }
+.sys-comment { margin-top: 14px; display: grid; gap: 8px; }
+.sys-comment h3 { font-size: 1rem; }
+.sys-comment ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.notice.good { border-left-color: var(--up); }
 .cmp-rows { display: grid; gap: 6px; margin: 8px 0; }
 .cmp-row { display: grid; grid-template-columns: 110px 80px 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .cmp-row input { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }

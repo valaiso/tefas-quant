@@ -148,7 +148,7 @@ def run(conn) -> dict | None:
 
 # =================================================================== model
 
-MIN_FUNDS, MAX_FUNDS = 3, 6
+MIN_FUNDS, MAX_FUNDS = 1, 6                 # alt sınır yok, en fazla 6 fon
 MIN_W, MAX_W, STEP = 0.10, 0.40, 0.05   # BES dağılımında fon başına %10'un altı pratik değil
 MIN_HISTORY = 504                        # 2 yıl (geçmiş test 2023 sonundan başlar; TÜFE şartı 3 yılı ayrıca ister)
 MIN_AUM, MIN_INVESTORS = 50e6, 1000
@@ -165,6 +165,14 @@ MAX_1Y = 2.0
 # (Özkan ve Öztürk 2021; Kuzubaş vd. 2019); kalıcı olan yalnızca en kötü fonların kötü
 # kalması (Carhart 1997). Bu yüzden önce varlık sınıfı dağılımı kurulur, sınıf içinde
 # zayıf fonlar elenir ve kalan en sağlam fonlar alınır.
+# Kurulum günü engelleyen risk bayrakları. Yatırım fonu skorlamasındaki "kuyruk riski" ve
+# "getiri anomalisi" kısa vadeli ölçülerdir; altın ve teknoloji gibi uzun vadede güçlü sınıfları
+# da sık işaretler. Kurucu riski her zaman engeller.
+BES_FLAGS = ("flag_tail", "flag_hot", "founder_risk", "anomaly")
+# Vergi yerleşimi: normal fonda %17,5 stopajlı (altın, teknoloji/yabancı, çok varlıklı) sınıflar BES'te
+# vergi avantajı taşır; yerli hisse yoğun fonlar normal fonda zaten %0. Bu sınıflara puan eklenir.
+TAX_TILT = 5.0
+TAX_ADV_BUCKETS = ("Altın / kıymetli maden", "Teknoloji / yabancı", "Çok varlıklı")
 SELECT_MODE = "score"                    # "score" (puan sırası) | "strategic" (varlık sınıfı eşit) — 2 ayrı testte "score" daha iyi
 BUCKET_WEIGHT = "equal"                  # varlık sınıfları arası: "equal" | "invvol" (risk paritesi)
 PER_BUCKET = 2                           # sınıf başına fon
@@ -255,9 +263,9 @@ def _universe(price, panel, funds, rf_idx, tufe, i, scores) -> pd.DataFrame:
     fresh = recent.notna().any() & (recent.max() != recent.min())
     flagged = set()
     if scores is not None:
-        bad = scores["p_anomaly"].fillna(0) > 0
+        bad = (scores["p_anomaly"].fillna(0) > 0) if "anomaly" in BES_FLAGS else pd.Series(False, index=scores.index)
         for col in ("flag_tail", "flag_hot", "founder_risk"):
-            if col in scores:
+            if col in scores and col in BES_FLAGS:
                 bad |= scores[col].fillna(False).astype(bool)
         flagged = set(scores.index[bad])
     grades = scores["grade"] if scores is not None else pd.Series(dtype=object)
@@ -322,6 +330,8 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, prev: list[str] | None,
         base.loc[base.index.isin(prev), "score"] += STAY_BONUS
     base["fill"] = False
     base["bucket"] = base.apply(bucket, axis=1)
+    if TAX_TILT:
+        base.loc[base["bucket"].isin(TAX_ADV_BUCKETS), "score"] += TAX_TILT
     pool = base[tufe_ok.reindex(base.index).fillna(False)].copy()
     # TÜFE'yi geçen fon 3'ten azsa: geçemeyenlerden TÜFE'ye en yakın olanlarla tamamla (işaretli)
     if len(pool) < MIN_FUNDS:
@@ -578,6 +588,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
                   "minVol": MIN_VOL, "excludedCategories": sorted(EXCLUDED_CATEGORIES), "okGrades": OK_GRADES,
                   "maxCorr": MAX_CORR, "perCat": PER_CAT, "max1y": MAX_1Y, "stayBonus": STAY_BONUS,
                   "periodMonths": PERIOD_MONTHS, "weights": WEIGHTS, "perCompany": PER_COMPANY,
+                  "taxTilt": TAX_TILT, "taxBuckets": list(TAX_ADV_BUCKETS),
                   "weightMode": WEIGHT_MODE,
                   "retWindows": {k: w for k, (_, w) in RET_WINDOWS.items()}},
     }

@@ -482,7 +482,11 @@ async function renderModel(body) {
       <li><b>Puan (sıralama için):</b> getiri ${R.weights.ret} (1Y %${R.retWindows["1y"] * 100}, 3Y %${R.retWindows["3y"] * 100}, 5Y %${R.retWindows["5y"] * 100}),
         reel istikrar ${R.weights.real} (12 aylık dönemlerde TÜFE'yi geçme oranı), Sharpe ${R.weights.sharpe}, 3 yıllık azami düşüş ${R.weights.mdd},
         TEFAS Quant skoru ${R.weights.quant}, katılımcı sayısı ${R.weights.inv}; önceki dönem sepette olan fona +${num(R.stayBonus, 0)}.</li>
-      <li><b>Çeşitlendirme:</b> varlık sınıfı / kategori başına en fazla ${R.perCat}, BEFAS sepetinde şirket başına en fazla ${R.perCompany} fon; haftalık getiri korelasyonu &gt; ${num(R.maxCorr, 2)} olan ikinci fon alınmaz.</li>
+      <li><b>Çeşitlendirme:</b> en fazla ${R.maxFunds} fon (alt sınır yok); varlık sınıfı başına en fazla ${R.perCat}, şirket başına en fazla ${R.perCompany} fon;
+        haftalık getiri korelasyonu &gt; ${num(R.maxCorr, 2)} olan ikinci fon alınmaz.</li>
+      <li><b>Vergi yerleşimi:</b> normal yatırım fonunda %17,5 stopajlı olan sınıflar (${(R.taxBuckets || []).map(esc).join(", ")}) BES'te birikim boyunca stopajsız
+        büyüdüğü için +${num(R.taxTilt || 0, 0)} puan önceliklidir; yerli hisse yoğun fonlar normal fonda zaten %0 stopajlı olduğundan BES'te ek avantaj taşımaz.
+        3 yıllık testte bu öncelik getiriyi artırdı, düşüşü değiştirmedi.</li>
       <li><b>Ağırlık:</b> eşit (1/N), her fon %${num(R.minW * 100, 0)}–%${num(R.maxW * 100, 0)}, 5'in katları. BES'te fon dağılımı yılda 12 kez değiştirilebilir; 2 aylık yenileme yılda 6 hak kullanır.</li>
       <li><b>Vergi:</b> birikim döneminde fon getirisinden stopaj kesilmez (yatırım fonunda altın, yabancı, değişken fonlarda %17,5). Çıkışta yalnızca getiriden:
         10 yıldan önce %15, 10 yılı dolduran ama 56 yaşını doldurmayan %10, emeklilik hakkıyla %5. Anapara ve devlet katkısı anaparası vergilenmez.</li>

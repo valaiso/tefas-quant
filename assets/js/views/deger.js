@@ -18,9 +18,9 @@ const getJson = (p) => fetch(`${p}?v=${Date.now().toString(36).slice(0, -3)}`).t
 function load() {
   try {
     const v = JSON.parse(localStorage.getItem(KEY) || "null");
-    if (v && Array.isArray(v.rows)) return { showNow: false, ...v };
+    if (v && Array.isArray(v.rows)) return { showNow: false, scope: "all", ...v };
   } catch { /* depolama kapalı olabilir */ }
-  return { rows: [{ c: "CFA", w: 50 }, { c: "YZD", w: 50 }], rebal: "2m", period: "5y", showNow: false };
+  return { rows: [{ c: "CFA", w: 50 }, { c: "YZD", w: 50 }], rebal: "2m", period: "5y", showNow: false, scope: "all" };
 }
 function save(v) {
   try { localStorage.setItem(KEY, JSON.stringify(v)); } catch { /* yok say */ }
@@ -89,6 +89,7 @@ export async function render(app, _route, store) {
 
   <section class="card">
     <div class="card-head"><h2>Dağılımım</h2>
+      <div class="seg" id="dgScope">${[["all", "Tümü"], ["fon", "Yalnız Fon"], ["bes", "Yalnız BES"]].map(([k, l]) => `<button data-s="${k}" aria-pressed="${k === st.scope}">${l}</button>`).join("")}</div>
       <div class="seg" id="dgPeriod">${PERIODS.map(([k, l]) => `<button data-p="${k}" aria-pressed="${k === st.period}">${l}</button>`).join("")}</div></div>
     <datalist id="dgCodes">${opts}</datalist>
     <div class="cmp-rows" id="dgRows"></div>
@@ -111,13 +112,17 @@ export async function render(app, _route, store) {
     <div class="card-head"><h2>Dağılımımdaki fonların değerlendirmesi</h2><span class="sub">Not, skor ve cezalar fonun kendi kategorisi içindedir</span></div>
     <div class="kpi-row" id="dgKpi"></div>
     <div class="table-wrap"><table class="model-table" id="dgEval"></table></div>
-    <div id="dgWarn"></div>
+    <div class="sys-comment" id="dgComment"></div>
   </section>`;
 
   const rowsEl = app.querySelector("#dgRows");
   const items = () => st.rows.map((r) => ({ r, hit: lookup((r.c || "").toUpperCase(), ctx) }));
+  // Tümü / Yalnız Fon / Yalnız BES: grafik, tablo ve değerlendirme yalnızca seçili türdeki fonlarla
+  const inScope = (x) => st.scope === "all" || !x.hit || x.hit.kind === st.scope;
+  const active = () => items().filter((x) => x.hit && +x.r.w > 0 && inScope(x));
+  let lastPerf = null;
   const drawRows = () => {
-    rowsEl.innerHTML = items().map(({ r, hit }, i) => `<div class="cmp-row">
+    rowsEl.innerHTML = items().map(({ r, hit }, i) => `<div class="cmp-row ${inScope({ hit }) ? "" : "out-scope"}">
         <input class="cmp-code" data-i="${i}" list="dgCodes" value="${esc(r.c)}" placeholder="Fon kodu" maxlength="3">
         <input class="cmp-w" data-i="${i}" type="number" min="0" max="100" step="5" value="${r.w}"><span>%</span>
         <span class="cmp-name ${hit || !r.c ? "" : "down"}">${hit ? `<span class="${hit.kind === "bes" ? "ch-tag" : "fx-tag"}">${hit.kind === "bes" ? "BES" : "FON"}</span>
@@ -126,7 +131,7 @@ export async function render(app, _route, store) {
   };
 
   const drawEval = () => {
-    const list = items().filter((x) => x.hit && +x.r.w > 0);
+    const list = active();
     const tw = list.reduce((a, x) => a + +x.r.w, 0) || 1;
     const pen = (f) => (f.p?.investor || 0) + (f.p?.outflow || 0) + (f.p?.anomaly || 0) + (f.p?.founder || 0) + (f.p?.drawdown || 0);
     const wavg = (fn) => list.reduce((a, x) => a + (fn(x.hit.f) ?? 0) * +x.r.w, 0) / tw;
@@ -156,9 +161,56 @@ export async function render(app, _route, store) {
           <td>%${num(f.m?.vol, 1)}</td><td class="down">−%${num(f.m?.mdd, 1)}</td>
           <td class="left">${flagsOf(hit).map(([t, l]) => `<span class="${t === "danger" ? "warn-tag danger-tag" : t === "warn" ? "warn-tag" : "fx-tag"}">${esc(l)}</span>`).join(" ") || `<span class="dim">—</span>`}</td></tr>`;
       }).join("")}</tbody>` : `<tbody><tr><td class="empty">Değerlendirilecek fon yok</td></tr></tbody>`;
-    const bad = list.filter((x) => flagsOf(x.hit).some(([t]) => t === "danger") || ["D"].includes(x.hit.f.g));
-    app.querySelector("#dgWarn").innerHTML = bad.length ? `<div class="notice warn"><b>Dikkat:</b> ${bad.map((x) => `${esc(x.hit.f.c)} (${flagsOf(x.hit).map(([, l]) => l).join(", ") || "not " + x.hit.f.g})`).join("; ")}.
-      Skor ve cezaların nasıl oluştuğunu görmek için fon koduna tıkla.</div>` : "";
+    drawComment();
+  };
+
+  // Sistem Yorumu: uyarılar varsa önce onlar, ardından dağılımın güçlü yanları
+  const TAX_ADV = ["Kıymetli Madenler", "Değişken", "Fon Sepeti", "Karma", "Katılım", "Borçlanma Araçları"];
+  const drawComment = () => {
+    const list = active();
+    const el = app.querySelector("#dgComment");
+    if (!list.length) { el.innerHTML = ""; return; }
+    const tw = list.reduce((a, x) => a + +x.r.w, 0) || 1;
+    const share = (x) => (+x.r.w / tw) * 100;
+    const warn = [], good = [], tips = [];
+    for (const x of list) {
+      const f = x.hit.f;
+      const fl = flagsOf(x.hit).filter(([t]) => t !== "info").map(([, l]) => l);
+      if (fl.length) warn.push(`<b>${esc(f.c)}</b> (%${num(share(x), 0)}): ${esc(fl.join(", "))}.`);
+      if (x.hit.kind === "bes" && f.bf) tips.push(`<b>${esc(f.c)}</b> BEFAS'tan alınamıyor (${esc(f.bf)}); yalnızca ${esc(f.co)} sözleşmesinde tutulabilir.`);
+      if (x.hit.kind === "bes" && f.k === "Hisse Senedi" && !f.fx && !f.tk)
+        tips.push(`<b>${esc(f.c)}</b> yerli hisse fonu: normal yatırım fonunda hisse yoğun fonlar zaten %0 stopajlı, BES'in vergi avantajı burada küçük. BES payını altın, teknoloji/yabancı ya da değişken fonlarda kullanmak vergi açısından daha verimli.`);
+      if (x.hit.kind === "fon" && (f.st ?? 0) >= 15 && (f.m?.vol ?? 0) >= 6)
+        tips.push(`<b>${esc(f.c)}</b> normal fonda %${num(f.st, 1)} stopajlı; benzer bir varlığı BES'te birikim boyunca stopajsız tutabilirsin.`);
+    }
+    list.filter((x) => share(x) > 50).forEach((x) => warn.push(`<b>${esc(x.hit.f.c)}</b> tek başına dağılımın %${num(share(x), 0)}'i; tek fona bağımlılık yüksek.`));
+    const byCat = {};
+    list.forEach((x) => { byCat[x.hit.f.k] = (byCat[x.hit.f.k] || 0) + share(x); });
+    const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
+    if (list.length > 1 && topCat && topCat[1] >= 70) warn.push(`Dağılımın %${num(topCat[1], 0)}'i tek varlık sınıfında (${esc(topCat[0])}).`);
+    const p = lastPerf;
+    if (p?.mine && p.mine.mdd < -25) warn.push(`Seçilen dönemde dağılımın tepeden %${num(-p.mine.mdd, 0)} geriledi; 10 yıllık birikimde bu düşüşü taşıyabileceğinden emin ol.`);
+    (p?.vs || []).filter((v) => v.diff < -5).forEach((v) => warn.push(`${esc(v.name)} aynı dönemde senden ${num(-v.diff, 1)} puan fazla kazandırdı.`));
+
+    const pen = (f) => (f.p?.investor || 0) + (f.p?.outflow || 0) + (f.p?.anomaly || 0) + (f.p?.founder || 0) + (f.p?.drawdown || 0);
+    if (list.every((x) => ["A+", "A"].includes(x.hit.f.g))) good.push("Tüm fonların notu A veya A+.");
+    if (list.every((x) => pen(x.hit.f) === 0)) good.push("Hiçbir fonda ceza yok.");
+    if (list.every((x) => !flagsOf(x.hit).some(([t]) => t !== "info"))) good.push("Kurucu riski, anomali, kuyruk riski ya da sıcak para uyarısı yok.");
+    if (Object.keys(byCat).length >= 3) good.push(`${Object.keys(byCat).length} farklı varlık sınıfıyla çeşitlendirilmiş.`);
+    if (list.every((x) => (x.hit.f.aum ?? 0) >= 1e9)) good.push("Tüm fonlar 1 milyar TL'nin üzerinde; büyük ve likit fonlar.");
+    const besList = list.filter((x) => x.hit.kind === "bes");
+    if (besList.length && besList.every((x) => TAX_ADV.includes(x.hit.f.k) || x.hit.f.fx || x.hit.f.tk))
+      good.push("BES'teki fonların hepsi normal fonda %17,5 stopajlı sınıflardan (altın, teknoloji/yabancı, değişken, fon sepeti): BES'in vergi avantajı verimli kullanılıyor.");
+    if (p?.tufe != null && p.tufe > 0) good.push(`Aynı dönemde TÜFE'nin ${num(p.tufe, 1)} puan üzerinde getiri (reel kazanç).`);
+    if (p?.tufe != null && p.tufe < 0) warn.push(`Aynı dönemde TÜFE'nin ${num(-p.tufe, 1)} puan altında kaldı (reel kayıp).`);
+    (p?.vs || []).filter((v) => v.diff > 5).forEach((v) => good.push(`${esc(v.name)} ile aynı dönemde ${num(v.diff, 1)} puan önde.`));
+    if (p?.mine && p.mine.mdd >= -10) good.push(`Seçilen dönemdeki en büyük düşüş yalnızca %${num(-p.mine.mdd, 1)}.`);
+
+    el.innerHTML = `<h3>Sistem Yorumu</h3>
+      ${warn.length ? `<div class="notice warn"><b>Uyarılar</b><ul>${warn.map((w) => `<li>${w}</li>`).join("")}</ul></div>` : `<div class="notice good"><b>Uyarı yok.</b></div>`}
+      ${good.length ? `<div class="notice good"><b>Güçlü yanlar</b><ul>${good.map((g) => `<li>+ ${g}</li>`).join("")}</ul></div>` : ""}
+      ${tips.length ? `<div class="notice"><b>Notlar</b><ul>${tips.map((t) => `<li>${t}</li>`).join("")}</ul></div>` : ""}
+      <p class="dim small">Yorumlar fonların bugünkü notu, cezaları, kategorileri ve seçilen dönemdeki geçmiş getiriden kurallarla üretilir; geçmiş getiri geleceği garanti etmez.</p>`;
   };
 
   const months = () => PERIODS.find(([k]) => k === st.period)[2];
@@ -167,8 +219,8 @@ export async function render(app, _route, store) {
     const total = st.rows.reduce((a, r) => a + (+r.w || 0), 0);
     app.querySelector("#dgSum").innerHTML = `Toplam: <b class="${Math.abs(total - 100) < 0.01 ? "" : "down"}">%${num(total, 0)}</b>${Math.abs(total - 100) < 0.01 ? "" : " (oranlar 100'e ölçeklenir)"}`;
     const mine = {}, kindOf = {};
-    items().forEach(({ r, hit }) => { if (hit && +r.w > 0) { mine[hit.f.c] = (mine[hit.f.c] || 0) + +r.w; kindOf[hit.f.c] = hit.kind; } });
-    const mdl = models(ctx);
+    active().forEach(({ r, hit }) => { mine[hit.f.c] = (mine[hit.f.c] || 0) + +r.w; kindOf[hit.f.c] = hit.kind; });
+    const mdl = models(ctx).filter((m) => st.scope === "all" || (st.scope === "bes" ? m.key === "befas" : m.key !== "befas"));
     const need = new Map(Object.entries(kindOf));
     if (st.showNow) mdl.forEach((m) => m.basket.forEach((b) => need.set(b.c, b.kind)));
     const hists = Object.fromEntries(await Promise.all([...need].map(async ([c, k]) => [c, await fundHistory(c, k)])));
@@ -216,11 +268,14 @@ export async function render(app, _route, store) {
       + (my && my.d[0] > from ? ` Dağılımındaki en genç fonun verisi ${dateTR(my.d[0])}'de başladığı için karşılaştırma oradan başlıyor.` : "")
       + " Modellerin çizgisi, gerçek geçmişlerinin başladığı tarihte senin dağılımınla aynı noktadan çizilir; tablo her satırı kendi başlangıcından ve aynı dönemdeki senin getirinle verir.";
 
+    lastPerf = { mine: mySer ? weeklyStats(mySer) : null, vs: [], tufe: null };
     const rows = series.map((s) => {
       const stt = weeklyStats(s);
       if (!stt) return "";
       const mineSame = mySer && s.key !== "mine" ? weeklyStats(rebaseFrom(mySer.d, mySer.v, stt.from) || mySer) : null;
       const diff = mineSame ? mineSame.total - stt.total : null;
+      if (diff != null && MODELS.some(([k]) => k === s.key)) lastPerf.vs.push({ name: MODELS.find(([k]) => k === s.key)[1], diff });
+      if (s.key === "tufe") lastPerf.tufe = diff;  // aynı dönemde senin getirin − TÜFE
       return `<tr class="${s.key === "mine" ? "is-self" : ""}"><td class="left">${esc(s.name)}</td><td>${dateTR(stt.from)}</td>
         <td class="${stt.total >= 0 ? "up" : "down"}"><b>${pct(stt.total, 1)}</b></td><td>${pct(stt.cagr, 1)}</td><td class="down">${pct(stt.mdd, 1)}</td>
         <td>%${num(stt.vol, 1)}</td><td>${mineSame ? pct(mineSame.total, 1) : "—"}</td>
@@ -228,6 +283,7 @@ export async function render(app, _route, store) {
     }).join("");
     app.querySelector("#dgStats").innerHTML = `<thead><tr><th class="left">Sepet / varlık</th><th>Başlangıç</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th>
       <th>Oynaklık</th><th>Benim dağılımım (aynı dönem)</th><th>Benim farkım</th></tr></thead><tbody>${rows}</tbody>`;
+    drawComment();
   };
 
   const redraw = () => { drawRows(); drawEval(); drawChart(); };
@@ -251,6 +307,13 @@ export async function render(app, _route, store) {
   });
   app.querySelector("#dgRebal").addEventListener("change", (e) => { st.rebal = e.target.value; drawChart(); });
   app.querySelector("#dgNow").addEventListener("change", (e) => { st.showNow = e.target.checked; drawChart(); });
+  app.querySelector("#dgScope").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    st.scope = b.dataset.s;
+    app.querySelectorAll("#dgScope button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    redraw();
+  });
   app.querySelector("#dgPeriod").addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;

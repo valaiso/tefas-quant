@@ -51,10 +51,35 @@ function heatColor(v) {
 }
 const heatCell = (v) => `<td class="mr-heat ${Math.abs(v ?? 0) >= 6 ? "strong" : ""}" style="background:${heatColor(v)}">${v == null ? "—" : num(v, 1)}</td>`;
 
-const modelLines = (m) => [
-  { name: "Model", v: m.series.model, color: MODEL_COLOR, w: 2.4 },
-  ...BENCH.filter(([k]) => m.series[k]).map(([k, l, c]) => ({ name: l.replace(" ortalaması", ""), v: m.series[k], color: c, dash: k === "ppf" })),
-];
+// Grafikte varsayılan olarak yalnızca PPF ve TÜFE çizilir; altın, dolar ve S&P 500 sitede açılıp kapatılabilir
+// (rakamları tablolarda ve "Kıyaslara karşı fark" bölümünde her zaman var).
+const DEFAULT_ON = new Set(["ppf", "tufe"]);
+const benchLines = (s) => BENCH.filter(([k]) => s[k]).map(([k, l, c]) => ({ name: l.replace(" ortalaması", ""), v: s[k], color: c, dash: k === "ppf", off: !DEFAULT_ON.has(k) }));
+const modelLines = (m) => [{ name: "Model", v: m.series.model, color: MODEL_COLOR, w: 2.4 }, ...benchLines(m.series)];
+
+/**
+ * Açılıp kapatılabilen grafik: üstte çizgi düğmeleri (yalnızca ekranda), altta statik SVG.
+ * Yazdırılan PDF ekranda açık olan çizgileri gösterir; e-postadaki PDF varsayılan (sade) hâliyle basılır.
+ */
+let CHARTS = [];
+function toggleChart(dates, lines, H, W, xLabel = null) {
+  const id = CHARTS.push({ dates, lines, H, W, xLabel }) - 1;
+  return `<div class="mr-tchart" data-cid="${id}">
+      <div class="mr-chips no-print">${lines.map((l, i) => `<button type="button" class="mr-chip" data-i="${i}" aria-pressed="${!l.off}">
+        <i style="background:${l.color}"></i>${esc(l.name)}</button>`).join("")}</div>
+      <div class="mr-tsvg">${chart(dates, lines.filter((l) => !l.off), H, W, xLabel)}</div></div>`;
+}
+function bindToggles(root) {
+  root.addEventListener("click", (e) => {
+    const b = e.target.closest(".mr-chip");
+    if (!b) return;
+    const box = b.closest(".mr-tchart"), c = CHARTS[+box.dataset.cid], l = c.lines[+b.dataset.i];
+    if (!l.off && c.lines.filter((x) => !x.off).length === 1) return;  // en az bir çizgi kalsın
+    l.off = !l.off;
+    b.setAttribute("aria-pressed", String(!l.off));
+    box.querySelector(".mr-tsvg").innerHTML = chart(c.dates, c.lines.filter((x) => !x.off), c.H, c.W, c.xLabel);
+  });
+}
 
 /** Statik SVG birikimli getiri grafiği (yazdırmada da aynı görünür). */
 function chart(dates, lines, H = 168, W = 764, xLabel = null) {
@@ -181,13 +206,14 @@ function summaryPage(models, asOf, total) {
       </table>
     </section>
 
-    <section class="rp-block">
-      <h3><span class="rp-dot brand"></span>Birikimli getiri · son 12 ay (${monthLabel(refY.dates[0])} = 100)</h3>
-      ${chart(refY.dates, [
-        ...models.map((m) => ({ name: m.label, v: m === ref ? refY.series.model : align(m), color: colors[m.key] || MODEL_COLOR, w: 2.2 })),
-        ...BENCH.filter(([k]) => refY.series[k]).map(([k, l, c]) => ({ name: l.replace(" ortalaması", ""), v: refY.series[k], color: c, dash: k === "ppf" })),
-      ], 150)}
-    </section>
+    <div class="rp-two">${[["fon", "Fon modelleri"], ["bes", "BES modelleri"]].map(([kind, title]) => `
+      <section class="rp-block">
+        <h3><span class="rp-dot brand"></span>${title} · birikimli, son 12 ay (${monthLabel(refY.dates[0])} = 100)</h3>
+        ${toggleChart(refY.dates, [
+          ...models.filter((m) => m.kind === kind).map((m) => ({ name: m.label, v: m === ref ? refY.series.model : align(m), color: colors[m.key] || MODEL_COLOR, w: 2.2 })),
+          ...benchLines(refY.series),
+        ], 136, 380)}
+      </section>`).join("")}</div>
 
     <section class="rp-block">
       <h3><span class="rp-dot brand"></span>Hangi model hangi kıyası geçti? (son 12 ay, toplam getiri farkı)</h3>
@@ -262,7 +288,7 @@ function modelPage(m, asOf, pageNo, total) {
     <div class="rp-two mr-two">
       <section class="rp-block">
         <h3><span class="rp-dot brand"></span>Birikimli getiri · son 12 ay (${monthLabel(y.dates[0])} = 100)</h3>
-        ${chart(y.dates, modelLines(y), 210, 470)}
+        ${toggleChart(y.dates, modelLines(y), 210, 470)}
       </section>
       <section class="rp-block">
         <h3><span class="rp-dot brand"></span>Kıyaslara karşı fark · son 12 ay</h3>
@@ -305,13 +331,16 @@ export async function render(app, _route, store) {
     return;
   }
   const total = data.models.length + 1;
+  CHARTS = [];
   app.innerHTML = `
   <div class="rp-toolbar no-print">
     <div><h2>Model performans raporu</h2>
-      <p class="dim">Fon modelleri ve üç BES modelinin aylık getirileri · PPF, TÜFE, altın, dolar ve S&P 500 ile · ${dateTR(data.asOf)} itibarıyla</p></div>
+      <p class="dim">Fon modelleri ve üç BES modelinin aylık getirileri · PPF, TÜFE, altın, dolar ve S&P 500 ile · ${dateTR(data.asOf)} itibarıyla.
+        Grafiklerin üstündeki düğmelerle çizgileri açıp kapatabilirsin; PDF ekranda açık olanlarla basılır.</p></div>
     <div class="rp-actions"><button class="btn btn-primary" id="mrPrint" type="button">⤓ PDF olarak indir</button></div>
   </div>
   <div class="rp-doc">${summaryPage(data.models, data.asOf, total)}${data.models.map((m, i) => modelPage(m, data.asOf, i + 2, total)).join("")}</div>`;
+  bindToggles(app.querySelector(".rp-doc"));
   app.querySelector("#mrPrint").addEventListener("click", () => {
     const prev = document.title;
     document.title = `TEFAS-Quant-Model-Raporu-${data.asOf}`;  // PDF dosya adı

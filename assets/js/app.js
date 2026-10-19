@@ -1,5 +1,5 @@
 // TEFAS Quant - uygulama girişi: veri yükleme, yönlendirme, tema, arama
-import { esc, dateTR, debounce, searchFunds } from "./util.js";
+import { esc, dateTR } from "./util.js";
 import * as overview from "./views/overview.js";
 import * as ranking from "./views/ranking.js";
 import * as fund from "./views/fund.js";
@@ -106,27 +106,6 @@ document.getElementById("themeBtn").addEventListener("click", () => {
   const next = dark ? "light" : "dark";
   applyTheme(next);
   try { localStorage.setItem(THEME_KEY, next); } catch { /* yok say */ }
-});
-
-// ---------------------------------------------------------------- arama
-const searchInput = document.getElementById("globalSearch");
-const searchList = document.getElementById("searchResults");
-searchInput.addEventListener("input", debounce(() => {
-  const q = searchInput.value.trim();
-  if (!q) { searchList.hidden = true; return; }
-  const hits = searchFunds(store.funds, q, { limit: 10 });
-  searchList.innerHTML = hits.length
-    ? hits.map((f) => `<a class="ac-item" href="#/fon/${encodeURIComponent(f.c)}"><b class="mono">${esc(f.c)}</b><span class="ac-name">${esc(f.n)}</span></a>`).join("")
-    : `<div class="ac-item dim">Sonuç yok</div>`;
-  searchList.hidden = false;
-}, 80));
-searchInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") searchList.querySelector("a")?.click();
-  if (e.key === "Escape") searchList.hidden = true;
-});
-document.addEventListener("click", (e) => {
-  if (!e.target.closest(".search")) searchList.hidden = true;
-  if (e.target.closest(".ac-item")) { searchList.hidden = true; searchInput.value = ""; }
 });
 
 window.addEventListener("hashchange", render);

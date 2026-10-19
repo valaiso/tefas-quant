@@ -210,23 +210,28 @@ async function renderCompare(app) {
   const draw = () => {
     const w = WINDOWS.find(([k]) => k === st.win);
     const start = w[2] ? isoMinus(end, w[2]) : (ds.pfirst || ds.dates[0]);
-    // Portföy kaydı pencerenin içinde başlıyorsa tüm seriler o gün 100'e eşitlenir (aynı başlangıçtan kıyas)
-    const anchor = ds.pfirst && ds.pfirst > start ? ds.pfirst : start;
+    // Model ve kıyaslar dönem başında 100'den başlar. Portföy kaydı dönemin içinde başlıyorsa portföy çizgisi
+    // o gün PPF'nin seviyesinden başlatılır (kısa geçmişli fon için yaygın gösterim); hepsi tek noktada sıkışmaz.
+    const late = ds.pfirst && ds.pfirst > start;
     const i0 = ds.dates.findIndex((x) => x >= start);
     const dates = ds.dates.slice(i0);
-    const rebase = (v) => {
+    const rebase = (v, from = start, level = 100) => {
       const w2 = v.slice(i0);
-      const ia = dates.findIndex((x, i) => x >= anchor && w2[i] != null);
+      const ia = dates.findIndex((x, i) => x >= from && w2[i] != null);
       const b = ia >= 0 ? w2[ia] : null;
-      return w2.map((x) => (x == null || !b ? null : (x / b) * 100));
+      return w2.map((x) => (x == null || !b ? null : (x / b) * level));
     };
+    const ppf = ds.series.ppf ? rebase(ds.series.ppf) : null;
+    const ip = late ? dates.findIndex((x) => x >= ds.pfirst) : -1;
+    const pLevel = late && ppf && ip >= 0 ? ppf.slice(0, ip + 1).filter((x) => x != null).pop() || 100 : 100;
     const series = [
-      { name: "Portföyüm (gerçek)", d: dates, v: rebase(ds.portfolio), color: "var(--text)" },
+      { name: "Portföyüm (gerçek)", d: dates, v: rebase(ds.portfolio, late ? ds.pfirst : start, pLevel), color: "var(--text)" },
       ...ds.models.map((m) => ({ name: m.label, d: dates, v: rebase(ds.series[m.key]), color: SCREEN_COLORS[m.key] || MODEL_COLORS[m.key] })),
       ...ds.bench.map((b) => ({ name: b.label, d: dates, v: rebase(ds.series[b.key]), color: b.color, dashed: true })),
     ];
     lineChart(app.querySelector("#pfChart"), series, { base: 100, height: 330, format: (v) => num(v, 1) });
-    app.querySelector("#pfNote").textContent = `${dateTR(dates[0])} – ${dateTR(end)} · ${anchor > start ? `${dateTR(anchor)} (portföy kaydının başlangıcı) = 100` : "dönem başı = 100"}`
+    app.querySelector("#pfNote").textContent = `${dateTR(dates[0])} – ${dateTR(end)} · dönem başı = 100`
+      + (late ? ` · portföy kaydı ${dateTR(ds.pfirst)} tarihinde başladığı için portföy çizgisi o gün PPF'nin seviyesinden başlar; karşılaştırma için tablodaki "Portföy kaydından bu yana" sütununa bak` : "")
       + " · model ve kıyaslar günlük, portföy Analiz'in kayıtlı günleri";
     const from = ds.pfirst && ds.pfirst > start ? ds.pfirst : start;
     const pRet = ds.pfirst ? spanRet(ds, ds.portfolio, from, end) : null;

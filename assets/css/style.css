@@ -420,6 +420,11 @@ table.compare td.best { background: var(--up-soft); font-weight: 700; }
 .seg-lg button { padding: 8px 20px; font-size: .92rem; }
 button.dist-item { font: inherit; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; color: inherit; }
 button.dist-item[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.sub-head { margin-top: 16px; }
+.sub-head h3 { font-size: .98rem; }
+.calc-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 12px; }
+p.small, .small { font-size: .8rem; }
+@media (max-width: 900px) { .calc-grid { grid-template-columns: 1fr 1fr; } }
 .glossary-title { margin: 18px 0 8px; font-size: .95rem; }
 .glossary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; margin: 0; }
 .glossary > div { padding: 8px 0; border-top: 1px solid var(--border); }

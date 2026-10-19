@@ -79,6 +79,27 @@ def bes_category(name: str) -> tuple[str, str]:
     return cat, ""
 
 
+# BEFAS'ta (başka şirketin sözleşmesinden) alınamayan fonlar — EGM: grup fonları, unvanında
+# "yabancı" ibaresi olan fonlar, para piyasası, katkı ve başlangıç fonları. OKS fonları
+# yalnızca otomatik katılım sözleşmesine açıktır.
+def befas_status(name: str, category: str, access: str) -> str | None:
+    """BEFAS'tan alınamıyorsa nedeni; alınabiliyorsa None."""
+    text = (name or "").upper()
+    if access == "GRUP":
+        return "grup fonu"
+    if access == "DK":
+        return "devlet katkısı fonu"
+    if access == "OKS":
+        return "OKS fonu"
+    if re.search(r"YABANCI", text):
+        return "unvanında 'yabancı' ibaresi var"
+    if category == "Para Piyasası":
+        return "para piyasası fonu"
+    if category == "Başlangıç":
+        return "başlangıç fonu"
+    return None
+
+
 def load_funds(conn) -> pd.DataFrame:
     funds = pd.read_sql("SELECT code, name FROM bes_funds", conn).set_index("code")
     cats = [bes_category(n) for n in funds["name"]]
@@ -89,6 +110,7 @@ def load_funds(conn) -> pd.DataFrame:
     funds["channel"] = [b for _, b in comp]
     funds["foreign"] = funds["name"].fillna("").str.upper().str.contains(FOREIGN_RE)
     funds["tech"] = funds["name"].fillna("").str.upper().str.contains(TECH_RE)
+    funds["befas_no"] = [befas_status(n, c, a) for n, c, a in zip(funds["name"], funds["category"], funds["access"])]
     funds["founder"] = funds["company"]          # kurucu riski şirket düzeyinde
     funds["category_src"] = "ünvan"
     funds["fee"] = np.nan                        # fon işletim gideri fiyata yansır
@@ -134,6 +156,8 @@ EXCLUDED_CATEGORIES = {"Para Piyasası", "Borçlanma Araçları", "Standart", "B
 OK_GRADES = ("A+", "A", "B")
 MAX_CORR = 0.85
 PER_CAT = 2
+PER_COMPANY = 2                          # BEFAS sepetinde aynı emeklilik şirketinden en fazla
+WEIGHT_MODE = "equal"                    # 1/N: tahmin hatasına en dayanıklı (DeMiguel vd. 2009)
 MAX_1Y = 2.0
 STAY_BONUS = 3.0
 PERIOD_MONTHS = 2
@@ -238,6 +262,8 @@ def _universe(price, panel, funds, rf_idx, tufe, i, scores) -> pd.DataFrame:
     m["company"] = funds["company"].reindex(m.index)
     m["category"] = funds["category"].reindex(m.index)
     m["foreign"] = funds["foreign"].reindex(m.index)
+    m["tech"] = funds["tech"].reindex(m.index)
+    m["befas_no"] = funds["befas_no"].reindex(m.index)
     m["investors"] = inv.reindex(m.index)
     m["aum"] = size.reindex(m.index)
     m["quant"] = scores["score"].reindex(m.index) if scores is not None else np.nan
@@ -246,10 +272,33 @@ def _universe(price, panel, funds, rf_idx, tufe, i, scores) -> pd.DataFrame:
     return m, px.iloc[-253:].iloc[::5].pct_change().iloc[1:]
 
 
-def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, company: str, prev: list[str] | None) -> list[dict]:
+def bucket(row) -> str:
+    """Varlık sınıfı kovası: sepette çeşitlilik bunun üzerinden sağlanır."""
+    if row["category"] == "Kıymetli Madenler":
+        return "Altın / kıymetli maden"
+    if row.get("tech") or row.get("foreign"):
+        return "Teknoloji / yabancı"
+    if row["category"] == "Hisse Senedi":
+        return "Yerli hisse"
+    return "Çok varlıklı"
+
+
+def _weights(sel: pd.DataFrame) -> pd.Series:
+    if WEIGHT_MODE == "equal":
+        raw = pd.Series(1.0, index=sel.index)
+    elif WEIGHT_MODE == "score_invvol":   # risk paritesine yakın: oynak fon daha az pay alır
+        raw = sel["score"] / sel["vol"].clip(lower=0.05)
+    else:                                 # "score2_sqrtvol": puana ağırlık veren eski kural
+        raw = sel["score"] ** 2 / sel["vol"].clip(lower=0.05) ** 0.5
+    return _round(raw)
+
+
+def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, prev: list[str] | None,
+          company: str | None = None, befas: bool = False) -> list[dict]:
+    """company verilirse o şirketin fonları; befas=True ise tüm şirketlerin BEFAS'a açık fonları."""
     if m.empty:
         return []
-    c = m[m["company"] == company].copy()
+    c = m[m["company"] == company].copy() if company else m[m["befas_no"].isna()].copy()
     if c.empty:
         return []
     spike = c.apply(lambda r: model._spike_reason(r, MAX_1Y), axis=1)
@@ -261,6 +310,7 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, company: str, prev: list[str
     if prev:
         base.loc[base.index.isin(prev), "score"] += STAY_BONUS
     base["fill"] = False
+    base["bucket"] = base.apply(bucket, axis=1)
     pool = base[tufe_ok.reindex(base.index).fillna(False)].copy()
     # TÜFE'yi geçen fon 3'ten azsa: geçemeyenlerden TÜFE'ye en yakın olanlarla tamamla (işaretli)
     if len(pool) < MIN_FUNDS:
@@ -270,20 +320,24 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, company: str, prev: list[str
         extra["score"] = extra["score"] * 0.9
         pool = pd.concat([pool, extra])
         pool.attrs = {}
-    chosen, per_cat = [], {}
+    group = "bucket" if befas else "category"
+    chosen, per_grp, per_co = [], {}, {}
     for code in pool.sort_values("score", ascending=False).index:
         if len(chosen) >= MAX_FUNDS:
             break
-        cat = pool.at[code, "category"]
-        if per_cat.get(cat, 0) >= PER_CAT:
+        g, co = pool.at[code, group], pool.at[code, "company"]
+        if per_grp.get(g, 0) >= PER_CAT:
+            continue
+        if befas and per_co.get(co, 0) >= PER_COMPANY:
             continue
         if chosen and wk[chosen].corrwith(wk[code]).max() > MAX_CORR:
             continue
         if len(chosen) >= MIN_FUNDS and pool.at[code, "score"] < 40:
             break
         chosen.append(code)
-        per_cat[cat] = per_cat.get(cat, 0) + 1
-    # Az fon kaldıysa ikinci tur: korelasyon ve kategori sınırı olmadan en iyi fonlarla 3'e tamamla
+        per_grp[g] = per_grp.get(g, 0) + 1
+        per_co[co] = per_co.get(co, 0) + 1
+    # Az fon kaldıysa ikinci tur: korelasyon ve grup sınırı olmadan en iyi fonlarla 3'e tamamla
     if len(chosen) < MIN_FUNDS:
         for code in pool.sort_values("score", ascending=False).index:
             if len(chosen) >= MIN_FUNDS:
@@ -293,8 +347,17 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, company: str, prev: list[str
     if not chosen:
         return []
     sel = pool.loc[chosen]
-    weights = _round(sel["score"] ** 2 / sel["vol"].clip(lower=0.05) ** 0.5)
+    weights = _weights(sel)
     return [{"code": k, "w": float(weights[k]), **sel.loc[k].to_dict()} for k in weights.sort_values(ascending=False).index]
+
+
+def _universe_pool(m: pd.DataFrame) -> list[str]:
+    """Kıyas evreni: BEFAS'a açık, uzun vadeye uygun (oynaklık ≥ sınır, sıçramasız) tüm fonlar."""
+    if m.empty:
+        return []
+    c = m[m["befas_no"].isna() & (m["vol"] >= MIN_VOL)]
+    spike = c.apply(lambda r: model._spike_reason(r, MAX_1Y), axis=1) if len(c) else pd.Series(dtype=object)
+    return list(c.index[spike.isna()]) if len(c) else []
 
 
 def _r(x, nd=2, mult=100):
@@ -316,13 +379,17 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
     forms = [i for i in scoring.month_ends(dates) if dates[i].month % PERIOD_MONTHS == 0
              and i >= MIN_HISTORY and i + 1 < len(dates) and i in scores_at]
     companies = sorted({c for c in funds.loc[funds.index.isin(price.columns), "company"]})
-    history = {c: [] for c in companies}
-    unis = {}
+    BEFAS = "__befas__"
+    history = {c: [] for c in [*companies, BEFAS]}
+    unis, univ_codes = {}, {}
     for i in forms:
         unis[i], wk = _universe(price, panel, funds, rf_idx, tufe, i, scores_at.get(i))
-        for comp in companies:
+        univ_codes[i] = _universe_pool(unis[i])
+        for comp in [*companies, BEFAS]:
             prev = [f["code"] for f in history[comp][-1]["funds"]] if history[comp] else None
-            history[comp].append({"i": i, "funds": _pick(unis[i], wk, comp, prev)})
+            funds_i = (_pick(unis[i], wk, prev, befas=True) if comp == BEFAS
+                       else _pick(unis[i], wk, prev, company=comp))
+            history[comp].append({"i": i, "funds": funds_i})
 
     flags = {}
     for code, f in scored.iterrows():
@@ -335,8 +402,26 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
         elif f.get("grade") in ("C", "D"):
             flags[code] = f"notu {f['grade']} seviyesine düştü"
 
+    def held(ws_list):
+        """Dönem dönem ağırlık listesinden (T+1 alış, sonraki kuruluma kadar) seviye serisi."""
+        rets, points = [], []
+        for k, (i, ws) in enumerate(ws_list):
+            a = dates[i + 1]
+            e = dates[ws_list[k + 1][0] + 1] if k + 1 < len(ws_list) else dates[-1]
+            if e <= a or ws is None or ws.empty:
+                continue
+            r = (px.loc[e, ws.index] / px.loc[a, ws.index] - 1).clip(-0.95, 5).fillna(0)
+            if not points:
+                points.append(a)
+            rets.append(float((r * ws).sum()))
+            points.append(e)
+        return rets, points
+
+    # Kıyas evreni: her dönem BEFAS'a açık, uzun vadeye uygun tüm fonlar eşit ağırlık
+    univ_ws = [(i, pd.Series(1 / len(univ_codes[i]), index=univ_codes[i]) if univ_codes[i] else None) for i in forms]
+
     out = {}
-    for comp in companies:
+    for comp in [*companies, BEFAS]:
         hist = history[comp]
         if not hist or not hist[-1]["funds"]:
             continue
@@ -347,6 +432,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
             code = f["code"]
             basket.append({
                 "c": code, "n": funds.at[code, "name"], "k": f.get("category"), "w": round(f["w"] * 100),
+                "co": funds.at[code, "company"], "bk": f.get("bucket"), "bf": funds.at[code, "befas_no"],
                 "score": round(float(f["score"]), 1), "g": f.get("grade"),
                 "gNow": scored.at[code, "grade"] if code in scored.index else None,
                 "fx": bool(f.get("foreign")), "tk": bool(funds.at[code, "tech"]), "fill": bool(f.get("fill")),
@@ -364,34 +450,34 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
             tw = sum(x for x, _ in vals)
             port[k] = round(sum(x * v for x, v in vals) / tw, 2) if tw else None
 
-        # Geçmiş: her dönem T+1 alış, bir sonraki kuruluma kadar tutuş; boş dönemde şirketin uygun fonları eşit ağırlık
-        rets, points, items = [], [], []
-        for k, h in enumerate(hist):
-            a = dates[h["i"] + 1]
-            e = dates[hist[k + 1]["i"] + 1] if k + 1 < len(hist) else dates[-1]
+        # Geçmiş: her dönem T+1 alış, bir sonraki kuruluma kadar tutuş; boş dönemde uygun fonlar eşit ağırlık
+        items, ws_list = [], []
+        for h in hist:
             items.append({"date": dates[h["i"]].strftime("%Y-%m-%d"),
                           "items": [[f["code"], round(f["w"] * 100)] for f in h["funds"]]})
-            if e <= a:
-                continue
             if h["funds"]:
                 ws = pd.Series({f["code"]: f["w"] for f in h["funds"]})
             else:
                 u = unis[h["i"]]
-                codes = list(u.index[u["company"] == comp]) if not u.empty else []
-                if not codes:
-                    continue
-                ws = pd.Series(1 / len(codes), index=codes)
-            r = (px.loc[e, ws.index] / px.loc[a, ws.index] - 1).clip(-0.95, 5).fillna(0)
-            if not points:
-                points.append(a)
-            rets.append(float((r * ws).sum()))
-            points.append(e)
+                codes = (univ_codes[h["i"]] if comp == BEFAS
+                         else list(u.index[u["company"] == comp]) if not u.empty else [])
+                ws = pd.Series(1 / len(codes), index=codes) if codes else None
+            ws_list.append((h["i"], ws))
+        rets, points = held(ws_list)
         backtest_out = {"available": False}
         if len(rets) >= 2:
             rs = pd.Series(rets, index=points[1:])
             lvl = pd.concat([pd.Series([100.0], index=[points[0]]), (1 + rs).cumprod() * 100])
             series, stats = {"model": [round(float(x), 3) for x in lvl.values]}, {}
             stats["model"] = _stats(lvl, rs, None)
+            # Evren: aynı tarihlerde BEFAS'a açık uygun fonların eşit ağırlıklı sepeti
+            u_r, u_p = held(univ_ws)
+            if len(u_r) >= 2:
+                us = pd.Series(u_r, index=u_p[1:])
+                ul = pd.concat([pd.Series([100.0], index=[u_p[0]]), (1 + us).cumprod() * 100]).reindex(points).ffill()
+                ul = ul / ul.iloc[0] * 100
+                series["universe"] = [None if pd.isna(x) else round(float(x), 3) for x in ul.values]
+                stats["universe"] = _stats(ul, ul.pct_change().dropna(), None)
             for b in ("gold", "usd", "tufe", "ppf"):
                 if b not in bench or bench[b].isna().all():
                     continue
@@ -402,8 +488,9 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
             backtest_out = {"available": True, "dates": [d.strftime("%Y-%m-%d") for d in points],
                             "series": series, "stats": stats}
         out[comp] = {
-            "company": comp, "channel": funds.loc[funds["company"] == comp, "channel"].dropna().iloc[0]
-            if funds.loc[funds["company"] == comp, "channel"].notna().any() else None,
+            "company": "BEFAS (tüm şirketler)" if comp == BEFAS else comp,
+            "channel": None if comp == BEFAS else (funds.loc[funds["company"] == comp, "channel"].dropna().iloc[0]
+                                                   if funds.loc[funds["company"] == comp, "channel"].notna().any() else None),
             "formed": dates[cur["i"]].strftime("%Y-%m-%d"), "entry": entry.strftime("%Y-%m-%d"),
             "basket": basket, "portfolio": port, "sinceEntry": round(since, 2),
             "history": items, "backtest": backtest_out,
@@ -417,11 +504,13 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
             y, mth = y + 1, mth - 12
         nxt = (pd.Timestamp(year=y, month=mth, day=1) + pd.offsets.BMonthEnd(0)).strftime("%Y-%m-%d")
     return {
-        "asOf": dates[-1].strftime("%Y-%m-%d"), "nextRebalance": nxt, "companies": out,
+        "asOf": dates[-1].strftime("%Y-%m-%d"), "nextRebalance": nxt,
+        "befas": out.pop(BEFAS, None), "companies": out,
         "rules": {"minFunds": MIN_FUNDS, "maxFunds": MAX_FUNDS, "minW": MIN_W, "maxW": MAX_W,
                   "minHistoryDays": MIN_HISTORY, "minAum": MIN_AUM, "minInvestors": MIN_INVESTORS,
                   "minVol": MIN_VOL, "excludedCategories": sorted(EXCLUDED_CATEGORIES), "okGrades": OK_GRADES,
                   "maxCorr": MAX_CORR, "perCat": PER_CAT, "max1y": MAX_1Y, "stayBonus": STAY_BONUS,
-                  "periodMonths": PERIOD_MONTHS, "weights": WEIGHTS,
+                  "periodMonths": PERIOD_MONTHS, "weights": WEIGHTS, "perCompany": PER_COMPANY,
+                  "weightMode": WEIGHT_MODE,
                   "retWindows": {k: w for k, (_, w) in RET_WINDOWS.items()}},
     }

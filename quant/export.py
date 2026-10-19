@@ -139,7 +139,7 @@ def write_bes(res: dict, out_dir: Path = ROOT / "dist") -> dict:
         rec.update({
             "co": funds.at[code, "company"], "ch": funds.at[code, "channel"],
             "ax": funds.at[code, "access"] or None, "fx": bool(funds.at[code, "foreign"]),
-            "tk": bool(funds.at[code, "tech"]),
+            "tk": bool(funds.at[code, "tech"]), "bf": funds.at[code, "befas_no"],
         })
         records.append(rec)
     price = res["panel"]["price"]

@@ -30,8 +30,8 @@ QUALIFIED_RE = re.compile(r"SERBEST|N[İI]TEL[İI]KL[İI]|G[İI]R[İI][ŞS][İI]
 
 # =================================================================== veri
 
-def load_panel(conn: sqlite3.Connection) -> dict[str, pd.DataFrame]:
-    df = pd.read_sql("SELECT date, code, price, shares, investors, size FROM prices", conn)
+def load_panel(conn: sqlite3.Connection, table: str = "prices") -> dict[str, pd.DataFrame]:
+    df = pd.read_sql(f"SELECT date, code, price, shares, investors, size FROM {table}", conn)
     df["date"] = pd.to_datetime(df["date"])
     panel = {
         col: df.pivot(index="date", columns="code", values=col).sort_index()

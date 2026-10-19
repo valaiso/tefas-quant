@@ -412,6 +412,14 @@ table.compare td.best { background: var(--up-soft); font-weight: 700; }
 .model-table tfoot td { border-top: 1px solid var(--border); }
 .hold-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 3px; border: 1px solid var(--border); border-radius: 999px; font-size: .84rem; }
 .rule-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: .9rem; line-height: 1.5; }
+.ch-tag, .ax-tag, .fx-tag { display: inline-block; font-size: .62rem; font-weight: 800; letter-spacing: .04em; padding: 1px 6px; border-radius: 999px; vertical-align: middle; margin-left: 4px; white-space: nowrap; }
+.ch-tag { background: var(--accent-soft); color: var(--accent); }
+.ax-tag { background: var(--warn-soft); color: var(--warn); }
+.fx-tag { background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border); }
+.seg-lg { margin: 4px 0; }
+.seg-lg button { padding: 8px 20px; font-size: .92rem; }
+button.dist-item { font: inherit; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; color: inherit; }
+button.dist-item[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .glossary-title { margin: 18px 0 8px; font-size: .95rem; }
 .glossary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; margin: 0; }
 .glossary > div { padding: 8px 0; border-top: 1px solid var(--border); }
@@ -497,8 +505,8 @@ table.bt-grades td { white-space: nowrap; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
-  /* Telefonda alt menü kalabalık olmasın: Metodoloji ve Karşılaştır yalnızca masaüstünde */
-  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"] { display: none; }
+  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır ve BES yalnızca masaüstünde */
+  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"] { display: none; }
   /* Telefonda sol üstte sayfa etiketi yerine logo ve marka adı */
   .topbar-logo { display: block; flex: none; margin-right: -6px; }
   .topbar-brand { display: block; }

@@ -44,6 +44,19 @@ CREATE TABLE IF NOT EXISTS scores (
     PRIMARY KEY (date, code)
 ) WITHOUT ROWID;
 
+-- Bireysel emeklilik (BES / EMK) fonları: yatırım fonlarından ayrı tutulur.
+CREATE TABLE IF NOT EXISTS bes_prices (
+    date TEXT NOT NULL,
+    code TEXT NOT NULL,
+    price REAL NOT NULL,
+    shares REAL,
+    investors INTEGER,
+    size REAL,
+    PRIMARY KEY (code, date)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS bes_funds (code TEXT PRIMARY KEY, name TEXT);
+
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE INDEX IF NOT EXISTS idx_prices_date ON prices (date);
 """

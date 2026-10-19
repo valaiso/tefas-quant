@@ -15,29 +15,33 @@ from .db import meta_get, meta_set
 from .tefas import Tefas
 
 KIND = "YAT"  # TEFAS Quant yatırım fonlarını sıralar
+BES_KIND = "EMK"  # bireysel emeklilik fonları (BES sekmesi)
+# Fon tipine göre fiyat ve fon tabloları
+TABLES = {"YAT": ("prices", "funds"), "EMK": ("bes_prices", "bes_funds")}
 
 
 CHUNK_DAYS = 28  # TEFAS tek istekte ~1 ay döndürüyor
 
 
-def fetch_window(conn: sqlite3.Connection, client: Tefas, start: dt.date, end: dt.date) -> int:
-    """Tek bir ≤28 günlük pencerenin tüm YAT fon kayıtlarını yazar ve hemen kaydeder.
+def fetch_window(conn: sqlite3.Connection, client: Tefas, start: dt.date, end: dt.date, kind: str = KIND) -> int:
+    """Tek bir ≤28 günlük pencerenin tüm fon kayıtlarını (YAT ya da EMK) yazar ve hemen kaydeder.
 
     Her pencereden sonra commit edildiği için iş yarıda kesilse de (zaman aşımı,
     hız sınırı) o ana kadar çekilenler kaybolmaz; cache'e kaydedilip sonraki
     çalışmada kalınan yerden devam edilir.
     """
+    price_table, fund_table = TABLES[kind]
     rows, names = [], {}
-    for rec in client.prices(KIND, start, end):
+    for rec in client.prices(kind, start, end):
         rows.append((rec["date"], rec["code"], rec["price"], rec["shares"], rec["investors"], rec["size"]))
         names[rec["code"]] = rec["name"]
     conn.executemany(
-        "INSERT OR REPLACE INTO prices (date, code, price, shares, investors, size)"
+        f"INSERT OR REPLACE INTO {price_table} (date, code, price, shares, investors, size)"
         " VALUES (?, ?, ?, ?, ?, ?)",
         rows,
     )
     conn.executemany(
-        "INSERT INTO funds (code, name) VALUES (?, ?)"
+        f"INSERT INTO {fund_table} (code, name) VALUES (?, ?)"
         " ON CONFLICT(code) DO UPDATE SET name = excluded.name",
         list(names.items()),
     )
@@ -225,19 +229,63 @@ def prune(conn: sqlite3.Connection, today: dt.date) -> int:
     """HISTORY_YEARS yıldan eski fiyatları ve skor fotoğraflarını siler."""
     cutoff = today - dt.timedelta(days=config.HISTORY_YEARS * 365 + config.RETENTION_BUFFER_DAYS)
     removed = conn.execute("DELETE FROM prices WHERE date < ?", (cutoff.isoformat(),)).rowcount
+    removed += conn.execute("DELETE FROM bes_prices WHERE date < ?", (cutoff.isoformat(),)).rowcount
     conn.execute("DELETE FROM scores WHERE date < ?", (cutoff.isoformat(),))
     conn.commit()
     print(f"[budama] {cutoff} öncesi {removed} fiyat satırı silindi", flush=True)
     return removed
 
 
+def _recent(conn: sqlite3.Connection, client: Tefas, kind: str, today: dt.date, cutoff: dt.date) -> dt.date:
+    """Son kayıttan (ya da boşsa son 4 haftadan) bugüne çeker; başlangıç gününü döndürür."""
+    table = TABLES[kind][0]
+    hi = conn.execute(f"SELECT MAX(date) FROM {table}").fetchone()[0]
+    start = (max(dt.date.fromisoformat(hi) - dt.timedelta(days=config.OVERLAP_DAYS), cutoff)
+             if hi else today - dt.timedelta(days=CHUNK_DAYS * 4))  # skor için ≥60 işlem günü
+    for s, e in _windows(start, today, newest_first=False):
+        n = fetch_window(conn, client, s, e, kind)
+        print(f"[fiyat {kind}] {s} -> {e}: {n} kayıt", flush=True)
+    return start
+
+
+def _backfill(conn: sqlite3.Connection, client: Tefas, kind: str, cutoff: dt.date, fallback: dt.date,
+              out_of_time) -> bool:
+    """En eski kayıttan geriye, saklama penceresinin başına kadar. Süre biterse False."""
+    table = TABLES[kind][0]
+    # TEFAS 5 yıldan eski başlangıç tarihini reddediyor; daha gerisi istenmez
+    today = dt.date.today()
+    try:
+        tefas_floor = today.replace(year=today.year - 5) + dt.timedelta(days=2)
+    except ValueError:  # 29 Şubat
+        tefas_floor = today.replace(year=today.year - 5, day=28) + dt.timedelta(days=2)
+    cutoff = max(cutoff, tefas_floor)
+    lo = conn.execute(f"SELECT MIN(date) FROM {table}").fetchone()[0]
+    oldest = dt.date.fromisoformat(lo) if lo else fallback
+    if oldest <= cutoff + dt.timedelta(days=7):
+        print(f"[geçmiş {kind}] saklama penceresi tamam", flush=True)
+        return True
+    for s, e in _windows(cutoff, oldest - dt.timedelta(days=1), newest_first=True):
+        if out_of_time():
+            print(f"[geçmiş {kind}] süre bütçesi doldu; {e} öncesi sonraki çalışmada", flush=True)
+            return False
+        try:
+            n = fetch_window(conn, client, s, e, kind)
+        except Exception as exc:  # noqa: BLE001
+            # Geçmiş eksikliği siteyi durdurmasın: güncel veriyle yayınla, sonra devam et.
+            print(f"[geçmiş {kind}] {s} -> {e} alınamadı ({exc}); sonraki çalışmada devam", flush=True)
+            return False
+        print(f"[geçmiş {kind}] {s} -> {e}: {n} kayıt", flush=True)
+    return True
+
+
 def update(conn: sqlite3.Connection, delay: float = 3.0, full: bool = False,
            budget_min: float | None = None) -> None:
     """Önce güncel günleri, sonra eksik geçmişi (yeniden eskiye) çeker.
 
-    budget_min verilirse geçmiş doldurma bu süre dolunca durur; site yine de
-    güncel fiyatla yayınlanır, kalan geçmiş sonraki çalışmalarda tamamlanır.
-    İlk kurulumda geçmiş tek seferde değil, birkaç çalışmaya yayılarak dolar.
+    Yatırım fonları (YAT) önce gelir; BES (EMK) fonları onun ardından ve
+    hatası siteyi durdurmadan çekilir. budget_min verilirse geçmiş doldurma bu
+    süre dolunca durur; site yine de güncel fiyatla yayınlanır, kalan geçmiş
+    sonraki çalışmalarda tamamlanır.
     """
     started = time.monotonic()
     out_of_time = lambda: budget_min is not None and time.monotonic() - started > budget_min * 60  # noqa: E731
@@ -246,36 +294,21 @@ def update(conn: sqlite3.Connection, delay: float = 3.0, full: bool = False,
     cutoff = today - dt.timedelta(days=config.HISTORY_YEARS * 365 + config.RETENTION_BUFFER_DAYS)
     if full:
         conn.execute("DELETE FROM prices")
+        conn.execute("DELETE FROM bes_prices")
         conn.commit()
-    lo, hi = conn.execute("SELECT MIN(date), MAX(date) FROM prices").fetchone()
     client = Tefas(delay=delay)
 
-    # 1) Güncel: son kayıttan (ya da boşsa son 4 haftadan) bugüne
-    recent_start = (
-        max(dt.date.fromisoformat(hi) - dt.timedelta(days=config.OVERLAP_DAYS), cutoff)
-        if hi else today - dt.timedelta(days=CHUNK_DAYS * 4)  # skor için ≥60 işlem günü
-    )
-    for s, e in _windows(recent_start, today, newest_first=False):
-        n = fetch_window(conn, client, s, e)
-        print(f"[fiyat] {s} -> {e}: {n} kayıt", flush=True)
+    # 1) Güncel günler
+    recent = _recent(conn, client, KIND, today, cutoff)
+    try:
+        bes_recent = _recent(conn, client, BES_KIND, today, cutoff)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[fiyat {BES_KIND}] alınamadı ({exc}); BES sekmesi önceki veriyle kalır", flush=True)
+        bes_recent = None
 
-    # 2) Geçmiş doldurma: en eski kayıttan geriye, 3 yıllık pencerenin başına kadar (HISTORY_YEARS)
-    lo = conn.execute("SELECT MIN(date) FROM prices").fetchone()[0]
-    oldest = dt.date.fromisoformat(lo) if lo else recent_start
-    if oldest > cutoff + dt.timedelta(days=7):
-        for s, e in _windows(cutoff, oldest - dt.timedelta(days=1), newest_first=True):
-            if out_of_time():
-                print(f"[geçmiş] süre bütçesi doldu; {e} öncesi sonraki çalışmada", flush=True)
-                break
-            try:
-                n = fetch_window(conn, client, s, e)
-            except Exception as exc:  # noqa: BLE001
-                # Geçmiş eksikliği siteyi durdurmasın: güncel veriyle yayınla, sonra devam et.
-                print(f"[geçmiş] {s} -> {e} alınamadı ({exc}); sonraki çalışmada devam", flush=True)
-                break
-            print(f"[geçmiş] {s} -> {e}: {n} kayıt", flush=True)
-    else:
-        print("[geçmiş] saklama penceresi tamam", flush=True)
+    # 2) Geçmiş doldurma: önce yatırım fonları, süre kalırsa BES
+    if _backfill(conn, client, KIND, cutoff, recent, out_of_time) and bes_recent is not None:
+        _backfill(conn, client, BES_KIND, cutoff, bes_recent, out_of_time)
 
     sync_categories(conn, client, today, force=full)
     sync_fvt(conn, today, force=full)

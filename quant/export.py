@@ -130,6 +130,30 @@ def write_benchmarks(bench: pd.DataFrame, out_dir: Path = ROOT / "dist") -> None
     _write(out_dir / "data" / "benchmarks.json", out)
 
 
+def write_bes(res: dict, out_dir: Path = ROOT / "dist") -> dict:
+    """BES fonları: kendi dosyası (bes.json); yatırım fonu sayfaları etkilenmez."""
+    scored, funds = res["scored"], res["funds"]
+    records = []
+    for code, f in scored.iterrows():
+        rec = _fund_record(code, f)
+        rec.update({
+            "co": funds.at[code, "company"], "ch": funds.at[code, "channel"],
+            "ax": funds.at[code, "access"] or None, "fx": bool(funds.at[code, "foreign"]),
+            "tk": bool(funds.at[code, "tech"]),
+        })
+        records.append(rec)
+    price = res["panel"]["price"]
+    meta = {
+        "lastDataDate": res["as_of"], "firstDataDate": res["first_date"], "fundCount": len(records),
+        "excluded": res["excluded"], "founderRisk": res.get("founder_risk", {}),
+        "riskFree": round(res["risk_free"] * 100, 2),
+        "periods": {key: {"from": price.index[-1 - n].strftime("%Y-%m-%d"), "to": price.index[-1].strftime("%Y-%m-%d")}
+                    for key, n in (("1w", 5), ("1m", 21)) if len(price) > n},
+    }
+    _write(out_dir / "data" / "bes.json", {"meta": meta, "funds": records})
+    return meta
+
+
 def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
     scored: pd.DataFrame = result["scored"]
     price: pd.DataFrame = result["panel"]["price"]

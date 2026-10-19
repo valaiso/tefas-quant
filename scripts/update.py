@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from quant import backtest, benchmarks, export, fetch, model, scoring, simulation  # noqa: E402
+from quant import backtest, benchmarks, bes, export, fetch, model, scoring, simulation  # noqa: E402
 from quant.db import DEFAULT_DB, ROOT, open_db  # noqa: E402
 
 
@@ -60,6 +60,18 @@ def main() -> int:
         print(f"[model] {p['label']} ({p['formed']}): "
               + ", ".join(f"{b['c']} %{b['w']}" for b in p["basket"])
               + f" · geçmiş %{st.get('total')}", flush=True)
+    # BES: ayrı skorlama ve uzun vadeli şirket modelleri; hatası siteyi durdurmaz
+    try:
+        bres = bes.run(conn)
+        if bres is not None:
+            export.write_bes(bres, Path(args.out))
+            bm = bes.model_run(bres, bench)
+            export.write_json(Path(args.out) / "data" / "bes_model.json", bm)
+            print(f"[bes model] {len(bm['companies'])} şirket için sepet, sonraki yenileme {bm['nextRebalance']}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        print(f"[bes] üretilemedi: {exc}", flush=True)
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.close()
     print(

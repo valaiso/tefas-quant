@@ -27,8 +27,6 @@ export function render(app, _route, store) {
          Az yatırımcı, nakit çıkışı ve olağan dışı getiri cezalandırılır; fiyatı durmuş fonlar listeye alınmaz.</p>
       <div class="hero-actions">
         <a class="btn btn-light" href="#/siralama">Tüm sıralama</a>
-        <a class="btn btn-ghost" href="#/backtest">QuantBacktest</a>
-        <a class="btn btn-ghost" href="#/metodoloji">Yöntemi incele</a>
       </div>
     </div>
     <div class="hero-figures">

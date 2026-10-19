@@ -671,6 +671,10 @@ table.bt-grades td { white-space: nowrap; }
   color: var(--rp-dim); border-top: 1px solid var(--rp-line); background: var(--rp-soft); }
 .rp-footer span:last-child { white-space: nowrap; font-weight: 700; }
 
+/* BES model sekmeleri */
+.bes-prof { margin: 4px 0 10px; }
+.bes-prof-desc { margin: 0 0 12px; }
+
 /* Quant / Backtest terimleri */
 .bt-terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 18px; margin: 14px 0 4px; }
 .bt-terms div { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); border-radius: 10px; padding: 9px 12px; }

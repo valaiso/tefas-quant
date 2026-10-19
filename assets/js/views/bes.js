@@ -364,6 +364,14 @@ function bindComparator(body, m, funds) {
 }
 
 // ------------------------------------------------------------------ model
+// Yıllık bileşik getiriden birikimli getiri (%)
+const cum = (c, yrs) => (c == null || !isFinite(c) ? null : (Math.pow(1 + c / 100, yrs) - 1) * 100);
+const wsum = (basket, f) => {
+  const xs = basket.map((b) => [b.w, f(b)]).filter(([, v]) => v != null);
+  const tw = xs.reduce((s, [w]) => s + w, 0);
+  return tw ? xs.reduce((s, [w, v]) => s + w * v, 0) / tw : null;
+};
+
 function basketHtml(p, idp) {
   const bt = p.backtest;
   const months = p.history.map((h) => h.date);
@@ -374,23 +382,23 @@ function basketHtml(p, idp) {
   return `
     <div class="kpi-row">
       <div><span>Dönem başından</span><b class="${(p.sinceEntry ?? 0) >= 0 ? "up" : "down"}">${pct(p.sinceEntry, 2)}</b></div>
-      <div><span>1Y</span><b>${pct(p.portfolio["1y"], 1)}</b></div>
-      <div><span>3Y yıllık</span><b>${pct(p.portfolio["3y"], 1)}</b></div>
-      <div><span>5Y yıllık</span><b>${pct(p.portfolio["5y"], 1)}</b></div>
+      <div><span>1 yıl</span><b>${pct(wsum(p.basket, (b) => b.r["1y"]), 1)}</b></div>
+      <div><span>2 yıl</span><b>${pct(wsum(p.basket, (b) => cum(b.r2, 2)), 1)}</b></div>
+      <div><span>3 yıl</span><b>${pct(wsum(p.basket, (b) => cum(b.r["3y"], 3)), 1)}</b></div>
       <div><span>Kuruluş</span><b>${dateTR(p.formed)}</b></div>
     </div>
     <div class="weight-bar">${bar}</div>
     <div class="table-wrap"><table class="model-table">
       <thead><tr><th class="left">Fon</th><th class="left">Şirket</th><th class="left">Varlık sınıfı</th><th>Ağırlık</th><th>Puan</th><th>Not</th>
-        <th>1Y</th><th>3Y yıllık</th><th>5Y yıllık</th><th title="3 yıllık reel (TÜFE üstü) yıllık getiri">3Y reel</th>
-        <th title="12 aylık dönemlerin kaçında TÜFE'yi geçti">TÜFE'yi geçen 12A</th><th>Maks. düşüş (3Y)</th><th>Oynaklık</th><th class="left">Bugünkü durum</th></tr></thead>
+        <th title="Son 1 yılın getirisi">1 yıl</th><th title="Son 2 yılın birikimli getirisi">2 yıl</th><th title="Son 3 yılın birikimli getirisi">3 yıl</th>
+        <th title="12 aylık dönemlerin kaçında TÜFE'yi geçti">TÜFE'yi geçen 12A</th><th title="Son 1 yılda zirveden en büyük düşüş">Maks. düşüş (1 yıl)</th><th>Oynaklık</th><th class="left">Bugünkü durum</th></tr></thead>
       <tbody>${p.basket.map((b, i) => `<tr>
         <td class="left"><span class="mdl-swatch" style="background:${SLICE[i % SLICE.length]}"></span>${chip(b.c)}${tags(b)}
           <span class="fund-name">${esc(b.n)}</span></td>
         <td class="left dim">${esc(b.co || "—")}</td><td class="left dim">${esc(b.bk || b.k || "—")}</td><td><b class="weight">%${b.w}</b></td><td>${num(b.score, 0)}</td>
         <td>${esc(b.gNow || b.g || "—")}</td>
-        <td>${pct(b.r["1y"], 1)}</td><td>${pct(b.r["3y"], 1)}</td><td>${pct(b.r["5y"], 1)}</td><td>${pct(b.real3, 1)}</td>
-        <td>%${num(b.realWin, 0)}</td><td class="down">${pct(b.mdd, 1)}</td><td>%${num(b.vol, 1)}</td>
+        <td>${pct(b.r["1y"], 1)}</td><td>${pct(cum(b.r2, 2), 1)}</td><td>${pct(cum(b.r["3y"], 3), 1)}</td>
+        <td>%${num(b.realWin, 0)}</td><td class="down">${pct(b.mdd1 ?? b.mdd, 1)}</td><td>%${num(b.vol, 1)}</td>
         <td class="left">${b.warn ? `<span class="warn-tag">${esc(b.warn)}</span>` : `<span class="dim">—</span>`}</td></tr>`).join("")}</tbody>
     </table></div>
     ${bt.available ? `<div class="card-head sub-head"><h3>Geçmişte</h3>
@@ -450,12 +458,18 @@ async function renderModel(body) {
     return;
   }
   const R = m.rules;
-  const B = m.befas;
+  const P = m.profiles || { dengeli: m.befas };
+  const pkeys = Object.keys(P).filter((k) => P[k]);
+  if (!pkeys.includes(state.bprof)) state.bprof = pkeys.includes("dengeli") ? "dengeli" : pkeys[0];
+  const B = P[state.bprof];
   const ust = B?.backtest.available ? B.backtest.stats : null;
+  const ppfBeat = ust ? ust.model.total - ust.ppf.total : null;
 
   body.innerHTML = `
   <section class="card">
-    <div class="card-head"><h2>Uzun vadeli BES modeli (BEFAS)</h2><span class="sub">2 ayda bir · son kurulum ${B ? dateTR(B.formed) : "—"} · sonraki ${dateTR(m.nextRebalance)}</span></div>
+    <div class="card-head"><h2>Uzun vadeli BES modelleri (BEFAS)</h2><span class="sub">2 ayda bir · son kurulum ${B ? dateTR(B.formed) : "—"} · sonraki ${dateTR(m.nextRebalance)}</span></div>
+    <div class="seg bes-prof" id="besProf">${pkeys.map((k) => `<button data-k="${k}" aria-pressed="${k === state.bprof}">${esc(P[k].label || k)}</button>`).join("")}</div>
+    ${B?.desc ? `<p class="bes-prof-desc"><b>${esc(B.label)}:</b> ${esc(B.desc)}</p>` : ""}
     <p><b>BEFAS</b> (Takasbank'ın emeklilik fonu platformu, Temmuz 2021'den beri) sayesinde hangi emeklilik şirketinde olursan ol, kendi şirketinin
       uygulamasından <b>başka şirketlerin fonlarını</b> da alabilirsin. İstisnalar (EGM): grup fonları, unvanında "yabancı" ibaresi olan fonlar,
       para piyasası, katkı ve başlangıç fonları; bunlar yalnızca kendi şirketinin sözleşmesinde. Bu yüzden ana sepet, tüm şirketlerin
@@ -464,9 +478,11 @@ async function renderModel(body) {
       temiz fonlar seçilir. Sepet varlık sınıfı başına (altın, yerli hisse, teknoloji-yabancı, çok varlıklı) en fazla ${R.perCat} ve şirket başına en fazla
       ${R.perCompany} fon içerir; ağırlıklar <b>eşit</b> dağıtılır (tahmine dayalı ağırlıklar uzun vadede eşit ağırlığı genelde geçemez; DeMiguel, Garlappi ve Uppal, 2009).</p>
     ${B ? basketHtml(B, "bf") : `<p class="dim">BEFAS sepeti için yeterli fon yok.</p>`}
-    ${ust ? `<div class="notice">Geçmiş testte BEFAS sepeti ${pct(ust.model.total, 1)} getirirken BEFAS'a açık tüm uygun fonların eşit ağırlıklı sepeti
-      ${pct(ust.universe?.total, 1)}, gram altın ${pct(ust.gold?.total, 1)}, TÜFE ${pct(ust.tufe?.total, 1)} getirdi. Altın bu dönemde çok güçlüydü;
-      model altını tek bir varlık sınıfı olarak sınırlı tutar (çeşitlendirme).</div>` : ""}
+    ${ust ? `<div class="notice ${ppfBeat >= 0 ? "good" : ""}">${dateTR(B.backtest.dates[0])}'den bu yana ${esc(B.label)} modeli ${pct(ust.model.total, 1)} getirdi;
+      PPF ortalaması (yatırım fonu) ${pct(ust.ppf?.total, 1)}, BEFAS'a açık tüm uygun fonların eşit sepeti ${pct(ust.universe?.total, 1)}, gram altın ${pct(ust.gold?.total, 1)},
+      TÜFE ${pct(ust.tufe?.total, 1)}. PPF'ye göre ${ppfBeat >= 0 ? "önde" : "geride"}: ${num(Math.abs(ppfBeat), 1)} puan.
+      Not: PPF burada vergisiz gösteriliyor; normal hesapta para piyasası fonu kazancından bugün %17,5 stopaj kesilir, BES'te birikim boyunca kesilmez ve devlet katkısı eklenir.
+      2024–2026'daki çok yüksek faiz döneminde (PPF yılda %50–60) uzun vadeli fonların çoğu PPF'nin gerisinde kaldı; 2022–2023'te ise hisse ve altın PPF'yi çok geride bıraktı.</div>` : ""}
   </section>
 
   ${comparatorHtml(loadCmp(), cacheFunds.funds.filter((f) => !f.ax))}
@@ -497,6 +513,12 @@ async function renderModel(body) {
     </ol>
   </section>`;
 
-  if (B) bindBasket(body, B, "bf", "BEFAS BES modeli");
+  if (B) bindBasket(body, B, "bf", `${B.label || "BEFAS"} BES modeli`);
+  body.querySelector("#besProf")?.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b || b.dataset.k === state.bprof) return;
+    state.bprof = b.dataset.k;
+    renderModel(body);
+  });
   bindComparator(body, m, cacheFunds.funds);
 }

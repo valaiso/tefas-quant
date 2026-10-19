@@ -19,6 +19,8 @@ const LOCAL_KEY = "tefas-portfoy-v1";
 const GROUP_COLORS = { Fon: "#1f5fbf", Hisse: "#db2777", ETF: "#7c3aed", Kripto: "#c58b12", Nakit: "#64748b", Diğer: "#0891b2" };
 const MODEL_COLORS = { guvenli: "#0b7a45", dengeli: "#1f5fbf", atak: "#db2777", bes: "#0891b2" };
 const PORT_COLOR = "#0b2a5b";
+// Ekrandaki grafik (koyu / açık tema): lacivert ve mavi koyu zeminde kayboluyordu
+const SCREEN_COLORS = { guvenli: "#10b981", dengeli: "#f59e0b", atak: "#ec4899", bes: "#06b6d4" };
 const tl = (v) => (v == null || !isFinite(v) ? "—" : `${num(v, 0)} ₺`);
 const tlS = (v) => (v == null || !isFinite(v) ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${num(Math.abs(v), 0)} ₺`);
 
@@ -243,6 +245,33 @@ function classBar(groups) {
     <div class="pf-legend">${groups.map((g) => `<span><i style="background:${GROUP_COLORS[g.name] || "#94a3b8"}"></i>${esc(g.name)} <b>%${num(g.w, 1)}</b> <em>${tl(g.value)}</em></span>`).join("")}</div>`;
 }
 
+// Gerçek getiri: Analiz'in günlük değer kaydından (para giriş/çıkışından arındırılmış)
+const realFirst = (state) => Object.keys(state?.valueHistory || {}).filter((k) => state.valueHistory[k] > 0).sort()[0] || null;
+function realBlock(d) {
+  const st8 = d.ps.state, hist = st8.valueHistory || {};
+  const dates = Object.keys(hist).filter((k) => hist[k] > 0).sort();
+  if (dates.length < 2) {
+    return `<section class="card"><div class="card-head"><h2>Gerçek getirim</h2></div>
+      <div class="empty">Gerçek getiri için en az iki günlük kayıt gerekiyor (ilk kayıt ${dateTR(dates[0])}).</div></section>`;
+  }
+  const flows = Array.isArray(st8.cashflows) ? st8.cashflows : [];
+  const twr = PR.realReturn(hist, flows)?.twr;
+  const a = dates[0], b = dates[dates.length - 1];
+  const { cal, bench } = d.pos.az;
+  const at = (key, iso) => { const v = bench[key]?.values || []; for (let i = idxOn(cal, iso); i >= 0; i--) if (v[i] > 0) return v[i]; return null; };
+  const br = (key) => { const x = at(key, a), y = at(key, b); return x && y ? (y / x - 1) * 100 : null; };
+  const rows = PR.BENCHMARK_ORDER.filter(([k]) => bench[k]).map(([k, l]) => [l, br(k)]);
+  return `<section class="card">
+    <div class="card-head"><h2>Gerçek getirim</h2><span class="sub">${dateTR(a)} – ${dateTR(b)} · ${dates.length} kayıtlı gün · para giriş/çıkışı hariç</span></div>
+    <div class="kpi-row">
+      <div><span>Portföyüm (gerçek)</span><b class="${R.tone(twr)}">${R.pctS(twr, 2)}</b></div>
+      ${rows.map(([l, v]) => `<div><span>${esc(l)}</span><b class="${R.tone(v)}">${R.pctS(v, 2)}</b></div>`).join("")}
+    </div>
+    <p class="chart-note dim">Kayıt ${dateTR(a)} tarihinde başladığı için bu kutu şimdilik kısa bir dönemi kapsar; her işlem günü uzar. Model portföylerle
+      gerçek karşılaştırma aylık olarak Portföy Raporu'nda yapılır.</p>
+  </section>`;
+}
+
 // ------------------------------------------------------------------ Portföy Karşılaştırması
 const WINDOWS = [["3", "3 Ay"], ["6", "6 Ay"], ["12", "1 Yıl"]];
 const st = { win: "12" };
@@ -255,13 +284,15 @@ async function renderCompare(app) {
   app.innerHTML = `
   <section class="method-intro card">
     <h2>Modellerle Karşılaştır <span class="model-tag">PORTFÖY · MODELLER</span></h2>
-    <p>Bugünkü pozisyonların (${dateTR(d.snap.date)} fotoğrafı) seçilen dönemin başında alınıp tutulduğu varsayılır ve
+    <p><b>İki ayrı ölçü var.</b> Gerçek getirin, Analiz'in günlük değer kaydı başladığı ${dateTR(realFirst(d.ps.state))} tarihinden itibaren hesaplanır (aşağıda ilk kutu).
+      Daha uzun dönemler için bugünkü pozisyonların (${dateTR(d.snap.date)} fotoğrafı) seçilen dönemin başında alınıp tutulduğu varsayılır ve
       Güvenli, Dengeli, Atak fon modelleri ile BES Öneri'ye ve PPF, TÜFE, altın, dolar, S&P 500 kıyaslarına karşı aylık izlenir.
       Bu, dağılımının geçmişte nasıl davranacağını gösterir; gerçek alım-satım geçmişini değil.${missingNote(d.pos)}</p>
     <div class="btn-row"><a class="btn btn-primary" href="#/portfoyrapor">▤ Portföy raporu (PDF)</a></div>
   </section>
+  ${realBlock(d)}
   <section class="card">
-    <div class="card-head"><h2>Birikimli getiri</h2>
+    <div class="card-head"><h2>Bugünkü dağılımım · geriye dönük birikimli getiri</h2>
       <div class="seg" id="pfWin">${WINDOWS.map(([k, l]) => `<button data-w="${k}" aria-pressed="${k === st.win}">${l}</button>`).join("")}</div></div>
     <div class="chart" id="pfChart"></div>
     <div class="table-wrap"><table class="model-table" id="pfStats"></table></div>
@@ -277,22 +308,22 @@ async function renderCompare(app) {
     const dates = cs.ref.dates.slice(i0);
     const rebase = (v) => { const w = v.slice(i0), b = w.find((x) => x != null); return w.map((x) => (x == null || !b ? null : (x / b) * 100)); };
     const series = [
-      { name: "Portföyüm", d: dates, v: rebase(cs.portfolio.series.model), color: PORT_COLOR },
-      ...cs.models.map((m) => ({ name: m.label, d: dates, v: rebase(m.series.model), color: MODEL_COLORS[m.key] })),
+      { name: "Bugünkü dağılımım", d: dates, v: rebase(cs.portfolio.series.model), color: "var(--text)" },
+      ...cs.models.map((m) => ({ name: m.label, d: dates, v: rebase(m.series.model), color: SCREEN_COLORS[m.key] || MODEL_COLORS[m.key] })),
       ...R.BENCH.filter(([b]) => cs.ref.series[b]).map(([b, l, c]) => ({ name: l, d: dates, v: rebase(cs.ref.series[b]), color: c, dashed: true })),
     ];
     lineChart(app.querySelector("#pfChart"), series, { base: 100, height: 320, format: (v) => num(v, 0) });
     const pRet = R.ret(cs.portfolio.series.model, i0, n);
     const rows = [
-      ...all.map((m) => ({ name: m.label, self: m.kind === "portfoy", s: m.series.model })),
+      ...all.map((m) => ({ name: m.kind === "portfoy" ? "Bugünkü dağılımım" : m.label, self: m.kind === "portfoy", s: m.series.model })),
       ...R.BENCH.filter(([b]) => cs.ref.series[b]).map(([b, l]) => ({ name: l, s: cs.ref.series[b], bench: true })),
     ];
-    app.querySelector("#pfStats").innerHTML = `<thead><tr><th class="left">Portföy / model / kıyas</th><th>Dönem getirisi</th><th>Portföyüme göre</th><th>Pozitif ay</th></tr></thead>
+    app.querySelector("#pfStats").innerHTML = `<thead><tr><th class="left">Portföy / model / kıyas</th><th>Dönem getirisi</th><th>Dağılımıma göre</th><th>Pozitif ay</th></tr></thead>
       <tbody>${rows.map((r) => {
         const t = R.ret(r.s, i0, n);
         const diff = r.self || t == null || pRet == null ? null : pRet - t;
         const mm = []; for (let i = i0 + 1; i <= eF; i++) { const x = R.ret(r.s, i - 1, i); if (x != null) mm.push(x); }
-        return `<tr class="${r.self ? "is-self" : ""}"><td class="left">${r.self ? "<b>Portföyüm</b>" : esc(r.name)}</td>
+        return `<tr class="${r.self ? "is-self" : ""}"><td class="left">${r.self ? "<b>Bugünkü dağılımım</b>" : esc(r.name)}</td>
           <td class="${R.tone(t)}"><b>${R.pctS(t)}</b></td>
           <td class="${R.tone(diff)}">${r.self ? "—" : diff == null ? "—" : `${diff >= 0 ? "önde " : "geride "}${num(Math.abs(diff), 1)} puan`}</td>
           <td>${mm.filter((x) => x > 0).length} / ${mm.length}</td></tr>`;
@@ -302,7 +333,7 @@ async function renderCompare(app) {
   const eF = R.lastFull(cs.ref);
   const keys = cs.ref.dates.slice(Math.max(0, eF - 12), eF + 1);
   const mr = (s) => keys.slice(1).map((_, j) => R.ret(s, cs.ref.dates.indexOf(keys[j]), cs.ref.dates.indexOf(keys[j + 1])));
-  const cols = [["Portföyüm", mr(cs.portfolio.series.model), true], ...cs.models.map((m) => [m.label, mr(m.series.model)]),
+  const cols = [["Bugünkü dağılımım", mr(cs.portfolio.series.model), true], ...cs.models.map((m) => [m.label, mr(m.series.model)]),
     ...R.BENCH.filter(([b]) => cs.ref.series[b]).map(([b, l]) => [l, mr(cs.ref.series[b])])];
   app.querySelector("#pfMonths").innerHTML = `<thead><tr><th class="left">Ay</th>${cols.map(([l]) => `<th>${esc(l)}</th>`).join("")}</tr></thead>
     <tbody>${keys.slice(0, -1).map((k, j) => ({ k, j })).reverse().map(({ k, j }) => `<tr><td class="left">${R.monthLong(k)}</td>

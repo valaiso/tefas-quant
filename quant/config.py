@@ -47,7 +47,7 @@ PERFORMANCE_WINDOWS = {
     "1y": (252, 0.35),
 }
 # Ekranda gösterilen getiri dönemleri (skora girmeyenler dahil)
-DISPLAY_WINDOWS = {"1a": 21, "2a": 42, "3a": 63, "6a": 126, "1y": 252, "3y": 756, "5y": 1260}
+DISPLAY_WINDOWS = {"1a": 21, "2a": 42, "3a": 63, "6a": 126, "1y": 252, "3y": 756, "5y": 1240}  # 5Y: 5 yıllık veri penceresi ~1250 işlem günü
 
 # Risk (son 252 işlem günü): metrik -> (ağırlık, yüksek değer iyi mi)
 RISK_METRICS = {

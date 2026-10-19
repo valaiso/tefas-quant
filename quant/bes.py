@@ -150,7 +150,8 @@ def run(conn) -> dict | None:
 
 MIN_FUNDS, MAX_FUNDS = 1, 6                 # alt sınır yok, en fazla 6 fon
 MIN_W, MAX_W, STEP = 0.10, 0.40, 0.05   # BES dağılımında fon başına %10'un altı pratik değil
-MIN_HISTORY = 504                        # 2 yıl (geçmiş test 2023 sonundan başlar; TÜFE şartı 3 yılı ayrıca ister)
+MIN_HISTORY = 504                        # 2 yıl: bugünkü sepette fonun en az bu kadar geçmişi olmalı
+EARLY_HISTORY = 252                      # geçmiş test 1 yıllık veriyle başlar (veri 5 yıl); erken dönemde mevcut pencereler kullanılır
 MIN_AUM, MIN_INVESTORS = 50e6, 1000
 MIN_VOL = 0.06                           # PPF benzeri (para piyasası, kısa vade) fon alınmaz
 EXCLUDED_CATEGORIES = {"Para Piyasası", "Borçlanma Araçları", "Standart", "Başlangıç",
@@ -182,7 +183,23 @@ TREND_FILTER = False                     # sınıf endeksi 40 haftalık ortalama
 STAY_BONUS = 10.0                        # uzun vade: iyi kalan fon sepette kalsın (testte 2 yarıda da daha iyi)
 PERIOD_MONTHS = 2
 WEIGHTS = {"ret": 35, "real": 15, "sharpe": 20, "mdd": 15, "quant": 10, "inv": 5}
-RET_WINDOWS = {"1y": (252, 0.2), "3y": (756, 0.5), "5y": (1260, 0.3)}
+RET_WINDOWS = {"1y": (252, 0.2), "3y": (756, 0.5), "5y": (1240, 0.3)}  # 5Y: veri penceresi ~1250 işlem günü
+
+# Üç uzun vadeli BES modeli (hepsi BEFAS'a açık fonlardan, 2 ayda bir). Dengeli eski "BEFAS modeli"dir.
+#   koruyucu: düşük oynaklıklı borçlanma / katılım / standart / karma fonlar (sermaye koruma)
+#   dengeli : çok varlıklı + altın + hisse + teknoloji (faiz fonları hariç), mevcut kurallar
+#   buyume  : yalnızca büyüme varlıkları (altın, yerli hisse, teknoloji / yabancı); 5-10 yıl ve üstü için
+BES_PROFILES = {
+    "koruyucu": {"label": "Koruyucu", "excluded": {"Para Piyasası", "Başlangıç", "Devlet Katkısı", "OKS", "Grup", "Hisse Senedi", "Kıymetli Madenler"},
+                 "min_vol": 0.0, "max_vol": 0.10, "tufe": False, "tilt": 0.0,
+                 "desc": "Düşük oynaklıklı borçlanma, katılım, standart ve karma fonlar; sermayeyi korumak ve enflasyona yakın kalmak için."},
+    "dengeli": {"label": "Dengeli", "excluded": EXCLUDED_CATEGORIES,
+                "desc": "Çok varlıklı, altın, hisse ve teknoloji fonlarının dengeli karışımı; faiz fonları alınmaz (önceki BEFAS modeli)."},
+    "buyume": {"label": "Büyüme", "excluded": EXCLUDED_CATEGORIES, "buckets": ("Altın / kıymetli maden", "Teknoloji / yabancı", "Yerli hisse"),
+               "min_vol": 0.10, "per_cat": 2,
+               "desc": "Yalnızca büyüme varlıkları: altın, yerli hisse ve teknoloji / yabancı fonlar. 5–10 yıllık birikim için; kısa vadede dalgalı."},
+}
+UNIVERSE_EXCLUDED = set.intersection(*(set(p["excluded"]) for p in BES_PROFILES.values()))
 
 
 def _metrics(px: pd.DataFrame, rf_idx: pd.Series, tufe: pd.Series | None) -> pd.DataFrame:
@@ -192,6 +209,8 @@ def _metrics(px: pd.DataFrame, rf_idx: pd.Series, tufe: pd.Series | None) -> pd.
         m[f"cagr_{k}"] = model._cagr(px, n)
     last3 = px.iloc[-MIN_HISTORY - 1:]
     m["mdd3"] = (last3 / last3.cummax() - 1).min()
+    last1 = px.iloc[-253:]
+    m["mdd1"] = (last1 / last1.cummax() - 1).min()
     # Reel istikrar: son 3 yılda aylık kaydırılan 12 aylık dönemlerin kaçında TÜFE'yi geçti
     if tufe is not None:
         wins, cnt = pd.Series(0.0, index=px.columns), pd.Series(0.0, index=px.columns)
@@ -216,7 +235,7 @@ def _metrics(px: pd.DataFrame, rf_idx: pd.Series, tufe: pd.Series | None) -> pd.
 
 def _score(p: pd.DataFrame) -> pd.Series:
     pct = model._pct
-    ret = sum(pct(p[f"cagr_{k}"].fillna(p["cagr_3y"])).fillna(50) * w for k, (_, w) in RET_WINDOWS.items())
+    ret = sum(pct(p[f"cagr_{k}"].fillna(p["cagr_3y"]).fillna(p["cagr_1y"])).fillna(50) * w for k, (_, w) in RET_WINDOWS.items())
     parts = {
         "ret": ret, "real": pct(p["real_win"]).fillna(50), "sharpe": pct(p["sharpe"]).fillna(50),
         "mdd": pct(p["mdd3"]).fillna(50), "quant": pct(p["quant"]).fillna(50),
@@ -256,10 +275,10 @@ def _round(raw: pd.Series) -> pd.Series:
 
 def _universe(price, panel, funds, rf_idx, tufe, i, scores) -> pd.DataFrame:
     px_all = price.iloc[: i + 1]
-    if len(px_all) <= MIN_HISTORY:
+    if len(px_all) <= EARLY_HISTORY:
         return pd.DataFrame(), None
     size, inv = panel["size"].iloc[i], panel["investors"].iloc[i]
-    hist = px_all.iloc[-MIN_HISTORY - 1]
+    hist = px_all.iloc[-min(MIN_HISTORY, len(px_all) - 1) - 1]  # erken dönemde verinin başı
     recent = px_all.iloc[-10:]
     fresh = recent.notna().any() & (recent.max() != recent.min())
     flagged = set()
@@ -271,7 +290,7 @@ def _universe(price, panel, funds, rf_idx, tufe, i, scores) -> pd.DataFrame:
         flagged = set(scores.index[bad])
     grades = scores["grade"] if scores is not None else pd.Series(dtype=object)
     elig = [c for c in px_all.columns
-            if c in funds.index and funds.at[c, "access"] == "" and funds.at[c, "category"] not in EXCLUDED_CATEGORIES
+            if c in funds.index and funds.at[c, "access"] == "" and funds.at[c, "category"] not in UNIVERSE_EXCLUDED
             and pd.notna(hist.get(c)) and pd.notna(px_all[c].iloc[-1]) and fresh.get(c, False)
             and size.get(c, 0) >= MIN_AUM and inv.get(c, 0) >= MIN_INVESTORS
             and (scores is None or (grades.get(c) in OK_GRADES and c not in flagged))]
@@ -314,16 +333,22 @@ def _weights(sel: pd.DataFrame) -> pd.Series:
 
 
 def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, prev: list[str] | None,
-          company: str | None = None, befas: bool = False) -> list[dict]:
-    """company verilirse o şirketin fonları; befas=True ise tüm şirketlerin BEFAS'a açık fonları."""
+          company: str | None = None, befas: bool = False, prof: dict | None = None) -> list[dict]:
+    """company verilirse o şirketin fonları; befas=True ise tüm şirketlerin BEFAS'a açık fonları.
+    prof: BES_PROFILES içinden model kuralları (kategori, oynaklık aralığı, varlık sınıfları)."""
+    prof = prof or BES_PROFILES["dengeli"]
     if m.empty:
         return []
     c = m[m["company"] == company].copy() if company else m[m["befas_no"].isna()].copy()
+    c = c[~c["category"].isin(prof.get("excluded", EXCLUDED_CATEGORIES))]
     if c.empty:
         return []
     spike = c.apply(lambda r: model._spike_reason(r, MAX_1Y), axis=1)
-    tufe_ok = c["real_3y"] > 0 if c["real_3y"].notna().any() else pd.Series(True, index=c.index)
-    base = c[(c["vol"] >= MIN_VOL) & spike.isna()].copy()
+    if prof.get("tufe", True):
+        tufe_ok = c["real_3y"] > 0 if c["real_3y"].notna().any() else pd.Series(True, index=c.index)
+    else:
+        tufe_ok = pd.Series(True, index=c.index)
+    base = c[(c["vol"] >= prof.get("min_vol", MIN_VOL)) & (c["vol"] <= prof.get("max_vol", 9.9)) & spike.isna()].copy()
     if BES_TREND:  # deneme: 200 günlük ortalamanın altındaki ya da 6 ayda PPF gerisindeki fon alınmaz
         base = base[(base["sma_gap"].fillna(0) > 0) & (base["mom6x"].fillna(0) > 0)]
     if base.empty:
@@ -333,8 +358,13 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, prev: list[str] | None,
         base.loc[base.index.isin(prev), "score"] += STAY_BONUS
     base["fill"] = False
     base["bucket"] = base.apply(bucket, axis=1)
-    if TAX_TILT:
-        base.loc[base["bucket"].isin(TAX_ADV_BUCKETS), "score"] += TAX_TILT
+    if prof.get("buckets"):
+        base = base[base["bucket"].isin(prof["buckets"])]
+        if base.empty:
+            return []
+    tilt = prof.get("tilt", TAX_TILT)
+    if tilt:
+        base.loc[base["bucket"].isin(TAX_ADV_BUCKETS), "score"] += tilt
     pool = base[tufe_ok.reindex(base.index).fillna(False)].copy()
     # TÜFE'yi geçen fon 3'ten azsa: geçemeyenlerden TÜFE'ye en yakın olanlarla tamamla (işaretli)
     if len(pool) < MIN_FUNDS:
@@ -350,7 +380,7 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, prev: list[str] | None,
         if len(chosen) >= MAX_FUNDS:
             break
         g, co = pool.at[code, group], pool.at[code, "company"]
-        if per_grp.get(g, 0) >= PER_CAT:
+        if per_grp.get(g, 0) >= prof.get("per_cat", PER_CAT):
             continue
         if befas and per_co.get(co, 0) >= PER_COMPANY:
             continue
@@ -457,18 +487,16 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
     bt = backtest.run(panel, funds)
     scores_at = {b["signal"]: b["scores"] for b in bt.pop("_baskets")}
     forms = [i for i in scoring.month_ends(dates) if dates[i].month % PERIOD_MONTHS == 0
-             and i >= MIN_HISTORY and i + 1 < len(dates) and i in scores_at]
-    companies: list[str] = []  # şirket içi sepetler kaldırıldı; model BEFAS geneli kurulur
-    BEFAS = "__befas__"
-    history = {c: [] for c in [*companies, BEFAS]}
+             and i >= EARLY_HISTORY and i + 1 < len(dates) and i in scores_at]
+    keys = list(BES_PROFILES)
+    history = {c: [] for c in keys}
     unis, univ_codes = {}, {}
     for i in forms:
         unis[i], wk = _universe(price, panel, funds, rf_idx, tufe, i, scores_at.get(i))
         univ_codes[i] = _universe_pool(unis[i])
-        for comp in [*companies, BEFAS]:
+        for comp in keys:
             prev = [f["code"] for f in history[comp][-1]["funds"]] if history[comp] else None
-            funds_i = ((_pick_strategic(unis[i], wk, prev) if SELECT_MODE == "strategic" else _pick(unis[i], wk, prev, befas=True)) if comp == BEFAS
-                       else _pick(unis[i], wk, prev, company=comp))
+            funds_i = _pick(unis[i], wk, prev, befas=True, prof=BES_PROFILES[comp])
             history[comp].append({"i": i, "funds": funds_i})
 
     flags = {}
@@ -521,7 +549,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
     univ_ws = [(i, pd.Series(1 / len(univ_codes[i]), index=univ_codes[i]) if univ_codes[i] else None) for i in forms]
 
     out = {}
-    for comp in [*companies, BEFAS]:
+    for comp in keys:
         hist = history[comp]
         if not hist or not hist[-1]["funds"]:
             continue
@@ -536,7 +564,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
                 "score": round(float(f["score"]), 1), "g": f.get("grade"),
                 "gNow": scored.at[code, "grade"] if code in scored.index else None,
                 "fx": bool(f.get("foreign")), "tk": bool(funds.at[code, "tech"]), "fill": bool(f.get("fill")),
-                "r": {k: _r(f.get(f"cagr_{k}")) for k in RET_WINDOWS},
+                "r": {k: _r(f.get(f"cagr_{k}")) for k in RET_WINDOWS}, "r2": _r(f.get("cagr_2y")), "mdd1": _r(f.get("mdd1")),
                 "real3": _r(f.get("real_3y")), "realWin": _r(f.get("real_win"), 0),
                 "sharpe": _r(f.get("sharpe"), 2, 1), "mdd": _r(f.get("mdd3")), "vol": _r(f.get("vol")),
                 "inv": None if pd.isna(f.get("investors")) else int(f["investors"]),
@@ -558,9 +586,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
             if h["funds"]:
                 ws = pd.Series({f["code"]: f["w"] for f in h["funds"]})
             else:
-                u = unis[h["i"]]
-                codes = (univ_codes[h["i"]] if comp == BEFAS
-                         else list(u.index[u["company"] == comp]) if not u.empty else [])
+                codes = univ_codes[h["i"]]
                 ws = pd.Series(1 / len(codes), index=codes) if codes else None
             ws_list.append((h["i"], ws))
         rets, points = held(ws_list)
@@ -591,9 +617,8 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
                             "monthly": {"dates": [d.strftime("%Y-%m-%d") for d in m_pts],
                                         "model": [round(float(x), 3) for x in m_vals]}}
         out[comp] = {
-            "company": "BEFAS (tüm şirketler)" if comp == BEFAS else comp,
-            "channel": None if comp == BEFAS else (funds.loc[funds["company"] == comp, "channel"].dropna().iloc[0]
-                                                   if funds.loc[funds["company"] == comp, "channel"].notna().any() else None),
+            "company": "BEFAS (tüm şirketler)", "channel": None,
+            "key": comp, "label": BES_PROFILES[comp]["label"], "desc": BES_PROFILES[comp]["desc"],
             "formed": dates[cur["i"]].strftime("%Y-%m-%d"), "entry": entry.strftime("%Y-%m-%d"),
             "basket": basket, "portfolio": port, "sinceEntry": round(since, 2),
             "history": items, "backtest": backtest_out,
@@ -608,7 +633,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
         nxt = (pd.Timestamp(year=y, month=mth, day=1) + pd.offsets.BMonthEnd(0)).strftime("%Y-%m-%d")
     return {
         "asOf": dates[-1].strftime("%Y-%m-%d"), "nextRebalance": nxt,
-        "befas": out.pop(BEFAS, None), "companies": out,
+        "befas": out.get("dengeli"), "profiles": out, "companies": {},
         "rules": {"minFunds": MIN_FUNDS, "maxFunds": MAX_FUNDS, "minW": MIN_W, "maxW": MAX_W,
                   "minHistoryDays": MIN_HISTORY, "minAum": MIN_AUM, "minInvestors": MIN_INVESTORS,
                   "minVol": MIN_VOL, "excludedCategories": sorted(EXCLUDED_CATEGORIES), "okGrades": OK_GRADES,

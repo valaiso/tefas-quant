@@ -81,10 +81,11 @@ export async function render(app, _route, store) {
   <section class="method-intro card">
     <h2>Model Portföyler <span class="model-tag">aylık dönem</span></h2>
     <p>Üç risk profilinde, son <b>1-2-3 yılda vergi sonrası istikrarlı</b> getiri vermiş, TEFAS Quant notu ve risk bayrakları temiz,
-      getirisi tek bir sıçramaya dayanmayan ${R.minFunds}–${R.maxFunds} fonluk ağırlıklı sepetler. Sepetler <b>her ay</b>
-      (ayın son işlem günü) yeniden kurulur ve ay boyunca sabit kalır; iyi kalan fonlar yeni ayda da sepette kalabilir, yalnızca ağırlıkları değişebilir.
+      getirisi tek bir sıçramaya dayanmayan ${R.minFunds}–${R.maxFunds} fonluk ağırlıklı sepetler.
       Köklü kurucuların (devlet bankaları ve büyük özel bankaların portföy şirketleri) fonlarına öncelik verilir.</p>
-    <p class="dim">Son kurulum: ${dateTR(m.profiles[state.profile].formed)} · Sonraki yenileme: <b>${dateTR(m.nextRebalance)}</b> · Veri: ${dateTR(m.asOf)}</p>
+    <p><b>Model portföyler ayda bir güncellenir:</b> fon seçimi ve oranlar her ayın son işlem gününde yeniden kurulur, ay boyunca sepet aynı kalır;
+      iyi kalan fonlar yeni ayda da sepette kalabilir, yalnızca ağırlıkları değişebilir · sonraki güncelleme <b>${dateTR(m.nextRebalance)}</b>.</p>
+    <p class="dim">Son kurulum: ${dateTR(m.profiles[state.profile].formed)} · Veri: ${dateTR(m.asOf)}</p>
   </section>
 
   <div class="profile-cards" id="mdlProfiles">${overviewCards(m)}</div>

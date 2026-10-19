@@ -78,6 +78,8 @@ export async function render(app, route, main) {
     return;
   }
   const { meta, funds } = cacheFunds;
+  if (!cacheModel) cacheModel = await get("data/bes_model.json").catch(() => null);
+  const nextBes = cacheModel?.nextRebalance;
 
   app.innerHTML = `
   <section class="method-intro card">
@@ -86,12 +88,14 @@ export async function render(app, route, main) {
       <b>BEFAS</b> sayesinde başka şirketlerin fonlarını da kendi sözleşmenden alabilirsin: <b>BEFAS</b> etiketli fonlar her şirketten,
       <b>ŞİRKET İÇİ</b> etiketli fonlar (grup, "yabancı" ibareli, para piyasası, katkı, başlangıç) yalnızca kendi şirketinin sözleşmesiyle alınır. Birikim döneminde fon getirisinden stopaj kesilmez ve fon işletim gideri fiyata yansır; gösterilen getiriler
       bu yüzden ücret sonrası ve vergi öncesidir.</p>
+    <p><b>BES modelleri (Koruyucu, Dengeli, Büyüme) 2 ayda bir güncellenir:</b> fon seçimi ve oranlar yalnızca çift ayların son işlem gününde
+      yeniden kurulur, aradaki iki ayda sepet aynı kalır${nextBes ? ` · sonraki güncelleme <b>${dateTR(nextBes)}</b>` : ""}. BES'te fon dağılımı yılda 12 kez değiştirilebilir; 2 aylık yenileme yılda 6 hak kullanır.</p>
     <p class="dim">Son fiyat: ${dateTR(meta.lastDataDate)} · Veri penceresi: ${dateTR(meta.firstDataDate)} – ${dateTR(meta.lastDataDate)}</p>
+    <div class="hero-actions" id="besTabs">
+      <button class="btn btn-light hero-tab" type="button" data-t="siralama" aria-pressed="${state.tab === "siralama"}">Sıralama</button>
+      <button class="btn btn-light hero-tab" type="button" data-t="model" aria-pressed="${state.tab === "model"}">Model</button>
+    </div>
   </section>
-  <div class="seg seg-lg" id="besTabs">
-    <button data-t="siralama" aria-pressed="${state.tab === "siralama"}">Sıralama</button>
-    <button data-t="model" aria-pressed="${state.tab === "model"}">Model</button>
-  </div>
   <div id="besBody"></div>`;
 
   const body = app.querySelector("#besBody");
@@ -448,7 +452,7 @@ function basketHtml(p, idp, m) {
   </section>
 
   ${bt.available ? `<section class="card">
-    <div class="card-head"><h2>${esc(p.label)} model geçmişte nasıl sonuç verdi?</h2>
+    <div class="card-head"><h2>BES modelleri geçmişte nasıl sonuç verdi?</h2>
       <div class="seg" id="${idp}Period">${PERIODS.map(([k, l]) => `<button data-p="${k}" aria-pressed="${k === state.period}">${l}</button>`).join("")}</div></div>
     <div class="chart" id="${idp}Chart"></div>
     <p class="chart-note dim" id="${idp}Range"></p>
@@ -468,21 +472,29 @@ function basketHtml(p, idp, m) {
   </section>` : ""}`;
 }
 
-function bindBasket(body, p, idp, label) {
+const PROFILE_COLORS = { koruyucu: "#94a3b8", dengeli: "#0ea5e9", buyume: "#ef4444" };
+
+function bindBasket(body, p, idp, label, all = []) {
   const bt = p.backtest;
   if (bt.available) {
-    const keys = Object.keys(bt.series);
-    const name = (k) => (k === "model" ? label : k === "universe" ? "BEFAS evreni (uygun tüm fonlar, eşit)" : LABELS[k] || k);
+    // Seçili model önce, sonra diğer BES modelleri (aynı kurulum günleri), sonra kıyaslar
+    const others = all.filter((q) => q && q !== p && q.backtest?.available && q.backtest.dates.length === bt.dates.length);
+    const extra = Object.fromEntries(others.map((q) => [`m_${q.key}`, q.backtest.series.model]));
+    const series = { model: bt.series.model, ...extra, ...Object.fromEntries(Object.entries(bt.series).filter(([k]) => k !== "model")) };
+    const keys = Object.keys(series);
+    const other = Object.fromEntries(others.map((q) => [`m_${q.key}`, q]));
+    const name = (k) => (k === "model" ? label : other[k] ? `${other[k].label} BES modeli` : k === "universe" ? "BEFAS evreni (uygun tüm fonlar, eşit)" : LABELS[k] || k);
+    const color = (k) => (k === "model" ? PROFILE_COLORS[p.key] || COLORS.model : other[k] ? PROFILE_COLORS[other[k].key] : COLORS[k] || "var(--text-dim)");
     const pm = () => PERIODS.find(([k]) => k === state.period)[2];
     const draw = () => {
       const i0 = startIndex(bt.dates, pm());
       const d = bt.dates.slice(i0);
-      lineChart(body.querySelector(`#${idp}Chart`), keys.map((k) => ({ name: name(k), d, v: windowed(bt.series[k], i0),
-        color: COLORS[k] || "var(--text-dim)", dashed: k === "ppf" || k === "universe" })), { base: 100, height: 300, format: (v) => num(v, 0) });
+      lineChart(body.querySelector(`#${idp}Chart`), keys.map((k) => ({ name: name(k), d, v: windowed(series[k], i0),
+        color: color(k), dashed: k === "ppf" || k === "universe" })), { base: 100, height: 320, format: (v) => num(v, 0) });
       body.querySelector(`#${idp}Range`).textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · 2 ayda bir yeniden kurulum (o gün bilinen veriyle, T+1 alış)`;
       body.querySelector(`#${idp}Stats`).innerHTML = `<thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th>
         <th>En kötü / en iyi dönem</th><th>Pozitif dönem</th><th>—</th></tr></thead>
-        <tbody>${keys.map((k, i) => statRow(name(k), windowStats(d, windowed(bt.series[k], i0), null), i === 0 ? "is-self" : "")).join("")}</tbody>`;
+        <tbody>${keys.map((k, i) => statRow(name(k), windowStats(d, windowed(series[k], i0), null), i === 0 ? "is-self" : "")).join("")}</tbody>`;
     };
     body.querySelector(`#${idp}Period`).addEventListener("click", (e) => {
       const b = e.target.closest("button");
@@ -521,16 +533,6 @@ async function renderModel(body) {
   const B = P[state.bprof];
 
   body.innerHTML = `
-  <section class="method-intro card">
-    <h2>Uzun vadeli BES modelleri <span class="model-tag">2 ayda bir · BEFAS</span></h2>
-    <p><b>BEFAS</b> (Takasbank'ın emeklilik fonu platformu, Temmuz 2021'den beri) sayesinde hangi emeklilik şirketinde olursan ol, kendi şirketinin
-      uygulamasından <b>başka şirketlerin fonlarını</b> da alabilirsin. İstisnalar (EGM): grup fonları, unvanında "yabancı" ibaresi olan fonlar,
-      para piyasası, katkı ve başlangıç fonları. Bu yüzden üç model de tüm şirketlerin <b>BEFAS'a açık</b> fonlarından kurulur; herkes kendi sözleşmesinden uygulayabilir.
-      Sepetlerde varlık sınıfı başına en fazla ${R.perCat}, şirket başına en fazla ${R.perCompany} fon bulunur ve ağırlıklar <b>eşit</b> dağıtılır
-      (DeMiguel, Garlappi ve Uppal, 2009).</p>
-    <p class="dim">Son kurulum: ${B ? dateTR(B.formed) : "—"} · Sonraki yenileme: <b>${dateTR(m.nextRebalance)}</b> · Veri: ${dateTR(m.asOf)}</p>
-  </section>
-
   <div class="profile-cards" id="besProf">${besCards(P, pkeys)}</div>
   ${B ? basketHtml(B, "bf", m) : `<div class="card empty"><h3>Bu model için yeterli fon yok</h3></div>`}
 
@@ -562,7 +564,7 @@ async function renderModel(body) {
     </ol>
   </section>`;
 
-  if (B) bindBasket(body, B, "bf", `${B.label || "BEFAS"} BES modeli`);
+  if (B) bindBasket(body, B, "bf", `${B.label || "BEFAS"} BES modeli`, pkeys.map((k) => P[k]));
   body.querySelector("#besProf")?.addEventListener("click", (e) => {
     const b = e.target.closest(".profile-card");
     if (!b || b.dataset.k === state.bprof) return;

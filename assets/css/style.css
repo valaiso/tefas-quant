@@ -208,6 +208,11 @@ select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 .btn-light:hover { background: #eef3fb; }
 .btn-ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.4); }
 .btn-ghost:hover { background: rgba(255,255,255,.1); }
+/* Mavi bilgi kartı içindeki sekme düğmeleri: beyaz zemin, siyah yazı; seçili olan koyu çerçeveli */
+.btn.hero-tab { background: #fff; color: #12233d; border-color: #fff; min-width: 110px; justify-content: center; }
+.btn.hero-tab:hover { background: #eef3fb; }
+.btn.hero-tab[aria-pressed="true"] { font-weight: 800; box-shadow: 0 0 0 3px rgba(255,255,255,.55); }
+.btn.hero-tab[aria-pressed="false"] { font-weight: 600; }
 .btn-sm { padding: 4px 10px; min-height: 30px; font-size: .84rem; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 

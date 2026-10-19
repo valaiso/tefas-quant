@@ -219,7 +219,7 @@ async function renderSummary(app, store) {
   <section class="card">
     <div class="card-head"><h2>Kayıtlı gerçek değer</h2><span class="sub">Analiz Panel'in günlük kaydettiği toplam değer</span></div>
     ${hist.length >= 2 ? `<div class="chart" id="pfHist"></div>` : `<div class="empty">Henüz ${hist.length} günlük kayıt var; grafik kayıt biriktikçe görünür.</div>`}
-    <p class="chart-note dim">Gerçek değer kaydı para girişi ve çıkışlarını da içerir; getiri karşılaştırması için Portföy Karşılaştırması'na bakın.</p>
+    <p class="chart-note dim">Gerçek değer kaydı para girişi ve çıkışlarını da içerir; getiri karşılaştırması için Modellerle Karşılaştır sayfasına bakın.</p>
   </section>`;
   if (hist.length >= 2) {
     lineChart(app.querySelector("#pfHist"), [{ name: "Portföy değeri", d: hist.map(([k]) => k), v: hist.map(([, v]) => v), color: "var(--brand-3)" }],
@@ -253,7 +253,7 @@ async function renderCompare(app) {
   if (!cs) { app.innerHTML = `<div class="card empty"><h3>Model verisi yüklenemedi</h3></div>`; return; }
   app.innerHTML = `
   <section class="method-intro card">
-    <h2>Portföy Karşılaştırması <span class="model-tag">PORTFÖY · MODELLER</span></h2>
+    <h2>Modellerle Karşılaştır <span class="model-tag">PORTFÖY · MODELLER</span></h2>
     <p>Bugünkü pozisyonların (${dateTR(d.snap.date)} fotoğrafı) seçilen dönemin başında alınıp tutulduğu varsayılır ve
       Güvenli, Dengeli, Atak fon modelleri ile BES Öneri'ye ve PPF, TÜFE, altın, dolar, S&P 500 kıyaslarına karşı aylık izlenir.
       Bu, dağılımının geçmişte nasıl davranacağını gösterir; gerçek alım-satım geçmişini değil.${missingNote(d.pos)}</p>

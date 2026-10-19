@@ -17,18 +17,18 @@ import * as deger from "./views/deger.js";
 const VIEWS = {
   genel: { mod: overview, title: "Genel Bakış", eyebrow: "PİYASA ÖZETİ" },
   siralama: { mod: ranking, title: "Fon Sıralaması", eyebrow: "KATEGORİ İÇİ DERECELENDİRME" },
-  bes: { mod: bes, title: "BES Genel Bakış", eyebrow: "BİREYSEL EMEKLİLİK FONLARI" },
+  bes: { mod: bes, title: "BES Fonları", eyebrow: "BİREYSEL EMEKLİLİK FONLARI" },
   deger: { mod: deger, title: "Değer", eyebrow: "FON + BES DAĞILIMI DEĞERLENDİRME" },
   fon: { mod: fund, title: "Fon Detayı", eyebrow: "FON ANALİZİ", nav: "genel" },
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
   backtest: { mod: backtest, title: "Quant / Backtest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
-  simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ", nav: "backtest" },
+  simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ" },
   portfoy: { mod: personal, title: "Portföy Özeti", eyebrow: "KİŞİSEL PORTFÖY" },
-  portfoykarsilastir: { mod: personal, title: "Portföy Karşılaştırması", eyebrow: "PORTFÖY · MODELLER · KIYASLAR" },
+  portfoykarsilastir: { mod: personal, title: "Modellerle Karşılaştır", eyebrow: "PORTFÖY · MODELLER · KIYASLAR" },
   portfoyrapor: { mod: personal, title: "Portföy Raporu", eyebrow: "KİŞİSEL PORTFÖY RAPORU", nav: "portfoy" },
   model: { mod: model, title: "Model Portföyler", eyebrow: "GÜVENLİ · DENGELİ · ATAK" },
-  rapor: { mod: report, title: "Rapor", eyebrow: "HAFTALIK · AYLIK AKIŞ" },
-  modelrapor: { mod: modelreport, title: "Model Rapor", eyebrow: "AYLIK MODEL PERFORMANSI" },
+  rapor: { mod: report, title: "Fon Akış Raporu", eyebrow: "HAFTALIK · AYLIK AKIŞ" },
+  modelrapor: { mod: modelreport, title: "Model Raporu", eyebrow: "AYLIK MODEL PERFORMANSI" },
   metodoloji: { mod: method, title: "Metodoloji", eyebrow: "PUANLAMA & CEZALAR" },
 };
 

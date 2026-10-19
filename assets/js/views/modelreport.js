@@ -57,7 +57,7 @@ const modelLines = (m) => [
 ];
 
 /** Statik SVG birikimli getiri grafiği (yazdırmada da aynı görünür). */
-function chart(dates, lines, H = 168, W = 764) {
+function chart(dates, lines, H = 168, W = 764, xLabel = null) {
   const pad = { l: 34, r: 92, t: 8, b: 18 };
   const vals = lines.flatMap((l) => l.v).filter((v) => v != null);
   const lo = Math.min(100, ...vals), hi = Math.max(...vals);
@@ -68,8 +68,9 @@ function chart(dates, lines, H = 168, W = 764) {
   const step = Math.pow(10, Math.floor(Math.log10((hi - lo) / 3 || 1)));
   const st = [1, 2, 5, 10].map((f) => f * step).find((s) => (hi - lo) / s <= 5) || step * 10;
   for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) ticks.push(v);
+  const xStep = Math.max(1, Math.round((n - 1) / 6));
   const xt = dates.map((d, i) => [d, i]).filter(([d], i) => i === 0 || i === n - 1
-    || ((d.slice(5, 7) === "01" || d.slice(5, 7) === "07") && x(i) - x(0) > 36 && x(n - 1) - x(i) > 36));
+    || (xLabel ? i % xStep === 0 : (d.slice(5, 7) === "01" || d.slice(5, 7) === "07")) && x(i) - x(0) > 36 && x(n - 1) - x(i) > 36);
   // Seri sonu etiketleri çakışmasın: değere göre sırala, en az 10 px aralık
   const ends = lines.map((l) => ({ l, v: l.v[n - 1] })).filter((e) => e.v != null).sort((a, b) => b.v - a.v);
   let lastY = -Infinity;
@@ -77,7 +78,7 @@ function chart(dates, lines, H = 168, W = 764) {
   return `<svg class="mr-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Birikimli getiri grafiği">
     ${ticks.map((v) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="${v === 100 ? "base" : "grid"}"/>
       <text x="${pad.l - 5}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end">${num(v, 0)}</text>`).join("")}
-    ${xt.map(([d, i]) => `<text x="${x(i).toFixed(1)}" y="${H - 4}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${monthLabel(d)}</text>`).join("")}
+    ${xt.map(([d, i]) => `<text x="${x(i).toFixed(1)}" y="${H - 4}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${xLabel ? xLabel(d) : monthLabel(d)}</text>`).join("")}
     ${lines.slice().reverse().map((l) => {
       const pts = l.v.map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ");
       return `<polyline points="${pts}" fill="none" stroke="${l.color}" stroke-width="${l.w || 1.3}" ${l.dash ? 'stroke-dasharray="4 3"' : ""} stroke-linejoin="round"/>`;

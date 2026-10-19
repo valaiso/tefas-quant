@@ -58,9 +58,10 @@ def _letter(rep: dict, site_url: str, with_portfolio: bool = False) -> tuple[str
         "ortalaması (PPF), TÜFE, gram altın, dolar/TL ve S&P 500 (TL) ile karşılaştırmalı olarak yer almaktadır. Özet "
         "bölümünde son 12 aylık dönemsel getiriler ve aylık getiri ısı haritası, model sayfalarında ise birikimli getiri, "
         "kıyaslara göre farklar ve ay ay getiri tabloları bulunmaktadır.",
-        *(["Ekte ayrıca kişisel portföyünüzün aynı döneme ait raporu ayrı bir dosya olarak yer almaktadır. Bu raporda "
-            "pozisyonlarınız, varlık sınıflarına göre dağılımınız ve bugünkü dağılımınızın son 12 ayının modellerle ve "
-            "kıyaslarla karşılaştırması bulunmaktadır."] if with_portfolio else []),
+        *(["Ekte ayrıca kişisel portföyünüzün aynı döneme ait raporu ayrı bir dosya olarak yer almaktadır. Analiz'in aylık "
+            "portföy raporu esas alınarak hazırlanan bu raporda para giriş ve çıkışlarından arındırılmış aylık getiriniz, reel "
+            "getiriniz, değer köprüsü, dağılım, pozisyonlar ve risk göstergeleri TEFAS Quant model portföyleriyle (Güvenli, "
+            "Dengeli, Atak, BES Öneri) ve kıyaslarla birlikte sunulmaktadır."] if with_portfolio else []),
         "Raporun güncel hâline aşağıdaki bağlantıdan da ulaşabilirsiniz.",
         "Bilgilerinize sunar, iyi çalışmalar dileriz.",
     ]

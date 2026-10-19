@@ -2,7 +2,7 @@
 
     python scripts/portfolio_pdf.py --site-url https://valaiso.github.io/tefas-quant --out portfoy-rapor.pdf
 
-Portföy Analiz'in Supabase'indeki portfolio_state satırından okunur ve yayındaki sitenin
+Portföy Analiz'in Supabase'indeki portfolio_state satırından okunur (Analiz'in aylık raporunun kullandığı kayıtlar) ve yayındaki sitenin
 #/portfoyrapor sayfasına tarayıcıda (window.__TQ_PORTFOLIO__) verilir; hiçbir dosyaya ya da
 siteye yazılmaz, yalnızca PDF'e basılır. Günlüğe pozisyon bilgisi yazdırılmaz.
 
@@ -40,9 +40,10 @@ def read_state() -> dict:
     snaps = {k: v for k, v in (state.get("monthlySnapshots") or {}).items() if (v or {}).get("rows")}
     if not snaps:
         raise SystemExit("Hesapta aylık pozisyon fotoğrafı yok (Analiz Panel'i bir kez açılmalı)")
-    last = max(snaps)
-    # Rapor için gereken en az veri: son aylık fotoğraf
-    return {"monthlySnapshots": {last: snaps[last]}}
+    # Rapor için gerekenler: aylık fotoğraflar (son 3 ay), günlük değer kaydı, para giriş/çıkışları, temettüler
+    keep = sorted(snaps)[-3:]
+    return {"monthlySnapshots": {k: snaps[k] for k in keep}, "valueHistory": state.get("valueHistory") or {},
+            "cashflows": state.get("cashflows") or [], "dividends": state.get("dividends") or []}
 
 
 def main() -> int:
@@ -51,6 +52,7 @@ def main() -> int:
     ap.add_argument("--out", default="portfoy-rapor.pdf")
     ap.add_argument("--state-file", help="yerel deneme: Supabase yerine bu JSON (monthlySnapshots içeren durum)")
     ap.add_argument("--channel", help="yerel deneme: kurulu tarayıcı (ör. msedge)")
+    ap.add_argument("--month", help="rapor ayı YYYY-AA (varsayılan: biten son ay)")
     args = ap.parse_args()
     slim = json.load(open(args.state_file, encoding="utf-8")) if args.state_file else read_state()
 
@@ -60,7 +62,7 @@ def main() -> int:
         browser = p.chromium.launch(channel=args.channel) if args.channel else p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 1600})
         page.add_init_script(f"window.__TQ_PORTFOLIO__ = {json.dumps(slim, ensure_ascii=False)};")
-        page.goto(f"{args.site_url.rstrip('/')}/?t={os.getpid()}#/portfoyrapor", wait_until="networkidle", timeout=90_000)
+        page.goto(f"{args.site_url.rstrip('/')}/?t={os.getpid()}#/portfoyrapor{'?ay=' + args.month if args.month else ''}", wait_until="networkidle", timeout=90_000)
         page.wait_for_function("window.__TQ_READY__ === true && document.querySelectorAll('.rp-page').length > 0", timeout=90_000)
         page.wait_for_timeout(1500)
         page.emulate_media(media="print")

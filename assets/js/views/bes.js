@@ -234,7 +234,8 @@ async function renderModel(body) {
       <li><b>Aday:</b> serbestçe seçilebilen (devlet katkısı, OKS ve grup fonları hariç), en az 3 yıl geçmiş, ≥${num(R.minAum / 1e6, 0)}m TL, ≥${num(R.minInvestors, 0)} katılımcı;
         kurulum günündeki notu ${R.okGrades.join(" / ")} ve getiri anomalisi, kuyruk riski, sıcak para ya da kurucu riski bayrağı yok.</li>
       <li><b>PPF benzeri fon yok:</b> ${R.excludedCategories.map(esc).join(", ")} kategorileri ve 1 yıllık oynaklığı %${num(R.minVol * 100, 0)}'ın altındaki fonlar alınmaz.</li>
-      <li><b>Reel getiri şartı:</b> 3 yıllık yıllık getiri TÜFE'yi geçmiş olmalı (enflasyon üstü birikim).</li>
+      <li><b>Reel getiri şartı:</b> 3 yıllık yıllık getiri TÜFE'yi geçmiş olmalı (enflasyon üstü birikim). Bir şirkette bu şartı geçen fon 3'ten azsa sepet,
+        geçemeyenler arasından TÜFE'ye en yakın fonlarla 3'e tamamlanır ve bu fonlar <b>TÜFE ALTI</b> etiketiyle gösterilir.</li>
       <li><b>Sıçrama filtresi:</b> yatırım fonu modelindeki gibi; tek aya dayalı getiri, aşırı son 3 ay, tek günde aşırı hareket ya da 1 yılda %${num(R.max1y * 100, 0)}'ün üstü yükseliş alınmaz.</li>
       <li><b>Puan:</b> getiri ${R.weights.ret} (1Y %${R.retWindows["1y"] * 100}, 3Y %${R.retWindows["3y"] * 100}, 5Y %${R.retWindows["5y"] * 100}; 5Y yoksa 3Y),
         reel istikrar ${R.weights.real} (12 aylık dönemlerde TÜFE'yi geçme oranı), Sharpe ${R.weights.sharpe}, 3 yıllık azami düşüş ${R.weights.mdd},
@@ -268,7 +269,7 @@ async function renderModel(body) {
           <th>1Y</th><th>3Y yıllık</th><th>5Y yıllık</th><th title="3 yıllık reel (TÜFE üstü) yıllık getiri">3Y reel</th>
           <th title="12 aylık dönemlerin kaçında TÜFE'yi geçti">TÜFE'yi geçen 12A</th><th>Maks. düşüş (3Y)</th><th>Oynaklık</th><th>Katılımcı</th><th class="left">Bugünkü durum</th></tr></thead>
         <tbody>${p.basket.map((b, i) => `<tr>
-          <td class="left"><span class="mdl-swatch" style="background:${SLICE[i % SLICE.length]}"></span>${chip(b.c)}${b.fx ? `<span class="fx-tag">YABANCI</span>` : ""}${b.tk ? `<span class="fx-tag">TEKNOLOJİ</span>` : ""}
+          <td class="left"><span class="mdl-swatch" style="background:${SLICE[i % SLICE.length]}"></span>${chip(b.c)}${b.fx ? `<span class="fx-tag">YABANCI</span>` : ""}${b.tk ? `<span class="fx-tag">TEKNOLOJİ</span>` : ""}${b.fill ? `<span class="ax-tag" title="Bu şirkette 3 yıllık getirisi TÜFE'yi geçen fon 3'ten az olduğu için sepet, TÜFE'ye en yakın fonla tamamlandı">TÜFE ALTI</span>` : ""}
             <span class="fund-name">${esc(b.n)}</span></td>
           <td class="left dim">${esc(b.k || "—")}</td><td><b class="weight">%${b.w}</b></td><td>${num(b.score, 0)}</td>
           <td>${esc(b.gNow || b.g || "—")}</td>

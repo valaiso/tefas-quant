@@ -254,13 +254,22 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, company: str, prev: list[str
         return []
     spike = c.apply(lambda r: model._spike_reason(r, MAX_1Y), axis=1)
     tufe_ok = c["real_3y"] > 0 if c["real_3y"].notna().any() else pd.Series(True, index=c.index)
-    gate = (c["vol"] >= MIN_VOL) & spike.isna() & tufe_ok
-    pool = c[gate].copy()
-    if pool.empty:
+    base = c[(c["vol"] >= MIN_VOL) & spike.isna()].copy()
+    if base.empty:
         return []
-    pool["score"] = _score(pool)
+    base["score"] = _score(base)
     if prev:
-        pool.loc[pool.index.isin(prev), "score"] += STAY_BONUS
+        base.loc[base.index.isin(prev), "score"] += STAY_BONUS
+    base["fill"] = False
+    pool = base[tufe_ok.reindex(base.index).fillna(False)].copy()
+    # TÜFE'yi geçen fon 3'ten azsa: geçemeyenlerden TÜFE'ye en yakın olanlarla tamamla (işaretli)
+    if len(pool) < MIN_FUNDS:
+        extra = base[~base.index.isin(pool.index)].sort_values(["real_3y", "score"], ascending=False)
+        extra = extra.head(MIN_FUNDS - len(pool)).copy()
+        extra["fill"] = True
+        extra["score"] = extra["score"] * 0.9
+        pool = pd.concat([pool, extra])
+        pool.attrs = {}
     chosen, per_cat = [], {}
     for code in pool.sort_values("score", ascending=False).index:
         if len(chosen) >= MAX_FUNDS:
@@ -340,7 +349,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
                 "c": code, "n": funds.at[code, "name"], "k": f.get("category"), "w": round(f["w"] * 100),
                 "score": round(float(f["score"]), 1), "g": f.get("grade"),
                 "gNow": scored.at[code, "grade"] if code in scored.index else None,
-                "fx": bool(f.get("foreign")), "tk": bool(funds.at[code, "tech"]),
+                "fx": bool(f.get("foreign")), "tk": bool(funds.at[code, "tech"]), "fill": bool(f.get("fill")),
                 "r": {k: _r(f.get(f"cagr_{k}")) for k in RET_WINDOWS},
                 "real3": _r(f.get("real_3y")), "realWin": _r(f.get("real_win"), 0),
                 "sharpe": _r(f.get("sharpe"), 2, 1), "mdd": _r(f.get("mdd3")), "vol": _r(f.get("vol")),

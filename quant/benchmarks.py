@@ -1,8 +1,9 @@
-"""Kıyas serileri: dolar/TL, gram altın, TÜFE ve para piyasası fonu (PPF) ortalaması.
+"""Kıyas serileri: dolar/TL, gram altın, S&P 500 (TL), TÜFE ve para piyasası fonu (PPF) ortalaması.
 
 Kaynaklar
 ---------
-* Yahoo Finance (anahtar gerekmez): USDTRY=X, ons altın GC=F -> gram altın TL
+* Yahoo Finance (anahtar gerekmez): USDTRY=X, ons altın GC=F -> gram altın TL,
+  S&P 500 ^GSPC (fiyat endeksi, temettüsüz) -> dolar/TL ile TL'ye çevrilir
 * TÜFE: TCMB EVDS (EVDS_API_KEY tanımlıysa). Tanımlı değilse aynı sahibin
   Portföy Analiz sitesinin yayımladığı TÜFE serisi (aynı TEFAS takvimine hizalı).
 * PPF: TEFAS Quant'ın kendi para piyasası fonlarının eşit ağırlıklı endeksi.
@@ -261,6 +262,14 @@ def collect(price: pd.DataFrame, category: pd.Series) -> pd.DataFrame:
     if gold_usd and usd:
         usd_ff = _forward_fill(usd, sorted(set(usd) | set(gold_usd)))
         raw["gold"] = {d: v / TROY_OUNCE_GRAMS * usd_ff[d] for d, v in gold_usd.items() if d in usd_ff}
+    try:
+        spx = yahoo_series("^GSPC", start, end)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  S&P 500 alınamadı: {exc}", flush=True)
+        spx = {}
+    if spx and usd:
+        usd_ff = _forward_fill(usd, sorted(set(usd) | set(spx)))
+        raw["sp500"] = {d: v * usd_ff[d] for d, v in spx.items() if d in usd_ff}
     tufe = tufe_series(start, end) if os.environ.get("EVDS_API_KEY", "").strip() else {}
     raw["tufe"] = tufe or _tufe_from_analiz()
 

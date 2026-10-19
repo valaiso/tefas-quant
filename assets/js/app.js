@@ -8,6 +8,7 @@ import * as method from "./views/method.js";
 import * as backtest from "./views/backtest.js";
 import * as simulation from "./views/simulation.js";
 import * as report from "./views/report.js";
+import * as modelreport from "./views/modelreport.js";
 import * as model from "./views/model.js";
 import * as bes from "./views/bes.js";
 import * as deger from "./views/deger.js";
@@ -23,6 +24,7 @@ const VIEWS = {
   simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ" },
   model: { mod: model, title: "Model Portföyler", eyebrow: "GÜVENLİ · DENGELİ · ATAK" },
   rapor: { mod: report, title: "Rapor", eyebrow: "HAFTALIK · AYLIK AKIŞ" },
+  modelrapor: { mod: modelreport, title: "Model Rapor", eyebrow: "AYLIK MODEL PERFORMANSI" },
   metodoloji: { mod: method, title: "Metodoloji", eyebrow: "PUANLAMA & CEZALAR" },
 };
 

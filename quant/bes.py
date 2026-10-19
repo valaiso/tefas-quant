@@ -497,6 +497,26 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
             points.append(e)
         return rets, points
 
+    month_marks = sorted({dates[j + 1] for j in scoring.month_ends(dates) if j + 1 < len(dates)} | {dates[-1]})
+
+    def held_monthly(ws_list):
+        """held() ile aynı tutuş; seviye her ayın ilk işlem gününde de okunur (Model Rapor için)."""
+        lvl, pts, vals = 100.0, [], []
+        for k, (i, ws) in enumerate(ws_list):
+            a = dates[i + 1]
+            e = dates[ws_list[k + 1][0] + 1] if k + 1 < len(ws_list) else dates[-1]
+            if e <= a or ws is None or ws.empty:
+                continue
+            if not pts:
+                pts.append(a)
+                vals.append(lvl)
+            for m in (x for x in month_marks if a < x <= e):
+                r = (px.loc[m, ws.index] / px.loc[a, ws.index] - 1).clip(-0.95, 5).fillna(0)
+                pts.append(m)
+                vals.append(lvl * (1 + float((r * ws).sum())))
+            lvl = vals[-1]
+        return pts, vals
+
     # Kıyas evreni: her dönem BEFAS'a açık, uzun vadeye uygun tüm fonlar eşit ağırlık
     univ_ws = [(i, pd.Series(1 / len(univ_codes[i]), index=univ_codes[i]) if univ_codes[i] else None) for i in forms]
 
@@ -565,8 +585,11 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
                 s = s / s.iloc[0] * 100
                 series[b] = [None if pd.isna(x) else round(float(x), 3) for x in s.values]
                 stats[b] = _stats(s, s.pct_change().dropna(), None)
+            m_pts, m_vals = held_monthly(ws_list)
             backtest_out = {"available": True, "dates": [d.strftime("%Y-%m-%d") for d in points],
-                            "series": series, "stats": stats}
+                            "series": series, "stats": stats,
+                            "monthly": {"dates": [d.strftime("%Y-%m-%d") for d in m_pts],
+                                        "model": [round(float(x), 3) for x in m_vals]}}
         out[comp] = {
             "company": "BEFAS (tüm şirketler)" if comp == BEFAS else comp,
             "channel": None if comp == BEFAS else (funds.loc[funds["company"] == comp, "channel"].dropna().iloc[0]

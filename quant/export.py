@@ -116,7 +116,7 @@ def write_json(path: Path, value) -> None:
     _write(path, value)
 
 
-BENCH_LABELS = {"usd": "Dolar/TL", "gold": "Gram altın", "tufe": "TÜFE", "ppf": "PPF ortalaması"}
+BENCH_LABELS = {"usd": "Dolar/TL", "gold": "Gram altın", "tufe": "TÜFE", "ppf": "PPF ortalaması", "sp500": "S&P 500 (TL)"}
 
 
 def write_benchmarks(bench: pd.DataFrame, out_dir: Path = ROOT / "dist") -> None:

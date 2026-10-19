@@ -524,8 +524,9 @@ table.bt-grades td { white-space: nowrap; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
-  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES ve Değer yalnızca masaüstünde */
-  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"], .tab[data-view="deger"] { display: none; }
+  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Değer ve Model Rapor yalnızca masaüstünde */
+  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"], .tab[data-view="deger"],
+  .tab[data-view="modelrapor"] { display: none; }
   /* Telefonda sol üstte sayfa etiketi yerine logo ve marka adı */
   .topbar-logo { display: block; flex: none; margin-right: -6px; }
   .topbar-brand { display: block; }
@@ -668,6 +669,43 @@ table.bt-grades td { white-space: nowrap; }
 .rp-footer { margin-top: auto; display: flex; justify-content: space-between; gap: 18px; padding: 9px 28px; font-size: 7.5px;
   color: var(--rp-dim); border-top: 1px solid var(--rp-line); background: var(--rp-soft); }
 .rp-footer span:last-child { white-space: nowrap; font-weight: 700; }
+
+/* Model Rapor */
+.mr-note { margin: 4px 0 0; font-size: 8px; color: var(--rp-dim); }
+.mr-tag { display: inline-block; font-size: 7px; font-weight: 800; letter-spacing: .05em; padding: 0 4px; border-radius: 3px;
+  background: var(--rp-soft); color: var(--rp-brand); border: 1px solid var(--rp-line); vertical-align: 1px; }
+.rp-page .dim { color: var(--rp-dim); }
+.rp-table .mr-bench td { color: #475569; }
+.rp-table .mr-bench td:first-child b { font-weight: 600; }
+.rp-table tr.mr-bench:first-of-type td, .mr-sum tr.mr-self + tr.mr-bench td { border-top: 1.5px solid #c5cfdd; }
+.mr-sum th:first-child { width: 150px; }
+.mr-heatmap th:first-child { width: 112px; }
+.mr-heatmap td.mr-heat { text-align: center; font-variant-numeric: tabular-nums; font-size: 8.5px; color: var(--rp-ink); padding: 3px 2px;
+  border-bottom: 1px solid #fff; border-right: 1px solid #fff; }
+.mr-heatmap td.mr-heat.strong { color: #fff; font-weight: 700; }
+.mr-heatmap tbody tr:nth-child(even) td.mr-heat { background-clip: padding-box; }
+.mr-beat th:first-child { width: 112px; }
+.mr-chart { width: 100%; height: auto; display: block; }
+.mr-chart text { font-size: 8px; fill: var(--rp-dim); font-family: var(--mono); }
+.mr-chart text.end { font-weight: 700; font-size: 7.5px; }
+.mr-chart line.grid { stroke: var(--rp-line); stroke-width: 1; }
+.mr-chart line.base { stroke: #9fb0c6; stroke-width: 1; stroke-dasharray: 2 2; }
+.mr-two { grid-template-columns: 1.55fr 1fr; }
+.mr-cmp { display: grid; gap: 7px; padding-top: 2px; }
+.mr-cmp-row { display: grid; grid-template-columns: 82px 1fr 66px; grid-template-rows: auto auto; column-gap: 7px; align-items: center; font-size: 9px; }
+.mr-cmp-name { display: flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--rp-ink); }
+.mr-cmp-name i { width: 8px; height: 3px; border-radius: 2px; flex: none; }
+.mr-cmp-row > .num { text-align: right; }
+.mr-cmp-sub { grid-column: 1 / -1; font-size: 7.5px; color: var(--rp-dim); padding-left: 13px; }
+.mr-month td { padding-top: 2.6px; padding-bottom: 2.6px; }
+.mr-month th:first-child { width: 112px; }
+.mr-month th:nth-child(2) { width: 62px; }
+.mr-month th:last-child { width: 92px; }
+.mr-month th:nth-last-child(2) { width: 70px; }
+.mr-month td.mr-model { background: #eef4fd !important; }
+.mr-month td.mr-win { color: var(--rp-brand); font-weight: 800; }
+.mr-month tr.mr-partial td { font-style: italic; }
+.mr-month.mr-dense td { padding-top: 1.6px; padding-bottom: 1.6px; font-size: 9px; }
 
 @media (max-width: 760px) {
   .rp-page { aspect-ratio: auto; font-size: 10px; }

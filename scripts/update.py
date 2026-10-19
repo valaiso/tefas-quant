@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from quant import backtest, benchmarks, bes, export, fetch, model, scoring, simulation  # noqa: E402
+from quant import backtest, benchmarks, bes, export, fetch, model, report, scoring, simulation  # noqa: E402
 from quant.db import DEFAULT_DB, ROOT, open_db  # noqa: E402
 
 
@@ -44,7 +44,7 @@ def main() -> int:
     export.write_backtest(bt, Path(args.out))
     print(f"[backtest] {len(bt['signalDates'])} ay, {bt['observations']} A+ gözlemi", flush=True)
 
-    print("[kıyas] dolar, altın, TÜFE, PPF", flush=True)
+    print("[kıyas] dolar, altın, S&P 500, TÜFE, PPF", flush=True)
     bench = benchmarks.collect(result["panel"]["price"], funds["category"])
     export.write_benchmarks(bench, Path(args.out))
     sim = simulation.run(result["panel"]["price"], baskets, bench, funds["category"])
@@ -61,6 +61,7 @@ def main() -> int:
               + ", ".join(f"{b['c']} %{b['w']}" for b in p["basket"])
               + f" · geçmiş %{st.get('total')}", flush=True)
     # BES: ayrı skorlama ve uzun vadeli şirket modelleri; hatası siteyi durdurmaz
+    bm = None
     try:
         bres = bes.run(conn)
         if bres is not None:
@@ -74,6 +75,9 @@ def main() -> int:
         import traceback
         traceback.print_exc()
         print(f"[bes] üretilemedi: {exc}", flush=True)
+    rp = report.build(mdl, bm, bench)
+    export.write_json(Path(args.out) / "data" / "model_report.json", rp)
+    print(f"[model rapor] {', '.join(m['label'] + ' ' + str(len(m['dates'])) + ' nokta' for m in rp['models'])}", flush=True)
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.close()
     print(

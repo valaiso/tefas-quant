@@ -46,11 +46,14 @@ async function enable(sb, permP = null) {
   await save(sb, sub);
 }
 
+// Elle kapatınca bu cihazdaki hesap oturumu da kapanır: yeniden açarken e-posta ve parola her zaman sorulur
 async function disable(sb) {
   const sub = await currentSub();
-  if (!sub) return;
-  await sb.from("push_subscriptions").delete().eq("endpoint", sub.endpoint);
-  await sub.unsubscribe();
+  if (sub) {
+    await sb.from("push_subscriptions").delete().eq("endpoint", sub.endpoint);
+    await sub.unsubscribe();
+  }
+  await sb.auth.signOut({ scope: "local" });
 }
 
 // ------------------------------------------------------------------ arayüz
@@ -98,7 +101,8 @@ export async function initPush() {
   const turnOn = async (sb, permP) => {
     await enable(sb, permP);
     document.getElementById("pushSetup").hidden = true;
-    toast("Bildirimler açıldı · ayın 1'i ve son günü 09:00 ve 18:00");
+    const { data: { user } } = await sb.auth.getUser();
+    toast(`Bildirimler açıldı (${user?.email || "hesap"}) · ayın 1'i ve son günü 09:00 ve 18:00`);
     await paint();
   };
 
@@ -121,7 +125,7 @@ export async function initPush() {
       if (s === "on") {
         if (!session) throw new Error("Kapatmak için Analiz hesabınla giriş yap.");
         await disable(sb);
-        toast("Bildirimler kapatıldı");
+        toast("Bildirimler kapatıldı · yeniden açarken hesap bilgileri sorulacak");
       } else if (session) {
         await turnOn(sb, permP);
       } else {

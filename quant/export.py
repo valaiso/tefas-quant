@@ -151,6 +151,12 @@ def write_bes(res: dict, out_dir: Path = ROOT / "dist") -> dict:
                     for key, n in (("1w", 5), ("1m", 21)) if len(price) > n},
     }
     _write(out_dir / "data" / "bes.json", {"meta": meta, "funds": records})
+    # Portföy karşılaştırma aracı için fon başına haftalık fiyat (5 yıla kadar)
+    for code in price.columns:
+        w = _weekly(price[code])
+        if len(w) >= 2:
+            _write(out_dir / "data" / "bes_history" / f"{code}.json",
+                   {"d": [d.strftime("%Y-%m-%d") for d in w.index], "p": [round(float(v), 6) for v in w.values]})
     return meta
 
 

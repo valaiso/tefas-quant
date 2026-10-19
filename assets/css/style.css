@@ -425,6 +425,14 @@ button.dist-item[aria-pressed="true"] { border-color: var(--accent); background:
 .calc-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 12px; }
 p.small, .small { font-size: .8rem; }
 @media (max-width: 900px) { .calc-grid { grid-template-columns: 1fr 1fr; } }
+tr.group-row td { background: var(--surface-2); font-size: .82rem; padding-top: 8px; }
+.cmp-rows { display: grid; gap: 6px; margin: 8px 0; }
+.cmp-row { display: grid; grid-template-columns: 110px 80px 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.cmp-row input { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; }
+.cmp-code { text-transform: uppercase; font-weight: 700; }
+.cmp-name { font-size: .84rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmp-actions { align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.field.inline { display: inline-flex; align-items: center; gap: 6px; }
 .glossary-title { margin: 18px 0 8px; font-size: .95rem; }
 .glossary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; margin: 0; }
 .glossary > div { padding: 8px 0; border-top: 1px solid var(--border); }

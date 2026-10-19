@@ -123,8 +123,9 @@ def _metrics(px: pd.DataFrame, ppf: pd.Series, tufe: pd.Series | None, stopaj: p
         # Stopaj kazanç üzerinden: toplam kazanç × (1 - oran), sonra yıllığa çevrilir
         total = (1 + gross) ** (n / 252) - 1
         out[f"net_{k}"] = (1 + total * (1 - tax)) ** (252 / n) - 1
-        p_tot = float(ppf.iloc[-1] / ppf.iloc[-1 - n] - 1)
-        t_tot = float(tufe.iloc[-1] / tufe.iloc[-1 - n] - 1) if tufe is not None and pd.notna(tufe.iloc[-1 - n]) else np.nan
+        p_tot = float(ppf.iloc[-1] / ppf.iloc[-1 - n] - 1) if len(ppf) > n else np.nan
+        t_tot = (float(tufe.iloc[-1] / tufe.iloc[-1 - n] - 1)
+                 if tufe is not None and len(tufe) > n and pd.notna(tufe.iloc[-1 - n]) else np.nan)
         bench[k] = {
             "ppf": (1 + p_tot) ** (252 / n) - 1,
             "ppf_net": (1 + p_tot * (1 - PPF_STOPAJ)) ** (252 / n) - 1,

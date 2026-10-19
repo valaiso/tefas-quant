@@ -13,7 +13,7 @@ const ACCESS = {
 const COLORS = { model: "var(--brand-3)", universe: "var(--text-dim)", gold: "var(--c7, #ca8a04)", usd: "var(--c4)", tufe: "var(--c2)", ppf: "var(--c6)" };
 const LABELS = { gold: "Gram altın", usd: "Dolar/TL", tufe: "TÜFE", ppf: "PPF ortalaması (yatırım fonu)" };
 const SLICE = ["#0f766e", "#2563eb", "#ca8a04", "#7c3aed", "#db2777", "#0891b2"];
-const PERIODS = [["6a", "6A", 6], ["1y", "1Y", 12], ["2y", "2Y", 24], ["all", "Tümü", null]];
+const PERIODS = [["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["5y", "5Y", 60], ["all", "Tümü", null]];
 const COLUMNS = [
   { key: "rk", label: "Sıra", get: (f) => f.rk },
   { key: "c", label: "Fon", get: (f) => f.c, left: true },
@@ -193,79 +193,213 @@ function renderRanking(body, funds) {
   draw();
 }
 
-// ------------------------------------------------------------------ vergi hesaplayıcı
-// 2026 kuralları: devlet katkısı %20, yıllık üst sınır brüt asgari ücretin %20'si (79.272 TL);
-// hak ediş 3 yıl %15, 6 yıl %35, 10 yıl %60, emeklilik %100; çıkışta getiriden %15 / %10 / %5.
-const DK_RATE = 0.20, DK_CAP_2026 = 79272;
-function vesting(years, ageEnd) {
-  if (years >= 10 && ageEnd >= 56) return { vest: 1, tax: 0.05, label: "Emeklilik hakkıyla (10 yıl + 56 yaş)" };
-  if (years >= 10) return { vest: 0.60, tax: 0.10, label: "10 yıl dolmuş, 56 yaş dolmamış" };
-  if (years >= 6) return { vest: 0.35, tax: 0.15, label: "6-10 yıl arası ayrılış" };
-  if (years >= 3) return { vest: 0.15, tax: 0.15, label: "3-6 yıl arası ayrılış" };
-  return { vest: 0, tax: 0.15, label: "3 yıldan önce ayrılış" };
-}
-function simulate({ monthly, years, age, ret, dkRet, infl, fundTax }) {
-  const rm = (1 + ret) ** (1 / 12) - 1, rd = (1 + dkRet) ** (1 / 12) - 1;
-  let vb = 0, vd = 0, vy = 0, paid = 0, paidReal = 0, dkPaid = 0, c = monthly, t = 0;
-  for (let y = 0; y < years; y++) {
-    const cap = DK_CAP_2026 * (1 + infl) ** y;
-    let dkYear = 0;
-    for (let mth = 0; mth < 12; mth++) {
-      const dk = Math.max(0, Math.min(c * DK_RATE, cap - dkYear));
-      dkYear += dk; dkPaid += dk; paid += c; paidReal += c / (1 + infl) ** (t / 12); t++;
-      vb = (vb + c) * (1 + rm); vy = (vy + c) * (1 + rm); vd = (vd + dk) * (1 + rd);
-    }
-    c *= 1 + infl;
-  }
-  const v = vesting(years, age + years);
-  const gain = Math.max(0, vb - paid) + v.vest * Math.max(0, vd - dkPaid);
-  const bes = vb + v.vest * vd - v.tax * gain;
-  const fund = vy - fundTax * Math.max(0, vy - paid);
-  const deflate = (1 + infl) ** years;
-  return { v, paid, dkPaid, bes, fund, real: { bes: bes / deflate, fund: fund / deflate, paid: paidReal } };
-}
-const tl = (x) => `${num(x, 0)} ₺`;
+// ------------------------------------------------------------------ karşılaştırma
+// Kullanıcının kendi BES dağılımı ile BEFAS modelini haftalık fiyatlardan karşılaştırır.
+const CMP_KEY = "tq_bes_compare";
+const CMP_PERIODS = [["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["5y", "5Y", 60]];
+const histCache = new Map();
+let benchCache = null;
 
-function calculator(defaultRet) {
+function loadCmp() {
+  try {
+    const v = JSON.parse(localStorage.getItem(CMP_KEY) || "null");
+    if (v && Array.isArray(v.rows)) return v;
+  } catch { /* depolama kapalı olabilir */ }
+  return { rows: [{ c: "CFA", w: 50 }, { c: "YZD", w: 50 }], rebal: "2m", period: "5y" };
+}
+function saveCmp(v) {
+  try { localStorage.setItem(CMP_KEY, JSON.stringify(v)); } catch { /* yok say */ }
+}
+async function besHistory(code) {
+  if (!histCache.has(code)) {
+    histCache.set(code, fetch(`data/bes_history/${encodeURIComponent(code)}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+  }
+  return histCache.get(code);
+}
+async function benchData() {
+  if (!benchCache) benchCache = fetch("data/benchmarks.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  return benchCache;
+}
+
+/** Haftalık fiyatlardan sabit hedef ağırlıklı sepet; rebalWeeks=0 ise al-tut. */
+function basketSeries(weights, hists, from, rebalWeeks) {
+  const codes = Object.keys(weights).filter((c) => hists[c]);
+  if (!codes.length) return null;
+  const maps = Object.fromEntries(codes.map((c) => [c, new Map(hists[c].d.map((d, i) => [d, hists[c].p[i]]))]));
+  const start = [from, ...codes.map((c) => hists[c].d[0])].sort().pop();
+  const dates = [...new Set(codes.flatMap((c) => hists[c].d))].filter((d) => d >= start).sort();
+  if (dates.length < 2) return null;
+  const last = Object.fromEntries(codes.map((c) => [c, null]));
+  const tw = codes.reduce((a, c) => a + weights[c], 0);
+  let units = null, value = 100;
+  const out = { d: [], v: [], start };
+  dates.forEach((d, k) => {
+    codes.forEach((c) => { const p = maps[c].get(d); if (p != null) last[c] = p; });
+    if (codes.some((c) => last[c] == null)) return;
+    if (units) value = codes.reduce((a, c) => a + units[c] * last[c], 0);
+    if (!units || (rebalWeeks && k % rebalWeeks === 0)) {
+      units = Object.fromEntries(codes.map((c) => [c, (value * weights[c] / tw) / last[c]]));
+    }
+    out.d.push(d);
+    out.v.push(value);
+  });
+  return out.d.length >= 2 ? out : null;
+}
+
+function rebaseFrom(d, v, from) {
+  const i0 = d.findIndex((x) => x >= from);
+  if (i0 < 0) return null;
+  const base = v.slice(i0).find((x) => x != null);
+  return base ? { d: d.slice(i0), v: v.slice(i0).map((x) => (x == null ? null : (x / base) * 100)) } : null;
+}
+
+function weeklyStats(s) {
+  const pts = s.d.map((d, i) => [d, s.v[i]]).filter(([, v]) => v != null);
+  if (pts.length < 2) return null;
+  const first = pts[0][1], last = pts[pts.length - 1][1];
+  const years = (Date.parse(pts[pts.length - 1][0]) - Date.parse(pts[0][0])) / (365.25 * 86400000);
+  let peak = -Infinity, mdd = 0;
+  for (const [, v] of pts) { peak = Math.max(peak, v); mdd = Math.min(mdd, (v / peak - 1) * 100); }
+  const rets = pts.slice(1).map(([, v], i) => v / pts[i][1] - 1);
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / Math.max(1, rets.length - 1));
+  const perYear = rets.length / Math.max(years, 1e-6);  // seri sıklığı (haftalık ~52, 2 aylık ~6)
+  const cagr = years > 0.95 ? ((last / first) ** (1 / years) - 1) * 100 : null;
+  return { total: (last / first - 1) * 100, cagr, mdd, vol: sd * Math.sqrt(perYear) * 100, from: pts[0][0] };
+}
+
+function comparatorHtml(cmp, funds) {
+  const opts = funds.map((f) => `<option value="${esc(f.c)}">${esc(f.c)} · ${esc(f.co)} · ${esc(f.n.replace(/^.*?A\.Ş\.\s*/, "").slice(0, 60))}</option>`).join("");
   return `<section class="card">
-    <div class="card-head"><h2>BES mi, normal fon mu? Vergi ve devlet katkısı hesaplayıcı</h2><span class="sub">2026 kurallarıyla, aynı fon getirisini varsayarak</span></div>
-    <div class="filter-grid calc-grid">
-      <label class="field"><span>Aylık katkı (TL)</span><input id="cM" type="number" min="0" step="500" value="5000"></label>
-      <label class="field"><span>Süre (yıl)</span><input id="cY" type="number" min="1" max="40" value="10"></label>
-      <label class="field"><span>Başlangıç yaşı</span><input id="cA" type="number" min="18" max="75" value="35"></label>
-      <label class="field"><span>Beklenen yıllık getiri (%)</span><input id="cR" type="number" step="1" value="${Math.round(defaultRet)}"></label>
-      <label class="field"><span>Devlet katkısı fonu getirisi (%)</span><input id="cD" type="number" step="1" value="35"></label>
-      <label class="field"><span>Yıllık enflasyon / katkı artışı (%)</span><input id="cI" type="number" step="1" value="25"></label>
-      <label class="field"><span>Normal fonda stopaj</span><select id="cT"><option value="0.175">%17,5 (altın, yabancı, değişken…)</option>
-        <option value="0">%0 (hisse senedi yoğun fon)</option></select></label>
+    <div class="card-head"><h2>Kendi BES dağılımını modelle karşılaştır</h2>
+      <div class="seg" id="cmpPeriod">${CMP_PERIODS.map(([k, l]) => `<button data-p="${k}" aria-pressed="${k === cmp.period}">${l}</button>`).join("")}</div></div>
+    <p class="dim">Kendi fonlarını ve yüzdelerini gir; dağılımın, BEFAS modelinin bugünkü sepeti ve modelin gerçek (her dönem o günkü veriyle kurulan) geçmişiyle
+      aynı tarihlerde karşılaştırılır. Fiyatlar haftalık, 5 yıla kadar. Girdiğin dağılım yalnızca bu tarayıcıda saklanır.</p>
+    <datalist id="besCodes">${opts}</datalist>
+    <div class="cmp-rows" id="cmpRows"></div>
+    <div class="btn-row cmp-actions">
+      <button class="btn btn-sm" id="cmpAdd" type="button">+ Fon ekle</button>
+      <label class="field inline"><span>Yeniden dengeleme</span><select id="cmpRebal">
+        <option value="2m" ${cmp.rebal === "2m" ? "selected" : ""}>2 ayda bir hedef yüzdelere dön</option>
+        <option value="12m" ${cmp.rebal === "12m" ? "selected" : ""}>Yılda bir</option>
+        <option value="hold" ${cmp.rebal === "hold" ? "selected" : ""}>Hiç (al ve tut)</option></select></label>
+      <span class="dim" id="cmpSum"></span>
     </div>
-    <div id="calcOut"></div>
-    <p class="dim small">Varsayımlar: katkı her yıl enflasyon kadar artar; devlet katkısı katkının %20'si, yıllık üst sınır 2026'da 79.272 TL ve enflasyonla büyür;
-      devlet katkısı ayrı (devlet katkısı) fonda değerlenir; çıkışta yalnızca getiriden stopaj kesilir, anapara ve devlet katkısı anaparası vergilenmez;
-      hak edilmeyen devlet katkısı geri alınır. Normal fonda stopaj satışta kazanç üzerinden alınır. Giriş aidatı ve yönetim gider kesintisi 0 kabul edildi.
-      Mevzuat değişebilir; sonuç yaklaşık bir karşılaştırmadır.</p>
+    <div class="chart" id="cmpChart"></div>
+    <p class="chart-note dim" id="cmpNote"></p>
+    <div class="table-wrap"><table id="cmpStats"></table></div>
   </section>`;
 }
 
-function bindCalculator(body) {
-  const val = (id) => parseFloat(body.querySelector(id).value) || 0;
-  const draw = () => {
-    const r = simulate({ monthly: val("#cM"), years: Math.max(1, Math.round(val("#cY"))), age: val("#cA"),
-      ret: val("#cR") / 100, dkRet: val("#cD") / 100, infl: val("#cI") / 100, fundTax: parseFloat(body.querySelector("#cT").value) });
-    const diff = r.bes - r.fund;
-    body.querySelector("#calcOut").innerHTML = `
-      <div class="kpi-row">
-        <div><span>Ödenen toplam katkı</span><b>${tl(r.paid)}</b></div>
-        <div><span>Devlet katkısı (yatan · hak edilen)</span><b>${tl(r.dkPaid)} · %${num(r.v.vest * 100, 0)}</b></div>
-        <div><span>BES net (vergi sonrası)</span><b class="up">${tl(r.bes)}</b></div>
-        <div><span>Normal fon net</span><b>${tl(r.fund)}</b></div>
-        <div><span>BES farkı</span><b class="${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "+" : ""}${tl(diff)}</b></div>
-      </div>
-      <p>${esc(r.v.label)}: çıkışta getiriden <b>%${num(r.v.tax * 100, 0)}</b> stopaj, devlet katkısının <b>%${num(r.v.vest * 100, 0)}</b>'i hak edilir.
-        Bugünün parasıyla (enflasyondan arındırılmış): BES <b>${tl(r.real.bes)}</b>, normal fon <b>${tl(r.real.fund)}</b>, ödenen katkı ${tl(r.real.paid)}.
-        ${diff >= 0 ? "BES'in avantajı devlet katkısı ve düşük çıkış vergisinden geliyor." : "Bu senaryoda erken çıkış ve hak edilmeyen devlet katkısı BES'i dezavantajlı yapıyor."}</p>`;
+function bindComparator(body, m, funds) {
+  const cmp = loadCmp();
+  const byCode = new Map(funds.map((f) => [f.c, f]));
+  const B = m.befas;
+  const rowsEl = body.querySelector("#cmpRows");
+  const drawRows = () => {
+    rowsEl.innerHTML = cmp.rows.map((r, i) => {
+      const f = byCode.get((r.c || "").toUpperCase());
+      return `<div class="cmp-row">
+        <input class="cmp-code" data-i="${i}" list="besCodes" value="${esc(r.c)}" placeholder="Fon kodu" maxlength="3">
+        <input class="cmp-w" data-i="${i}" type="number" min="0" max="100" step="5" value="${r.w}"><span>%</span>
+        <span class="cmp-name ${f ? "" : "down"}">${f ? `${esc(f.co)} · ${esc(f.k)}${f.bf ? ` · <span class="ax-tag">ŞİRKET İÇİ</span>` : ""}` : r.c ? "Kod bulunamadı" : ""}</span>
+        <button class="btn btn-sm cmp-del" data-i="${i}" type="button" title="Kaldır">✕</button></div>`;
+    }).join("");
   };
-  body.querySelectorAll(".calc-grid input, .calc-grid select").forEach((el) => el.addEventListener("input", draw));
+  const months = () => CMP_PERIODS.find(([k]) => k === cmp.period)[2];
+  const draw = async () => {
+    saveCmp(cmp);
+    const total = cmp.rows.reduce((a, r) => a + (+r.w || 0), 0);
+    body.querySelector("#cmpSum").innerHTML = `Toplam: <b class="${Math.abs(total - 100) < 0.01 ? "" : "down"}">%${num(total, 0)}</b>${Math.abs(total - 100) < 0.01 ? "" : " (oranlar 100'e ölçeklenir)"}`;
+    const mine = {};
+    cmp.rows.forEach((r) => { const c = (r.c || "").toUpperCase(); if (byCode.has(c) && +r.w > 0) mine[c] = (mine[c] || 0) + +r.w; });
+    const modelW = Object.fromEntries((B?.basket || []).map((b) => [b.c, b.w]));
+    const codes = [...new Set([...Object.keys(mine), ...Object.keys(modelW)])];
+    const hists = Object.fromEntries(await Promise.all(codes.map(async (c) => [c, await besHistory(c)])));
+    const bench = await benchData();
+    const lastDate = Object.values(hists).filter(Boolean).map((h) => h.d[h.d.length - 1]).sort().pop();
+    if (!lastDate) { body.querySelector("#cmpChart").innerHTML = `<div class="empty">Fiyat verisi yok</div>`; return; }
+    const end = new Date(lastDate); end.setMonth(end.getMonth() - months());
+    const from = end.toISOString().slice(0, 10);
+    const rw = cmp.rebal === "2m" ? 9 : cmp.rebal === "12m" ? 52 : 0;
+
+    const my = Object.keys(mine).length ? basketSeries(mine, hists, from, rw) : null;
+    const mdl = basketSeries(modelW, hists, from, rw);
+    const start = [from, my?.d[0], mdl?.d[0]].filter(Boolean).sort().pop();
+    const at = (s, d) => { let v = null; s.d.forEach((x, i) => { if (x <= d && s.v[i] != null) v = s.v[i]; }); return v; };
+    const series = [];
+    if (my) series.push({ key: "mine", name: "Benim dağılımım", ...rebaseFrom(my.d, my.v, start), color: "#db2777" });
+    if (mdl) series.push({ key: "now", name: "BEFAS modeli · bugünkü sepet (geriye dönük)", ...rebaseFrom(mdl.d, mdl.v, start), color: "var(--brand-3)", dashed: true });
+    if (bench) {
+      for (const [k, label, color] of [["gold", "Gram altın", "var(--c7, #ca8a04)"], ["tufe", "TÜFE", "var(--c2)"], ["usd", "Dolar/TL", "var(--c4)"]]) {
+        const sr = bench.s[k];
+        const r = sr && rebaseFrom(bench.d, sr.v, start);
+        if (r) series.push({ key: k, name: label, ...r, color });
+      }
+    }
+    // Gerçek model geçmişi: kendi başladığı tarihte "benim dağılımım" ile aynı noktadan çizilir
+    let real = null;
+    if (B?.backtest.available) {
+      const r = rebaseFrom(B.backtest.dates, B.backtest.series.model, start);
+      if (r) {
+        const anchor = series[0] ? at(series[0], r.d[0]) : 100;
+        real = { key: "real", name: `BEFAS modeli · gerçek geçmiş (${dateTR(r.d[0])}'den)`, d: r.d, v: r.v.map((x) => (x == null ? null : (x / 100) * (anchor || 100))),
+          color: "var(--brand-3)" };
+        series.splice(2, 0, real);
+      }
+    }
+    lineChart(body.querySelector("#cmpChart"), series, { base: 100, height: 320, format: (v) => num(v, 0) });
+    const firsts = [my && ["dağılımındaki fonlar", my.d[0]], mdl && ["model sepetindeki fonlar", mdl.d[0]]].filter(Boolean);
+    const late = start > from ? ` Seçilen dönemin başında ${firsts.filter(([, d]) => d >= start).map(([n]) => n).join(" ve ")} için veri olmadığından karşılaştırma ${dateTR(start)}'den başlıyor.` : "";
+    body.querySelector("#cmpNote").textContent = `${dateTR(start)} – ${dateTR(lastDate)} · başlangıç = 100 · ${cmp.rebal === "hold" ? "al ve tut" : cmp.rebal === "12m" ? "yılda bir yeniden dengeleme" : "2 ayda bir yeniden dengeleme"}.${late}`
+      + " Bugünkü sepet geriye dönük gösterimdir (o tarihte bilinmiyordu); gerçek geçmiş, modelin her dönem yalnızca o günkü veriyle kurduğu sepetlerdir.";
+
+    const row = (s, from2) => {
+      const r = from2 ? rebaseFrom(s.d, s.v, from2) : s;
+      const st = r && weeklyStats(r);
+      return st ? `<tr class="${s.key === "mine" ? "is-self" : ""}"><td class="left">${esc(s.name)}</td>
+        <td class="${st.total >= 0 ? "up" : "down"}"><b>${pct(st.total, 1)}</b></td><td>${pct(st.cagr, 1)}</td><td class="down">${pct(st.mdd, 1)}</td>
+        <td>%${num(st.vol, 1)}</td></tr>` : "";
+    };
+    const head = (t) => `<tr class="group-row"><td class="left" colspan="5"><b>${t}</b></td></tr>`;
+    let html = `<thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th></tr></thead><tbody>`
+      + head(`Seçilen dönem: ${dateTR(start)} – ${dateTR(lastDate)}`) + series.filter((s) => s.key !== "real").map((s) => row(s)).join("");
+    if (real) {
+      const r0 = real.d[0];
+      const uni = B.backtest.series.universe ? { key: "uni", name: "BEFAS evreni (uygun tüm fonlar, eşit)", d: B.backtest.dates, v: B.backtest.series.universe } : null;
+      html += head(`Modelin gerçek geçmiş dönemi: ${dateTR(r0)} – ${dateTR(lastDate)}`)
+        + [series.find((s) => s.key === "mine"), real, uni, ...series.filter((s) => ["gold", "tufe", "usd"].includes(s.key))]
+          .filter(Boolean).map((s) => row(s, r0)).join("");
+    }
+    body.querySelector("#cmpStats").innerHTML = html + "</tbody>";
+  };
+  const sync = (e) => {
+    const i = +e.target.dataset.i;
+    if (e.target.classList.contains("cmp-code")) cmp.rows[i].c = e.target.value.toUpperCase().trim();
+    if (e.target.classList.contains("cmp-w")) cmp.rows[i].w = parseFloat(e.target.value) || 0;
+  };
+  rowsEl.addEventListener("change", (e) => { sync(e); drawRows(); draw(); });
+  rowsEl.addEventListener("click", (e) => {
+    const b = e.target.closest(".cmp-del");
+    if (!b) return;
+    cmp.rows.splice(+b.dataset.i, 1);
+    if (!cmp.rows.length) cmp.rows.push({ c: "", w: 100 });
+    drawRows(); draw();
+  });
+  body.querySelector("#cmpAdd").addEventListener("click", () => {
+    if (cmp.rows.length >= 10) return;
+    cmp.rows.push({ c: "", w: 0 });
+    drawRows();
+  });
+  body.querySelector("#cmpRebal").addEventListener("change", (e) => { cmp.rebal = e.target.value; draw(); });
+  body.querySelector("#cmpPeriod").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    cmp.period = b.dataset.p;
+    body.querySelectorAll("#cmpPeriod button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    draw();
+  });
+  drawRows();
   draw();
 }
 
@@ -351,24 +485,11 @@ async function renderModel(body) {
   body.innerHTML = `<div class="loading"><div class="spinner"></div><p>Model yükleniyor…</p></div>`;
   if (!cacheModel) cacheModel = await get("data/bes_model.json").catch(() => null);
   const m = cacheModel;
-  const names = m ? Object.keys(m.companies).sort((a, b) => a.localeCompare(b, "tr")) : [];
-  if (!m || (!m.befas && !names.length)) {
-    body.innerHTML = `<div class="card empty"><h3>BES modeli için yeterli geçmiş yok</h3><p>Model 3 yıllık fiyat geçmişi istiyor; emeklilik fonlarının geçmişi doldukça açılacak.</p></div>`;
+  if (!m || !m.befas) {
+    body.innerHTML = `<div class="card empty"><h3>BES modeli için yeterli geçmiş yok</h3><p>Model 2 yıllık fiyat geçmişi istiyor; emeklilik fonlarının geçmişi doldukça açılacak.</p></div>`;
     return;
   }
   const R = m.rules;
-  if (!state.company || !m.companies[state.company]) {
-    const best = names.map((n) => [n, m.companies[n].backtest.available ? m.companies[n].backtest.stats.model.total : -1e9]).sort((a, b) => b[1] - a[1]);
-    state.company = best[0]?.[0];
-  }
-  const summary = names.map((n) => {
-    const p = m.companies[n];
-    const st = p.backtest.available ? p.backtest.stats.model : null;
-    return `<tr data-co="${esc(n)}" class="${n === state.company ? "is-self" : ""} row-link">
-      <td class="left"><b>${esc(n)}</b>${p.channel ? ` <span class="dim">· ${esc(p.channel)}</span>` : ""}</td>
-      <td>${p.basket.length}</td><td>${st ? pct(st.total, 1) : "—"}</td><td>${st ? pct(st.cagr, 1) : "—"}</td>
-      <td class="down">${st ? pct(st.mdd, 1) : "—"}</td><td>${pct(p.portfolio["3y"], 1)}</td><td>${pct(p.sinceEntry, 2)}</td></tr>`;
-  }).join("");
   const B = m.befas;
   const ust = B?.backtest.available ? B.backtest.stats : null;
 
@@ -388,16 +509,7 @@ async function renderModel(body) {
       model altını tek bir varlık sınıfı olarak sınırlı tutar (çeşitlendirme).</div>` : ""}
   </section>
 
-  ${calculator(B?.portfolio["3y"] ?? 35)}
-
-  <section class="card">
-    <div class="card-head"><h2>Kendi şirketinle (BEFAS'sız alternatif)</h2><span class="sub">Yalnızca şirketin kendi fonlarıyla; "yabancı" ibareli fonlar da dahil</span></div>
-    <div class="table-wrap"><table class="compact" id="coTable">
-      <thead><tr><th class="left">Şirket</th><th>Fon</th><th>Geçmiş toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Sepet 3Y yıllık</th><th>Dönem başından</th></tr></thead>
-      <tbody>${summary}</tbody>
-    </table></div>
-    <div id="coBody"></div>
-  </section>
+  ${comparatorHtml(loadCmp(), cacheFunds.funds.filter((f) => !f.ax))}
 
   <section class="card">
     <div class="card-head"><h2>BES model kuralları ve vergi</h2></div>
@@ -422,20 +534,5 @@ async function renderModel(body) {
   </section>`;
 
   if (B) bindBasket(body, B, "bf", "BEFAS BES modeli");
-  bindCalculator(body);
-  const drawCompany = () => {
-    const p = m.companies[state.company];
-    if (!p) return;
-    body.querySelector("#coBody").innerHTML = `<div class="card-head sub-head"><h3>${esc(p.company)} sepeti</h3>
-      <span class="sub">${p.channel ? `satış kanalı: ${esc(p.channel)}` : ""}</span></div>${basketHtml(p, "co")}`;
-    bindBasket(body, p, "co", `${p.company} modeli`);
-  };
-  body.querySelector("#coTable").addEventListener("click", (e) => {
-    const tr = e.target.closest("tr[data-co]");
-    if (!tr) return;
-    state.company = tr.dataset.co;
-    body.querySelectorAll("#coTable tr[data-co]").forEach((x) => x.classList.toggle("is-self", x === tr));
-    drawCompany();
-  });
-  drawCompany();
+  bindComparator(body, m, cacheFunds.funds);
 }

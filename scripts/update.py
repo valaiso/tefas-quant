@@ -67,7 +67,9 @@ def main() -> int:
             export.write_bes(bres, Path(args.out))
             bm = bes.model_run(bres, bench)
             export.write_json(Path(args.out) / "data" / "bes_model.json", bm)
-            print(f"[bes model] {len(bm['companies'])} şirket için sepet, sonraki yenileme {bm['nextRebalance']}", flush=True)
+            bb = (bm.get("befas") or {}).get("basket", [])
+            print(f"[bes model] BEFAS sepeti: " + ", ".join(f"{x['c']} %{x['w']}" for x in bb)
+                  + f" · sonraki yenileme {bm['nextRebalance']}", flush=True)
     except Exception as exc:  # noqa: BLE001
         import traceback
         traceback.print_exc()

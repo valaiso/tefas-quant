@@ -2,8 +2,10 @@
 
 Yatırım fonlarından farkları
 ----------------------------
-* Fon yalnızca kendi emeklilik şirketinle yaptığın sözleşme içinden seçilir;
-  model bu yüzden her şirket için ayrı kurulur.
+* Fon kendi emeklilik şirketinle yaptığın sözleşme içinden alınır; BEFAS (Temmuz 2021)
+  sayesinde başka şirketlerin fonları da bu sözleşmeden alınabilir (grup, "yabancı"
+  ibareli, para piyasası, katkı ve başlangıç fonları hariç). Model bu yüzden tüm
+  şirketlerin BEFAS'a açık fonlarından tek sepet kurar.
 * Birikim döneminde fon getirisinden stopaj kesilmez; vergi çıkışta, birikimin
   getirisi üzerinden alınır. Fon işletim gideri (yıllık ücret) fiyata yansıdığı
   için fiyat getirisi zaten ücret sonrasıdır.
@@ -148,7 +150,7 @@ def run(conn) -> dict | None:
 
 MIN_FUNDS, MAX_FUNDS = 3, 6
 MIN_W, MAX_W, STEP = 0.10, 0.40, 0.05   # BES dağılımında fon başına %10'un altı pratik değil
-MIN_HISTORY = 756                        # 3 yıl
+MIN_HISTORY = 504                        # 2 yıl (geçmiş test 2023 sonundan başlar; TÜFE şartı 3 yılı ayrıca ister)
 MIN_AUM, MIN_INVESTORS = 50e6, 1000
 MIN_VOL = 0.06                           # PPF benzeri (para piyasası, kısa vade) fon alınmaz
 EXCLUDED_CATEGORIES = {"Para Piyasası", "Borçlanma Araçları", "Standart", "Başlangıç",
@@ -159,6 +161,15 @@ PER_CAT = 2
 PER_COMPANY = 2                          # BEFAS sepetinde aynı emeklilik şirketinden en fazla
 WEIGHT_MODE = "equal"                    # 1/N: tahmin hatasına en dayanıklı (DeMiguel vd. 2009)
 MAX_1Y = 2.0
+# Stratejik (varlık sınıfı) seçim: Türkiye BES fonlarında performans kalıcılığı zayıf
+# (Özkan ve Öztürk 2021; Kuzubaş vd. 2019); kalıcı olan yalnızca en kötü fonların kötü
+# kalması (Carhart 1997). Bu yüzden önce varlık sınıfı dağılımı kurulur, sınıf içinde
+# zayıf fonlar elenir ve kalan en sağlam fonlar alınır.
+SELECT_MODE = "score"                    # "score" (puan sırası) | "strategic" (varlık sınıfı eşit) — 2 ayrı testte "score" daha iyi
+BUCKET_WEIGHT = "equal"                  # varlık sınıfları arası: "equal" | "invvol" (risk paritesi)
+PER_BUCKET = 2                           # sınıf başına fon
+LOSER_CUT = 0.30                         # sınıf içinde reel getiri / Sharpe'ta alt %30 elenir
+TREND_FILTER = False                     # sınıf endeksi 40 haftalık ortalamanın altındaysa payı diğerlerine
 STAY_BONUS = 3.0
 PERIOD_MONTHS = 2
 WEIGHTS = {"ret": 35, "real": 15, "sharpe": 20, "mdd": 15, "quant": 10, "inv": 5}
@@ -351,6 +362,62 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, prev: list[str] | None,
     return [{"code": k, "w": float(weights[k]), **sel.loc[k].to_dict()} for k in weights.sort_values(ascending=False).index]
 
 
+def _pick_strategic(m: pd.DataFrame, wk: pd.DataFrame | None, prev: list[str] | None) -> list[dict]:
+    """BEFAS'a açık fonlardan varlık sınıfı temelli sepet."""
+    if m.empty:
+        return []
+    c = m[m["befas_no"].isna()].copy()
+    spike = c.apply(lambda r: model._spike_reason(r, MAX_1Y), axis=1) if len(c) else pd.Series(dtype=object)
+    base = c[(c["vol"] >= MIN_VOL) & spike.isna()].copy()
+    if base.empty:
+        return []
+    base["score"] = _score(base)
+    if prev:
+        base.loc[base.index.isin(prev), "score"] += STAY_BONUS
+    base["fill"] = False
+    base["bucket"] = base.apply(bucket, axis=1)
+    picks, bucket_of = [], {}
+    per_co = {}
+    for bk, g in base.groupby("bucket"):
+        g = g.copy()
+        # Kaybedenleri ele: reel 3Y getiri ve Sharpe'ın ortalama yüzdeliğinde alt dilim
+        rank = (g["real_3y"].rank(pct=True).fillna(0.5) + g["sharpe"].rank(pct=True).fillna(0.5)) / 2
+        keep = g[rank > LOSER_CUT] if len(g) >= 4 else g
+        chosen = []
+        for code in keep.sort_values("score", ascending=False).index:
+            if len(chosen) >= PER_BUCKET:
+                break
+            co = keep.at[code, "company"]
+            if per_co.get(co, 0) >= PER_COMPANY:
+                continue
+            peers = [x for x in (*picks, *chosen) if x in wk.columns]
+            if peers and wk[peers].corrwith(wk[code]).max() > MAX_CORR:
+                continue
+            chosen.append(code)
+            per_co[co] = per_co.get(co, 0) + 1
+        for code in chosen:
+            bucket_of[code] = bk
+        picks += chosen
+    if not picks:
+        return []
+    sel = base.loc[picks]
+    buckets = sorted(set(bucket_of.values()))
+    if BUCKET_WEIGHT == "invvol":
+        bw = pd.Series({b: 1 / max(sel.loc[[k for k, v in bucket_of.items() if v == b], "vol"].mean(), 0.05) for b in buckets})
+    else:
+        bw = pd.Series(1.0, index=buckets)
+    if TREND_FILTER and wk is not None:
+        for b in buckets:
+            codes = [k for k, v in bucket_of.items() if v == b and k in wk.columns]
+            idx = (1 + wk[codes].mean(axis=1).fillna(0)).cumprod()
+            if len(idx) >= 40 and idx.iloc[-1] < idx.iloc[-40:].mean():
+                bw[b] *= 0.25  # düşüş trendindeki sınıfın payı dörtte bire iner, kalan diğerlerine
+    bw = bw / bw.sum()
+    raw = pd.Series({k: bw[bucket_of[k]] / sum(1 for v in bucket_of.values() if v == bucket_of[k]) for k in picks})
+    weights = _round(raw)
+    return [{"code": k, "w": float(weights[k]), **sel.loc[k].to_dict()} for k in weights.sort_values(ascending=False).index]
+
+
 def _universe_pool(m: pd.DataFrame) -> list[str]:
     """Kıyas evreni: BEFAS'a açık, uzun vadeye uygun (oynaklık ≥ sınır, sıçramasız) tüm fonlar."""
     if m.empty:
@@ -378,7 +445,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
     scores_at = {b["signal"]: b["scores"] for b in bt.pop("_baskets")}
     forms = [i for i in scoring.month_ends(dates) if dates[i].month % PERIOD_MONTHS == 0
              and i >= MIN_HISTORY and i + 1 < len(dates) and i in scores_at]
-    companies = sorted({c for c in funds.loc[funds.index.isin(price.columns), "company"]})
+    companies: list[str] = []  # şirket içi sepetler kaldırıldı; model BEFAS geneli kurulur
     BEFAS = "__befas__"
     history = {c: [] for c in [*companies, BEFAS]}
     unis, univ_codes = {}, {}
@@ -387,7 +454,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
         univ_codes[i] = _universe_pool(unis[i])
         for comp in [*companies, BEFAS]:
             prev = [f["code"] for f in history[comp][-1]["funds"]] if history[comp] else None
-            funds_i = (_pick(unis[i], wk, prev, befas=True) if comp == BEFAS
+            funds_i = ((_pick_strategic(unis[i], wk, prev) if SELECT_MODE == "strategic" else _pick(unis[i], wk, prev, befas=True)) if comp == BEFAS
                        else _pick(unis[i], wk, prev, company=comp))
             history[comp].append({"i": i, "funds": funds_i})
 

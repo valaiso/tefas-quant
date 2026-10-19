@@ -79,11 +79,13 @@ PROFILES = {
     },
     "dengeli": {
         "label": "Dengeli", "vol": (0.04, 0.20), "mdd": -0.20, "beat": "tufe_all", "win": 0.3,
+        "trend": True,  # 200g ort. altı ya da 6 ayda PPF gerisindeki fon alınmaz (testte iki yarıda da daha iyi)
         "max_1y": 1.5, "per_cat": 2, "v_power": 0.5, "min_score": 40, "safe_share": 0.4, "nonbank_max": 0.15, "bank_min": 0.5,
         "weights": {"ret": 30, "win": 15, "sharpe": 20, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
     "atak": {
         "label": "Atak", "vol": (0.08, 0.35), "mdd": -0.35, "beat": "tufe_all", "win": 0.3,
+        "trend": True,
         "max_1y": 2.0, "per_cat": 2, "v_power": 0.5, "min_score": 40, "min_risky": 0.8, "bank_min": 0.5, "nonbank_max": 0.20,
         "weights": {"ret": 35, "win": 10, "sharpe": 20, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
@@ -163,6 +165,12 @@ def _metrics(px: pd.DataFrame, ppf: pd.Series, tufe: pd.Series | None, stopaj: p
     prev = q.iloc[:-1]
     out["recent_z"] = (q.iloc[-1] - prev.mean()) / prev.std().replace(0, np.nan)
     out["max_day"] = rets.iloc[-252:].abs().max()
+    # Trend (zaman serisi momentumu): 200 günlük ortalamaya uzaklık ve 6 aylık PPF üstü getiri
+    out["sma_gap"] = px.iloc[-1] / px.iloc[-200:].mean() - 1 if len(px) >= 200 else np.nan
+    if len(px) > 126:
+        out["mom6x"] = (px.iloc[-1] / px.iloc[-127] - 1) - float(ppf.iloc[-1] / ppf.iloc[-127] - 1)
+    else:
+        out["mom6x"] = np.nan
     out.attrs["bench"] = bench
     return out
 
@@ -292,6 +300,8 @@ def _gate(m: pd.DataFrame, profile: dict) -> tuple[pd.Series, pd.Series]:
     lo, hi = profile["vol"]
     spike = m.apply(lambda r: _spike_reason(r, profile["max_1y"]), axis=1)
     gate = (m["vol"] > lo) & (m["vol"] <= hi) & (m["mdd"] >= profile["mdd"]) & spike.isna()         & _beats(m, profile["beat"]) & (m["win"].fillna(0) >= profile["win"])
+    if profile.get("trend"):  # düşüş trendindeki fon alınmaz (fiyat < 200g ort. ya da 6 ayda PPF gerisinde)
+        gate &= (m["sma_gap"].fillna(0) > 0) & (m["mom6x"].fillna(0) > 0)
     return gate, spike
 
 
@@ -557,6 +567,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
             "bench": {k: {"ppf": _r(v["ppf"]), "ppfNet": _r(v["ppf_net"]), "tufe": _r(v["tufe"])} for k, v in bm.items()},
             "spiky": spiky, "history": items, "backtest": backtest,
             "rules": {"vol": prof["vol"], "mdd": prof["mdd"], "beat": prof["beat"], "win": prof["win"],
+                      "trend": bool(prof.get("trend")),
                       "max1y": prof["max_1y"], "perCat": prof["per_cat"], "weights": prof["weights"]},
         }
 

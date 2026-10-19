@@ -39,6 +39,7 @@ const GLOSSARY = [
   ["Korelasyon", "İki fonun haftalık getirilerinin birlikte hareket etme derecesi. 0,85'in üstündeyse aynı fonu iki kez almak gibi olduğundan biri alınmaz."],
   ["Çapa (ÇAPA)", "Dengeli sepetin %40'ını oluşturan, Güvenli sepetten gelen düşük oynaklıklı fonlar; sepetin dalgalanmasını sınırlar."],
   ["Süreklilik puanı", "Önceki dönem sepette olan fona yeni kurulumda verilen +3 puan; iyi kalan fonun gereksiz yere değiştirilmesini önler."],
+  ["Trend kapısı", "Dengeli ve Atak'ta fiyatı 200 günlük ortalamasının altında olan ya da son 6 ayda PPF'nin gerisinde kalan fon sepete alınmaz; düşüş trendindeki fonları dışarıda tutar."],
   ["Nitelikli yatırımcı fonu", "Yalnızca belirli varlık eşiğini aşan yatırımcıların alabildiği (serbest) fonlar; modele alınmaz."],
   ["Havuz", "O profilin tüm kapılarını (oynaklık, düşüş, kıyas, sıçrama, not ve bayraklar) geçen aday fon sayısı."],
   ["T+1 alış / o gün bilinen veri", "Geçmiş testte sepet kurulum günü yalnızca o güne kadar bilinen verilerle seçilir ve ertesi işlem günü fiyatından alınmış sayılır; gelecek bilgisi kullanılmaz."],
@@ -216,6 +217,8 @@ export async function render(app, _route, store) {
         <li><b>Kıyas şartı (vergi sonrası):</b> ${esc(BEAT[ru.beat] || ru.beat)}${ru.win ? `; 12 aylık dönemlerin en az %${num(ru.win * 100, 0)}'ında PPF'yi geçmiş` : ""}.</li>
         <li><b>Puan ağırlıkları:</b> getiri ${W.ret}, istikrar ${W.win}, Sharpe ${W.sharpe}, düşüş ${W.mdd}, TEFAS Quant skoru ${W.quant}, yatırımcı ${W.inv}, ücret ${W.fee}.</li>
         <li><b>Kategori sınırı:</b> aynı kategoriden en fazla ${ru.perCat} fon.</li>
+        ${ru.trend ? `<li><b>Trend kapısı:</b> fiyatı 200 günlük ortalamasının altında olan ya da son 6 ayda PPF'nin gerisinde kalan fon alınmaz
+          (zaman serisi momentumu; Moskowitz, Ooi ve Pedersen 2012). Vergi sonrası testte Dengeli ve Atak'ı dönemin iki yarısında da iyileştirdi.</li>` : ""}
       </ul>
     </section>`;
 

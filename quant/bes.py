@@ -172,13 +172,14 @@ BES_FLAGS = ("flag_tail", "flag_hot", "founder_risk", "anomaly")
 # Vergi yerleşimi: normal fonda %17,5 stopajlı (altın, teknoloji/yabancı, çok varlıklı) sınıflar BES'te
 # vergi avantajı taşır; yerli hisse yoğun fonlar normal fonda zaten %0. Bu sınıflara puan eklenir.
 TAX_TILT = 5.0
+BES_TREND = False
 TAX_ADV_BUCKETS = ("Altın / kıymetli maden", "Teknoloji / yabancı", "Çok varlıklı")
 SELECT_MODE = "score"                    # "score" (puan sırası) | "strategic" (varlık sınıfı eşit) — 2 ayrı testte "score" daha iyi
 BUCKET_WEIGHT = "equal"                  # varlık sınıfları arası: "equal" | "invvol" (risk paritesi)
 PER_BUCKET = 2                           # sınıf başına fon
 LOSER_CUT = 0.30                         # sınıf içinde reel getiri / Sharpe'ta alt %30 elenir
 TREND_FILTER = False                     # sınıf endeksi 40 haftalık ortalamanın altındaysa payı diğerlerine
-STAY_BONUS = 3.0
+STAY_BONUS = 10.0                        # uzun vade: iyi kalan fon sepette kalsın (testte 2 yarıda da daha iyi)
 PERIOD_MONTHS = 2
 WEIGHTS = {"ret": 35, "real": 15, "sharpe": 20, "mdd": 15, "quant": 10, "inv": 5}
 RET_WINDOWS = {"1y": (252, 0.2), "3y": (756, 0.5), "5y": (1260, 0.3)}
@@ -323,6 +324,8 @@ def _pick(m: pd.DataFrame, wk: pd.DataFrame | None, prev: list[str] | None,
     spike = c.apply(lambda r: model._spike_reason(r, MAX_1Y), axis=1)
     tufe_ok = c["real_3y"] > 0 if c["real_3y"].notna().any() else pd.Series(True, index=c.index)
     base = c[(c["vol"] >= MIN_VOL) & spike.isna()].copy()
+    if BES_TREND:  # deneme: 200 günlük ortalamanın altındaki ya da 6 ayda PPF gerisindeki fon alınmaz
+        base = base[(base["sma_gap"].fillna(0) > 0) & (base["mom6x"].fillna(0) > 0)]
     if base.empty:
         return []
     base["score"] = _score(base)

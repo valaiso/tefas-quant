@@ -528,10 +528,10 @@ table.bt-grades td { white-space: nowrap; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
-  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Değer, ve Model Raporu
+  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Değer, Model Raporu ve Portföy Simülasyonu
      yalnızca masaüstünde */
   .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"], .tab[data-view="deger"],
-  .tab[data-view="modelrapor"] { display: none; }
+  .tab[data-view="modelrapor"], .tab[data-view="simulasyon"] { display: none; }
   /* Telefonda sol üstte sayfa etiketi yerine logo ve marka adı */
   .topbar-logo { display: block; flex: none; margin-right: -6px; }
   .topbar-brand { display: block; }

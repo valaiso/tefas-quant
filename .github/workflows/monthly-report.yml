@@ -66,7 +66,7 @@ jobs:
       - name: Raporu PDF'e bas
         if: steps.isaret.outputs.cache-hit != 'true'
         run: |
-          google-chrome --headless=new --no-sandbox --disable-gpu --no-pdf-header-footer \
+          google-chrome --headless=new --no-sandbox --disable-gpu --no-pdf-header-footer --window-size=1280,1600 \
             --run-all-compositor-stages-before-draw --virtual-time-budget=20000 \
             --print-to-pdf=model-rapor.pdf "${SITE_URL}/?t=$(date +%s)#/modelrapor"
           ls -la model-rapor.pdf

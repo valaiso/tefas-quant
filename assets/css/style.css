@@ -784,8 +784,9 @@ table.bt-grades td { white-space: nowrap; }
 .mr-month tr.mr-partial td { font-style: italic; }
 .mr-month.mr-dense td { padding-top: 1.6px; padding-bottom: 1.6px; font-size: 9px; }
 
-@media (max-width: 760px) {
-  /* Telefonda yatay taşma: anahtar-değer tabloları ve filtre alanları ekrana sığsın */
+@media screen and (max-width: 760px) {
+  /* Telefonda yatay taşma: anahtar-değer tabloları ve filtre alanları ekrana sığsın. Yalnızca ekran:
+     e-postadaki PDF dar pencerede basıldığında rapor düzeni bozulmasın */
   table.kv { table-layout: fixed; width: 100%; }
   table.kv th, table.kv td { white-space: normal; overflow-wrap: anywhere; }
   #app input, #app select { max-width: 100%; min-width: 0; }

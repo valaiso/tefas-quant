@@ -536,6 +536,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
 
         # Geçmiş performans: her dönem T+1 alış, bir sonraki kuruluma kadar tutuş
         rets, points, items = [], [], []
+        daily_d, daily_v, lvl_now = [], [], 100.0  # günlük seviye (Model Simülasyonu ve kişisel rapor için)
         for k, h in enumerate(hist):
             a = dates[h["i"] + 1]
             e = dates[hist[k + 1]["i"] + 1] if k + 1 < len(hist) else dates[-1]
@@ -547,8 +548,17 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
                 w = pd.Series({f["code"]: f["w"] for f in h["funds"]})
                 r = (px.loc[e, w.index] / px.loc[a, w.index] - 1).clip(-0.95, 5).fillna(0)
                 ret = float((r * w).sum())
+                path = ((px.loc[a:e, w.index] / px.loc[a, w.index] - 1).clip(-0.95, 5).fillna(0) * w).sum(axis=1)
             else:
                 ret = float(ppf.loc[e] / ppf.loc[a] - 1)
+                path = ppf.loc[a:e] / ppf.loc[a] - 1
+            if not daily_d:
+                daily_d.append(a)
+                daily_v.append(lvl_now)
+            for d_, x_ in path.iloc[1:].items():
+                daily_d.append(d_)
+                daily_v.append(lvl_now * (1 + float(x_)))
+            lvl_now = daily_v[-1]
             if not points:
                 points.append(a)
             rets.append(ret)
@@ -569,7 +579,8 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
                 series[b] = [None if pd.isna(x) else round(float(x), 3) for x in s.values]
                 stats[b] = _stats(s, s.pct_change().dropna(), ppf_p if b != "ppf" else None)
             backtest = {"available": True, "dates": [d.strftime("%Y-%m-%d") for d in points],
-                        "series": series, "stats": stats}
+                        "series": series, "stats": stats,
+                        "daily": {"dates": [d.strftime("%Y-%m-%d") for d in daily_d], "model": [round(float(x), 3) for x in daily_v]}}
 
         bm = m.attrs.get("bench", {}) if not m.empty else {}
         profiles_out[key] = {

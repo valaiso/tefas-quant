@@ -1,4 +1,4 @@
-// Model Rapor: fon modelleri ve BES Öneri modelinin aylık getirileri, kıyaslarla (A4, yazdırılabilir / PDF)
+// Model Raporu: fon modelleri ve üç BES modelinin aylık getirileri, kıyaslarla (A4, yazdırılabilir / PDF)
 import { esc, num, dateTR, monthLabel } from "../util.js";
 
 const BENCH = [
@@ -140,7 +140,7 @@ function summaryPage(models, asOf, total) {
     ...BENCH.filter(([k]) => ref.series[k]).map(([k, label]) => ({ name: label, v: byMonth(ref, k) })),
   ];
 
-  // Birikimli grafik: son 12 ay; BES Öneri aynı ay noktalarına hizalanır (son, süren ay noktası ayrı tutulur)
+  // Birikimli grafik: son 12 ay; BES modelleri aynı ay noktalarına hizalanır (son, süren ay noktası ayrı tutulur)
   const refY = lastYear(ref);
   const pointKey = (d, i) => d[i].slice(0, 7) + (i === d.length - 1 && !isMonthStart(d, i) ? "+" : "");
   const align = (m) => {
@@ -150,7 +150,8 @@ function summaryPage(models, asOf, total) {
     const b = v.find((x) => x != null);
     return v.map((x) => (x == null || !b ? null : (x / b) * 100));
   };
-  const colors = { guvenli: "#0b7a45", dengeli: "#1f5fbf", atak: "#db2777", bes: "#0891b2" };
+  const colors = { guvenli: "#0b7a45", dengeli: "#1f5fbf", atak: "#db2777", bes: "#0891b2",
+    bes_koruyucu: "#64748b", bes_dengeli: "#0891b2", bes_buyume: "#c2410c" };
 
   const tr = (r) => `<tr class="${r.bench ? "mr-bench" : "mr-self"}">
       <td><b>${esc(r.name)}</b>${r.kind === "bes" ? ' <span class="mr-tag">BES</span>' : ""}</td>
@@ -159,8 +160,8 @@ function summaryPage(models, asOf, total) {
 
   return `<article class="rp-page">
     ${cover("AYLIK RAPOR", "Model Performans Raporu",
-      `Güvenli · Dengeli · Atak fon modelleri ve BES Öneri · ${monthLong(lastMonth)} sonu itibarıyla son 12 ay · PPF, TÜFE, altın, dolar ve S&P 500 ile`)}
-    <div class="rp-kpis">${rows.map((r) => `<div class="${tone(r.m1)}"><span>${esc(r.name)} · ${MONTHS_LONG[+lastMonth.slice(5, 7) - 1]}</span>
+      `Güvenli · Dengeli · Atak fon modelleri ve BES Koruyucu · Dengeli · Büyüme · ${monthLong(lastMonth)} sonu itibarıyla son 12 ay`)}
+    <div class="rp-kpis mr-kpis6">${rows.map((r) => `<div class="${tone(r.m1)}"><span>${esc(r.name)} · ${MONTHS_LONG[+lastMonth.slice(5, 7) - 1]}</span>
       <b>${pctS(r.m1)}</b><em>Son 12 ayda ${pctS(r.m12)}</em></div>`).join("")}</div>
 
     <section class="rp-block">
@@ -185,7 +186,7 @@ function summaryPage(models, asOf, total) {
       ${chart(refY.dates, [
         ...models.map((m) => ({ name: m.label, v: m === ref ? refY.series.model : align(m), color: colors[m.key] || MODEL_COLOR, w: 2.2 })),
         ...BENCH.filter(([k]) => refY.series[k]).map(([k, l, c]) => ({ name: l.replace(" ortalaması", ""), v: refY.series[k], color: c, dash: k === "ppf" })),
-      ], 200)}
+      ], 150)}
     </section>
 
     <section class="rp-block">
@@ -202,7 +203,7 @@ function summaryPage(models, asOf, total) {
       </table>
     </section>
 
-    ${footer("Model getirileri fon fiyatlarından (yönetim ücreti düşülmüş), vergi öncesi hesaplanır; fon modelleri aylık, BES Öneri 2 ayda bir yenilenir. S&P 500 temettüsüz fiyat endeksidir, dolar/TL ile TL'ye çevrilir.", asOf, 1, total)}
+    ${footer("Model getirileri fon fiyatlarından (yönetim ücreti düşülmüş), vergi öncesi hesaplanır; fon modelleri aylık, BES modelleri 2 ayda bir yenilenir. S&P 500 temettüsüz fiyat endeksidir, dolar/TL ile TL'ye çevrilir.", asOf, 1, total)}
   </article>`;
 }
 
@@ -222,6 +223,9 @@ function modelPage(m, asOf, pageNo, total) {
     dengeli: "Karma ve değişken fonlarla PPF üstü getiri hedefi; orta oynaklık, trend kapısı açık.",
     atak: "Hisse ve tematik fon ağırlıklı; yüksek oynaklık, uzun vadede TÜFE ve PPF üstü hedef.",
     bes: "BEFAS'a açık tüm şirketlerden en çok 6 fon; uzun vade (3–10 yıl), vergi avantajı yüksek varlıklara öncelik.",
+    bes_koruyucu: "Düşük oynaklıklı borçlanma, katılım, standart ve karma BES fonları; sermayeyi korumak için.",
+    bes_dengeli: "Çok varlıklı, altın, hisse ve teknoloji BES fonlarının dengeli karışımı; faiz fonları alınmaz.",
+    bes_buyume: "Yalnızca altın, yerli hisse ve teknoloji / yabancı BES fonları; 5–10 yıllık birikim için, kısa vadede dalgalı.",
   }[m.key] || "";
 
   const cmp = bench.map(([k, label, color]) => {
@@ -289,7 +293,7 @@ function modelPage(m, asOf, pageNo, total) {
     </section>
 
     ${footer(isBes
-      ? "BES Öneri: 2 ayda bir yeniden kurulan BEFAS sepeti, ara aylarda aynı sepet tutulur; fon değişikliği vergisizdir, devlet katkısı dahil değildir."
+      ? `${esc(m.label)}: 2 ayda bir yeniden kurulan BEFAS sepeti, ara aylarda aynı sepet tutulur; fon değişikliği vergisizdir, devlet katkısı dahil değildir.`
       : `${esc(m.label)} model: her ay yeniden kurulan sepet (T+1 alış), vergi öncesi. Normal hesapta fon değişikliğinde kazançtan stopaj kesilir.`, asOf, pageNo, total)}
   </article>`;
 }
@@ -304,7 +308,7 @@ export async function render(app, _route, store) {
   app.innerHTML = `
   <div class="rp-toolbar no-print">
     <div><h2>Model performans raporu</h2>
-      <p class="dim">Fon modelleri ve BES Öneri'nin aylık getirileri · PPF, TÜFE, altın, dolar ve S&P 500 ile · ${dateTR(data.asOf)} itibarıyla</p></div>
+      <p class="dim">Fon modelleri ve üç BES modelinin aylık getirileri · PPF, TÜFE, altın, dolar ve S&P 500 ile · ${dateTR(data.asOf)} itibarıyla</p></div>
     <div class="rp-actions"><button class="btn btn-primary" id="mrPrint" type="button">⤓ PDF olarak indir</button></div>
   </div>
   <div class="rp-doc">${summaryPage(data.models, data.asOf, total)}${data.models.map((m, i) => modelPage(m, data.asOf, i + 2, total)).join("")}</div>`;

@@ -527,8 +527,9 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
 
     month_marks = sorted({dates[j + 1] for j in scoring.month_ends(dates) if j + 1 < len(dates)} | {dates[-1]})
 
-    def held_monthly(ws_list):
-        """held() ile aynı tutuş; seviye her ayın ilk işlem gününde de okunur (Model Rapor için)."""
+    def held_monthly(ws_list, marks=None):
+        """held() ile aynı tutuş; seviye her ayın ilk işlem gününde (marks verilirse o günlerde) de okunur."""
+        marks = month_marks if marks is None else marks
         lvl, pts, vals = 100.0, [], []
         for k, (i, ws) in enumerate(ws_list):
             a = dates[i + 1]
@@ -538,7 +539,7 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
             if not pts:
                 pts.append(a)
                 vals.append(lvl)
-            for m in (x for x in month_marks if a < x <= e):
+            for m in (x for x in marks if a < x <= e):
                 r = (px.loc[m, ws.index] / px.loc[a, ws.index] - 1).clip(-0.95, 5).fillna(0)
                 pts.append(m)
                 vals.append(lvl * (1 + float((r * ws).sum())))
@@ -612,10 +613,13 @@ def model_run(res: dict, bench: pd.DataFrame) -> dict:
                 series[b] = [None if pd.isna(x) else round(float(x), 3) for x in s.values]
                 stats[b] = _stats(s, s.pct_change().dropna(), None)
             m_pts, m_vals = held_monthly(ws_list)
+            d_pts, d_vals = held_monthly(ws_list, list(dates))
             backtest_out = {"available": True, "dates": [d.strftime("%Y-%m-%d") for d in points],
                             "series": series, "stats": stats,
                             "monthly": {"dates": [d.strftime("%Y-%m-%d") for d in m_pts],
-                                        "model": [round(float(x), 3) for x in m_vals]}}
+                                        "model": [round(float(x), 3) for x in m_vals]},
+                            "daily": {"dates": [d.strftime("%Y-%m-%d") for d in d_pts],
+                                      "model": [round(float(x), 3) for x in d_vals]}}
         out[comp] = {
             "company": "BEFAS (tüm şirketler)", "channel": None,
             "key": comp, "label": BES_PROFILES[comp]["label"], "desc": BES_PROFILES[comp]["desc"],

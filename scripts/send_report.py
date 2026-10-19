@@ -54,14 +54,14 @@ def _letter(rep: dict, site_url: str, with_portfolio: bool = False) -> tuple[str
     paras = [
         "Sayın İlgili,",
         f"TEFAS Quant model portföylerinin {label} dönemine ait aylık performans raporu ekte bilgilerinize sunulmuştur.",
-        "Raporda Güvenli, Dengeli ve Atak fon modelleri ile BES Öneri modelinin aylık getirileri; para piyasası fonları "
+        "Raporda Güvenli, Dengeli ve Atak fon modelleri ile BES Koruyucu, Dengeli ve Büyüme modellerinin aylık getirileri; para piyasası fonları "
         "ortalaması (PPF), TÜFE, gram altın, dolar/TL ve S&P 500 (TL) ile karşılaştırmalı olarak yer almaktadır. Özet "
         "bölümünde son 12 aylık dönemsel getiriler ve aylık getiri ısı haritası, model sayfalarında ise birikimli getiri, "
         "kıyaslara göre farklar ve ay ay getiri tabloları bulunmaktadır.",
         *(["Ekte ayrıca kişisel portföyünüzün aynı döneme ait raporu ayrı bir dosya olarak yer almaktadır. Analiz'in aylık "
             "portföy raporu esas alınarak hazırlanan bu raporda para giriş ve çıkışlarından arındırılmış aylık getiriniz, reel "
             "getiriniz, değer köprüsü, dağılım, pozisyonlar ve risk göstergeleri TEFAS Quant model portföyleriyle (Güvenli, "
-            "Dengeli, Atak, BES Öneri) ve kıyaslarla birlikte sunulmaktadır."] if with_portfolio else []),
+            "Dengeli, Atak ve üç BES modeli) ve kıyaslarla birlikte sunulmaktadır."] if with_portfolio else []),
         "Raporun güncel hâline aşağıdaki bağlantıdan da ulaşabilirsiniz.",
         "Bilgilerinize sunar, iyi çalışmalar dileriz.",
     ]

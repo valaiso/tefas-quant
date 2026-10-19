@@ -731,6 +731,9 @@ table.bt-grades td { white-space: nowrap; }
 .pa-pos th:nth-child(6) { width: 48px; }
 .pa-pos th:nth-child(7) { width: 30px; }
 .pa-table th:not(:first-child) { width: 13.5%; }
+.pa-compact td { padding-top: 2.2px; padding-bottom: 2.2px; font-size: 9px; }
+.pa-cats { gap: 2px; }
+.pa-cat { font-size: 9px; }
 .rp-page .rp-bar.brand i { background: var(--rp-brand); }
 
 /* Model Rapor */
@@ -746,8 +749,9 @@ table.bt-grades td { white-space: nowrap; }
 .rp-table .mr-bench td:first-child b { font-weight: 600; }
 .rp-table tr.mr-bench:first-of-type td, .mr-sum tr.mr-self + tr.mr-bench td { border-top: 1.5px solid #c5cfdd; }
 .mr-sum th:first-child { width: 150px; }
+.mr-sum td, .mr-beat td, .mr-heatmap td { padding-top: 2.4px; padding-bottom: 2.4px; }
 .mr-heatmap th:first-child { width: 112px; }
-.mr-heatmap td.mr-heat { text-align: center; font-variant-numeric: tabular-nums; font-size: 8.5px; color: var(--rp-ink); padding: 3px 2px;
+.mr-heatmap td.mr-heat { text-align: center; font-variant-numeric: tabular-nums; font-size: 8.5px; color: var(--rp-ink); padding: 2px 2px;
   border-bottom: 1px solid #fff; border-right: 1px solid #fff; }
 .mr-heatmap td.mr-heat.strong { color: #fff; font-weight: 700; }
 .mr-heatmap tbody tr:nth-child(even) td.mr-heat { background-clip: padding-box; }

@@ -23,7 +23,7 @@ const VIEWS = {
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
   backtest: { mod: backtest, title: "Quant / Backtest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
   simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ" },
-  portfoykarsilastir: { mod: personal, title: "Modellerle Karşılaştır", eyebrow: "PORTFÖY · MODELLER · KIYASLAR" },
+  portfoykarsilastir: { mod: personal, title: "Model Simülasyonu", eyebrow: "PORTFÖY · MODELLER · KIYASLAR" },
   portfoyrapor: { mod: personal, title: "Portföy Raporu", eyebrow: "KİŞİSEL PORTFÖY RAPORU", nav: "portfoykarsilastir" },
   model: { mod: model, title: "Model Portföyler", eyebrow: "GÜVENLİ · DENGELİ · ATAK" },
   rapor: { mod: report, title: "Fon Akış Raporu", eyebrow: "HAFTALIK · AYLIK AKIŞ" },

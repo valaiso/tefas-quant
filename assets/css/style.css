@@ -524,9 +524,10 @@ table.bt-grades td { white-space: nowrap; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
-  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Değer ve Model Rapor yalnızca masaüstünde */
+  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Değer, Model Rapor ve
+     Portföy Karşılaştırması yalnızca masaüstünde */
   .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"], .tab[data-view="deger"],
-  .tab[data-view="modelrapor"] { display: none; }
+  .tab[data-view="modelrapor"], .tab[data-view="portfoykarsilastir"] { display: none; }
   /* Telefonda sol üstte sayfa etiketi yerine logo ve marka adı */
   .topbar-logo { display: block; flex: none; margin-right: -6px; }
   .topbar-brand { display: block; }
@@ -669,6 +670,24 @@ table.bt-grades td { white-space: nowrap; }
 .rp-footer { margin-top: auto; display: flex; justify-content: space-between; gap: 18px; padding: 9px 28px; font-size: 7.5px;
   color: var(--rp-dim); border-top: 1px solid var(--rp-line); background: var(--rp-soft); }
 .rp-footer span:last-child { white-space: nowrap; font-weight: 700; }
+
+/* Kişisel portföy */
+.pf-bar { display: flex; height: 14px; border-radius: 99px; overflow: hidden; background: var(--border); }
+.pf-bar i { display: block; height: 100%; }
+.pf-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; font-size: .86rem; }
+.pf-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.pf-legend em { font-style: normal; color: var(--text-dim); margin-left: 4px; }
+.pr-classes { display: grid; gap: 6px; }
+.pr-class { display: grid; grid-template-columns: 120px 1fr 52px 96px; gap: 9px; align-items: center; font-size: 9.5px; }
+.pr-class-name { display: flex; align-items: center; gap: 6px; color: var(--rp-ink); }
+.pr-class-name i { width: 9px; height: 9px; border-radius: 2px; }
+.pr-class .num { text-align: right; }
+.pr-pos th:nth-child(3) { width: 112px; }
+.pr-pos th:nth-child(4) { width: 82px; }
+.pr-pos th:nth-child(5) { width: 50px; }
+.pr-pos th:nth-child(6) { width: 78px; }
+.pr-pos th:nth-child(7) { width: 50px; }
+.pr-pos th:nth-child(8) { width: 32px; }
 
 /* Model Rapor */
 .mr-note { margin: 4px 0 0; font-size: 8px; color: var(--rp-dim); }

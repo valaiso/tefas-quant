@@ -86,9 +86,9 @@ function chart(dates, lines, H = 168, W = 764) {
   </svg>`;
 }
 
-function cover(badge, title, sub) {
+function cover(badge, title, sub, caption = "MODEL PORTFÖY RAPORU") {
   return `<header class="rp-cover">
-      <div class="rp-brand"><img src="assets/img/logo.webp" alt=""><div><b>TEFAS Quant</b><span>MODEL PORTFÖY RAPORU</span></div></div>
+      <div class="rp-brand"><img src="assets/img/logo.webp" alt=""><div><b>TEFAS Quant</b><span>${caption}</span></div></div>
       <span class="rp-badge">${badge}</span>
       <h1>${title}</h1>
       <p class="rp-period">${sub}</p>
@@ -314,3 +314,6 @@ export async function render(app, _route, store) {
     setTimeout(() => (document.title = prev), 500);
   });
 }
+
+// Kişisel portföy raporu ve karşılaştırma sayfası aynı yardımcıları kullanır
+export { BENCH, MONTHS_LONG, monthLong, pctS, ptsS, tone, months, isMonthStart, ret, lastFull, heatCell, chart, cover, footer, lastYear, load as loadModelReport };

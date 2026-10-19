@@ -1,6 +1,7 @@
 """Aylık Model Rapor e-postası: resmi yazı + PDF eki + siteye bağlantı.
 
-    python scripts/send_report.py --site-url https://valaiso.github.io/tefas-quant --pdf model-rapor.pdf
+    python scripts/send_report.py --site-url https://valaiso.github.io/tefas-quant --pdf model-rapor.pdf \
+        [--portfolio-pdf portfoy-rapor.pdf]
 
 Gönderim bilgileri ortam değişkenlerinden (GitHub Actions secret) okunur, depoda tutulmaz:
     MAIL_USER          gönderen Gmail adresi
@@ -36,7 +37,11 @@ def _last_full(dates: list[str]) -> int:
     return n - 1
 
 
-def _letter(rep: dict, site_url: str) -> tuple[str, str, str]:
+def _ok_pdf(path: str | None) -> bool:
+    return bool(path) and Path(path).exists() and Path(path).stat().st_size > 10_000
+
+
+def _letter(rep: dict, site_url: str, with_portfolio: bool = False) -> tuple[str, str, str]:
     """Resmi yazı: konu etiketi, HTML gövde ve düz metin gövde (tablo yok; ayrıntılar PDF ekinde)."""
     models = rep["models"]
     ref = next((m for m in models if m["kind"] == "fon"), models[0])
@@ -53,11 +58,17 @@ def _letter(rep: dict, site_url: str) -> tuple[str, str, str]:
         "ortalaması (PPF), TÜFE, gram altın, dolar/TL ve S&P 500 (TL) ile karşılaştırmalı olarak yer almaktadır. Özet "
         "bölümünde son 12 aylık dönemsel getiriler ve aylık getiri ısı haritası, model sayfalarında ise birikimli getiri, "
         "kıyaslara göre farklar ve ay ay getiri tabloları bulunmaktadır.",
+        *(["Ekte ayrıca kişisel portföyünüzün aynı döneme ait raporu ayrı bir dosya olarak yer almaktadır. Bu raporda "
+            "pozisyonlarınız, varlık sınıflarına göre dağılımınız ve bugünkü dağılımınızın son 12 ayının modellerle ve "
+            "kıyaslarla karşılaştırması bulunmaktadır."] if with_portfolio else []),
         "Raporun güncel hâline aşağıdaki bağlantıdan da ulaşabilirsiniz.",
         "Bilgilerinize sunar, iyi çalışmalar dileriz.",
     ]
     note = ("Model getirileri fon fiyatlarından, vergi öncesi ve geriye dönük test olarak hesaplanmıştır; geçmiş getiri "
             "gelecekteki sonuçların göstergesi değildir. Bu e-posta ve eki yatırım tavsiyesi niteliği taşımaz.")
+    ek = [f"TEFAS Quant Model Performans Raporu – {label} (PDF)"]
+    if with_portfolio:
+        ek.append(f"TEFAS Quant Kişisel Portföy Raporu – {label} (PDF)")
     p_html = "".join(f'<p style="margin:0 0 14px;line-height:1.6">{t}</p>' for t in paras)
     html = f"""<div style="font-family:Segoe UI,Arial,sans-serif;color:#12233d;max-width:620px;font-size:14px">
   <div style="border-bottom:3px solid #1f5fbf;padding:0 0 12px;margin-bottom:18px">
@@ -72,17 +83,18 @@ def _letter(rep: dict, site_url: str) -> tuple[str, str, str]:
   <p style="margin:0 0 2px">Saygılarımızla,</p>
   <p style="margin:0 0 22px"><b>TEFAS Quant</b></p>
   <p style="margin:0;padding-top:12px;border-top:1px solid #e3e9f2;font-size:11px;color:#64748b;line-height:1.5">
-    <b>Ek:</b> TEFAS Quant Model Performans Raporu – {label} (PDF)<br>{note}</p>
+    <b>Ekler:</b> {"<br>".join(f"{i + 1}. {e}" for i, e in enumerate(ek))}<br>{note}</p>
 </div>"""
     text = (f"{date_txt}\n\nKonu: {label} Model Performans Raporu\n\n" + "\n\n".join(paras)
-            + f"\n\nRaporu sitede aç: {link}\n\nSaygılarımızla,\nTEFAS Quant\n\nEk: TEFAS Quant Model Performans Raporu – {label} (PDF)\n{note}\n")
+            + f"\n\nRaporu sitede aç: {link}\n\nSaygılarımızla,\nTEFAS Quant\n\nEkler:\n" + "\n".join(f"{i + 1}. {e}" for i, e in enumerate(ek)) + f"\n{note}\n")
     return label, html, text
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--site-url", required=True)
-    ap.add_argument("--pdf", default=None)
+    ap.add_argument("--pdf", default=None, help="Model Rapor PDF'i")
+    ap.add_argument("--portfolio-pdf", default=None, help="Kişisel Portföy Raporu PDF'i (yoksa yalnızca model raporu gider)")
     ap.add_argument("--dry-run", action="store_true", help="göndermeden HTML'i yazdır")
     args = ap.parse_args()
     site = args.site_url.rstrip("/")
@@ -92,7 +104,7 @@ def main() -> int:
     if not rep.get("models"):
         print("model_report.json boş; e-posta gönderilmedi", file=sys.stderr)
         return 1
-    label, html, text = _letter(rep, site)
+    label, html, text = _letter(rep, site, with_portfolio=_ok_pdf(args.portfolio_pdf))
     if args.dry_run:
         print(html)
         return 0
@@ -110,11 +122,12 @@ def main() -> int:
     msg["To"] = ", ".join(to)
     msg.set_content(text)
     msg.add_alternative(html, subtype="html")
-    if args.pdf and Path(args.pdf).exists() and Path(args.pdf).stat().st_size > 10_000:
-        msg.add_attachment(Path(args.pdf).read_bytes(), maintype="application", subtype="pdf",
-                           filename=f"TEFAS-Quant-Model-Raporu-{label.replace(' ', '-')}.pdf")
-    else:
-        print("PDF bulunamadı; e-posta eksiz gönderiliyor", file=sys.stderr)
+    tag = label.replace(" ", "-")
+    for path, name in ((args.pdf, f"TEFAS-Quant-Model-Raporu-{tag}.pdf"), (args.portfolio_pdf, f"TEFAS-Quant-Portfoy-Raporu-{tag}.pdf")):
+        if _ok_pdf(path):
+            msg.add_attachment(Path(path).read_bytes(), maintype="application", subtype="pdf", filename=name)
+        elif path:
+            print(f"{path} bulunamadı; bu ek gönderilmiyor", file=sys.stderr)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context(), timeout=60) as s:
         s.login(user, pw)

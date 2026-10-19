@@ -52,6 +52,7 @@ export async function render(app, _route, store) {
       Toplam ${num(bt.observations, 0)} A+ gözlemi. Kıyas ölçüsü: aynı ay, aynı kategorideki tüm fonların medyan getirisi.
       A+ canlı sitedeki sıkı kuralla verildi (üst %5, kalite şartları, 2 ay süreklilik, kurucu riski yok); ilk A+ sinyali
       ${dateTR(bt.byDate[0]?.date)}. Renkler kategoriye göredir: kategori kıyasının altında kalan sonuç kırmızı gösterilir.</p>
+    <div class="btn-row"><a class="btn" href="#/simulasyon">◫ Portföy Simülasyonu: aylık A+ sepetinin geçmişi →</a></div>
   </section>
 
   <div class="grid bt-grid">${hs.map((h) => kpi(h, bt.overall[h])).join("")}</div>

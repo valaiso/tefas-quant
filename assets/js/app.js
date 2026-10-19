@@ -9,6 +9,7 @@ import * as backtest from "./views/backtest.js";
 import * as simulation from "./views/simulation.js";
 import * as report from "./views/report.js";
 import * as modelreport from "./views/modelreport.js";
+import * as personal from "./views/personal.js";
 import * as model from "./views/model.js";
 import * as bes from "./views/bes.js";
 import * as deger from "./views/deger.js";
@@ -16,12 +17,15 @@ import * as deger from "./views/deger.js";
 const VIEWS = {
   genel: { mod: overview, title: "Genel Bakış", eyebrow: "PİYASA ÖZETİ" },
   siralama: { mod: ranking, title: "Fon Sıralaması", eyebrow: "KATEGORİ İÇİ DERECELENDİRME" },
-  bes: { mod: bes, title: "BES", eyebrow: "BİREYSEL EMEKLİLİK FONLARI" },
+  bes: { mod: bes, title: "BES Genel Bakış", eyebrow: "BİREYSEL EMEKLİLİK FONLARI" },
   deger: { mod: deger, title: "Değer", eyebrow: "FON + BES DAĞILIMI DEĞERLENDİRME" },
   fon: { mod: fund, title: "Fon Detayı", eyebrow: "FON ANALİZİ", nav: "siralama" },
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
-  backtest: { mod: backtest, title: "QuantBacktest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
-  simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ" },
+  backtest: { mod: backtest, title: "Quant / Backtest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
+  simulasyon: { mod: simulation, title: "Portföy Simülasyonu", eyebrow: "AYLIK A+ SEPETİ", nav: "backtest" },
+  portfoy: { mod: personal, title: "Portföy Özeti", eyebrow: "KİŞİSEL PORTFÖY" },
+  portfoykarsilastir: { mod: personal, title: "Portföy Karşılaştırması", eyebrow: "PORTFÖY · MODELLER · KIYASLAR" },
+  portfoyrapor: { mod: personal, title: "Portföy Raporu", eyebrow: "KİŞİSEL PORTFÖY RAPORU", nav: "portfoy" },
   model: { mod: model, title: "Model Portföyler", eyebrow: "GÜVENLİ · DENGELİ · ATAK" },
   rapor: { mod: report, title: "Rapor", eyebrow: "HAFTALIK · AYLIK AKIŞ" },
   modelrapor: { mod: modelreport, title: "Model Rapor", eyebrow: "AYLIK MODEL PERFORMANSI" },

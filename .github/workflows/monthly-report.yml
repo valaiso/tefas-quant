@@ -6,7 +6,9 @@ name: Aylık Model Rapor e-postası
 # geciktirebildiği için 18:00'den önce başlatılır.
 #
 # Gerekli secret'lar: MAIL_USER (gönderen Gmail), MAIL_APP_PASSWORD (Gmail uygulama şifresi),
-# MAIL_TO (alıcı). Elle denemek için: Actions > bu iş > Run workflow.
+# MAIL_TO (alıcı). Kişisel Portföy Raporu (ikinci PDF) için ayrıca SUPABASE_SERVICE_ROLE_KEY
+# (Analiz'in Supabase projesi) ve isteğe bağlı PORTFOLIO_USER_ID gerekir; yoksa yalnızca model
+# raporu gider. Elle denemek için: Actions > bu iş > Run workflow.
 
 on:
   schedule:
@@ -19,7 +21,7 @@ permissions:
 jobs:
   mail:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       SITE_URL: ${{ format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
       PYTHONIOENCODING: utf-8
@@ -36,9 +38,20 @@ jobs:
             --print-to-pdf=model-rapor.pdf "${SITE_URL}/?t=$(date +%s)#/modelrapor"
           ls -la model-rapor.pdf
 
+      # Portföy yalnızca bu adımda tarayıcıya verilir ve PDF'e basılır; siteye ya da depoya yazılmaz.
+      - name: Kişisel portföy raporunu PDF'e bas
+        continue-on-error: true
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PORTFOLIO_USER_ID: ${{ secrets.PORTFOLIO_USER_ID }}
+        run: |
+          pip install -q playwright==1.47.0
+          python -m playwright install --with-deps chromium > /dev/null
+          python scripts/portfolio_pdf.py --site-url "${SITE_URL}" --out portfoy-rapor.pdf
+
       - name: E-postayı gönder
         env:
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python scripts/send_report.py --site-url "${SITE_URL}" --pdf model-rapor.pdf
+        run: python scripts/send_report.py --site-url "${SITE_URL}" --pdf model-rapor.pdf --portfolio-pdf portfoy-rapor.pdf

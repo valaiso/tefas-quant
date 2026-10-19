@@ -33,16 +33,14 @@ function months(m) {
   return rows;
 }
 // Son nokta bir sonraki ayın ilk işlem günü değilse (veri ay ortasında bitiyorsa) son ay kısmidir
+// Ay başında (rapor e-postasının gittiği gün) son nokta önceki ayın son işlem günüdür: o ay bitmiştir.
 function isMonthStart(d, i) {
   const prev = d[i - 1].slice(0, 7), cur = d[i].slice(0, 7);
-  return cur !== prev && +d[i].slice(8, 10) <= 4;
+  if (cur !== prev && +d[i].slice(8, 10) <= 4) return true;
+  return i === d.length - 1 && cur < new Date().toISOString().slice(0, 7);
 }
 
 const ret = (s, i0, i1) => (s?.[i0] != null && s?.[i1] != null ? (s[i1] / s[i0] - 1) * 100 : null);
-const cagr = (s, d) => {
-  const t = ret(s, 0, s.length - 1), yrs = (Date.parse(d[d.length - 1]) - Date.parse(d[0])) / (365.25 * 864e5);
-  return t == null || yrs < 0.5 ? null : (Math.pow(1 + t / 100, 1 / yrs) - 1) * 100;
-};
 // Son tamamlanmış ayın bitiş noktası (kısmi son ay hariç)
 const lastFull = (m) => (isMonthStart(m.dates, m.dates.length - 1) ? m.dates.length - 1 : m.dates.length - 2);
 
@@ -102,21 +100,33 @@ function footer(text, asOf, pageNo, total) {
       <span>Oluşturma ${dateTR(asOf)} · Sayfa ${pageNo} / ${total}</span></footer>`;
 }
 
+const TABLE_FROM = "2024-11";  // aylık getiri tablosu bu aydan başlar; grafik ve özetler son 12 ay
+
+/** Son 12 tamamlanmış ay (süren ay hariç): seriler pencere başında 100'e çekilir. */
+function lastYear(m) {
+  const e = lastFull(m), s0 = Math.max(0, e - 12);
+  const series = {};
+  for (const [k, v] of Object.entries(m.series)) {
+    const w = v.slice(s0, e + 1), b = w.find((x) => x != null);
+    series[k] = w.map((x) => (x == null || !b ? null : (x / b) * 100));
+  }
+  return { ...m, dates: m.dates.slice(s0, e + 1), series };
+}
+
 function summaryPage(models, asOf, total) {
   const fon = models.filter((m) => m.kind === "fon");
   const ref = fon[0] || models[0];
-  const rows = models.map((m) => {
-    const s = m.series.model, e = lastFull(m), n = s.length - 1;
-    return { name: m.label, kind: m.kind, start: m.dates[0], m1: ret(s, e - 1, e), m3: ret(s, e - 3, e), m6: ret(s, e - 6, e),
-      m12: ret(s, e - 12, e), tot: ret(s, 0, n), cagr: cagr(s, m.dates) };
-  });
-  const e = lastFull(ref), n = ref.dates.length - 1;
-  const bRows = BENCH.filter(([k]) => ref.series[k]).map(([k, label]) => {
-    const s = ref.series[k];
-    return { name: label, bench: true, start: ref.dates[0], m1: ret(s, e - 1, e), m3: ret(s, e - 3, e), m6: ret(s, e - 6, e),
-      m12: ret(s, e - 12, e), tot: ret(s, 0, n), cagr: cagr(s, ref.dates) };
-  });
+  const e = lastFull(ref);
   const lastMonth = ref.dates[e - 1];
+  const yr = lastMonth.slice(0, 4);
+  const per = (m, s, name, extra) => {
+    const eM = lastFull(m);
+    const y0 = m.dates.findIndex((d) => d.slice(0, 4) === yr);  // yılbaşından: yılın ilk ay noktasından
+    return { name, ...extra, m1: ret(s, eM - 1, eM), m3: ret(s, eM - 3, eM), m6: ret(s, eM - 6, eM), m12: ret(s, eM - 12, eM),
+      ytd: y0 >= 0 && y0 < eM ? ret(s, y0, eM) : null };
+  };
+  const rows = models.map((m) => per(m, m.series.model, m.label, { kind: m.kind }));
+  const bRows = BENCH.filter(([k]) => ref.series[k]).map(([k, label]) => per(ref, ref.series[k], label, { bench: true }));
 
   // Isı haritası: son 12 tamamlanmış ay
   const monthKeys = ref.dates.slice(Math.max(0, e - 12), e).map((d) => d.slice(0, 7));
@@ -129,25 +139,36 @@ function summaryPage(models, asOf, total) {
     ...BENCH.filter(([k]) => ref.series[k]).map(([k, label]) => ({ name: label, v: byMonth(ref, k) })),
   ];
 
+  // Birikimli grafik: son 12 ay; BES Öneri aynı ay noktalarına hizalanır (son, süren ay noktası ayrı tutulur)
+  const refY = lastYear(ref);
+  const pointKey = (d, i) => d[i].slice(0, 7) + (i === d.length - 1 && !isMonthStart(d, i) ? "+" : "");
+  const align = (m) => {
+    const y = lastYear(m);
+    const map = new Map(y.dates.map((_, i) => [pointKey(y.dates, i), y.series.model[i]]));
+    const v = refY.dates.map((_, i) => map.get(pointKey(refY.dates, i)) ?? null);
+    const b = v.find((x) => x != null);
+    return v.map((x) => (x == null || !b ? null : (x / b) * 100));
+  };
+  const colors = { guvenli: "#0b7a45", dengeli: "#1f5fbf", atak: "#db2777", bes: "#0891b2" };
+
   const tr = (r) => `<tr class="${r.bench ? "mr-bench" : "mr-self"}">
       <td><b>${esc(r.name)}</b>${r.kind === "bes" ? ' <span class="mr-tag">BES</span>' : ""}</td>
       ${[r.m1, r.m3, r.m6, r.m12].map((v) => `<td class="r num ${tone(v)}">${pctS(v)}</td>`).join("")}
-      <td class="r num ${tone(r.tot)}"><b>${pctS(r.tot)}</b></td><td class="r num">${pctS(r.cagr)}</td><td class="r dim">${monthLabel(r.start)}</td></tr>`;
+      <td class="r num ${tone(r.ytd)}"><b>${pctS(r.ytd)}</b></td></tr>`;
 
   return `<article class="rp-page">
     ${cover("AYLIK RAPOR", "Model Performans Raporu",
-      `Güvenli · Dengeli · Atak fon modelleri ve BES Öneri · ${monthLong(lastMonth)} sonu itibarıyla · PPF, TÜFE, altın, dolar ve S&P 500 ile`)}
+      `Güvenli · Dengeli · Atak fon modelleri ve BES Öneri · ${monthLong(lastMonth)} sonu itibarıyla son 12 ay · PPF, TÜFE, altın, dolar ve S&P 500 ile`)}
     <div class="rp-kpis">${rows.map((r) => `<div class="${tone(r.m1)}"><span>${esc(r.name)} · ${MONTHS_LONG[+lastMonth.slice(5, 7) - 1]}</span>
-      <b>${pctS(r.m1)}</b><em>Başlangıçtan ${pctS(r.tot)}</em></div>`).join("")}</div>
+      <b>${pctS(r.m1)}</b><em>Son 12 ayda ${pctS(r.m12)}</em></div>`).join("")}</div>
 
     <section class="rp-block">
-      <h3><span class="rp-dot brand"></span>Dönemsel getiriler (tamamlanmış aylar; toplam ve yıllık bugüne kadar)</h3>
+      <h3><span class="rp-dot brand"></span>Dönemsel getiriler (tamamlanmış aylar)</h3>
       <table class="rp-table mr-sum">
         <thead><tr><th>Model / kıyas</th><th class="r">${MONTHS_LONG[+lastMonth.slice(5, 7) - 1]}</th><th class="r">3 ay</th><th class="r">6 ay</th><th class="r">12 ay</th>
-          <th class="r">Toplam</th><th class="r">Yıllık</th><th class="r">Başlangıç</th></tr></thead>
+          <th class="r">${yr} yılbaşından</th></tr></thead>
         <tbody>${rows.map(tr).join("")}${bRows.map(tr).join("")}</tbody>
       </table>
-      <p class="mr-note">Kıyas satırları fon modellerinin dönemine (${monthLabel(ref.dates[0])} – bugün) göredir. BES Öneri ${monthLabel(models.find((m) => m.kind === "bes")?.dates[0] || ref.dates[0])} başından beri izlenir; toplamı kendi sayfasındaki kıyaslarla karşılaştırın.</p>
     </section>
 
     <section class="rp-block">
@@ -159,21 +180,21 @@ function summaryPage(models, asOf, total) {
     </section>
 
     <section class="rp-block">
-      <h3><span class="rp-dot brand"></span>Birikimli getiri · fon modelleri ve kıyaslar (${monthLabel(ref.dates[0])} = 100)</h3>
-      ${chart(ref.dates, [
-        ...fon.map((m, i) => ({ name: m.label, v: m.series.model, color: ["#0b7a45", "#1f5fbf", "#db2777"][i % 3], w: 2.2 })),
-        ...BENCH.filter(([k]) => ref.series[k]).map(([k, l, c]) => ({ name: l.replace(" ortalaması", ""), v: ref.series[k], color: c, dash: k === "ppf" })),
+      <h3><span class="rp-dot brand"></span>Birikimli getiri · son 12 ay (${monthLabel(refY.dates[0])} = 100)</h3>
+      ${chart(refY.dates, [
+        ...models.map((m) => ({ name: m.label, v: m === ref ? refY.series.model : align(m), color: colors[m.key] || MODEL_COLOR, w: 2.2 })),
+        ...BENCH.filter(([k]) => refY.series[k]).map(([k, l, c]) => ({ name: l.replace(" ortalaması", ""), v: refY.series[k], color: c, dash: k === "ppf" })),
       ], 200)}
     </section>
 
     <section class="rp-block">
-      <h3><span class="rp-dot brand"></span>Hangi model hangi kıyası geçti? (başlangıçtan bugüne, toplam getiri farkı)</h3>
+      <h3><span class="rp-dot brand"></span>Hangi model hangi kıyası geçti? (son 12 ay, toplam getiri farkı)</h3>
       <table class="rp-table mr-beat">
         <thead><tr><th>Model</th>${BENCH.filter(([k]) => ref.series[k]).map(([, l]) => `<th class="r">${esc(l)}</th>`).join("")}</tr></thead>
         <tbody>${models.map((m) => {
-          const n2 = m.dates.length - 1, t = ret(m.series.model, 0, n2);
+          const y = lastYear(m), n2 = y.dates.length - 1, t = ret(y.series.model, 0, n2);
           return `<tr><td><b>${esc(m.label)}</b></td>${BENCH.filter(([k]) => ref.series[k]).map(([k]) => {
-            const d = t == null || ret(m.series[k], 0, n2) == null ? null : t - ret(m.series[k], 0, n2);
+            const b = ret(y.series[k], 0, n2), d = t == null || b == null ? null : t - b;
             return `<td class="r num ${tone(d)}">${d == null ? "—" : `${d >= 0 ? "✓ " : "✗ "}${ptsS(d)}`}</td>`;
           }).join("")}</tr>`;
         }).join("")}</tbody>
@@ -185,13 +206,14 @@ function summaryPage(models, asOf, total) {
 }
 
 function modelPage(m, asOf, pageNo, total) {
-  const rows = months(m);
-  const full = rows.filter((r) => !r.partial);
-  const s = m.series.model, n = s.length - 1;
-  const tot = ret(s, 0, n), yr = cagr(s, m.dates);
-  const pos = full.filter((r) => r.r.model > 0).length;
-  const best = full.reduce((a, r) => (r.r.model > (a?.r.model ?? -Infinity) ? r : a), null);
-  const worst = full.reduce((a, r) => (r.r.model < (a?.r.model ?? Infinity) ? r : a), null);
+  const rows = months(m).filter((r) => r.start.slice(0, 7) >= TABLE_FROM);
+  const y = lastYear(m);
+  const yFull = months(y).filter((r) => !r.partial);
+  const s = y.series.model, n = s.length - 1;
+  const tot = ret(s, 0, n);
+  const pos = yFull.filter((r) => r.r.model > 0).length;
+  const best = yFull.reduce((a, r) => (r.r.model > (a?.r.model ?? -Infinity) ? r : a), null);
+  const worst = yFull.reduce((a, r) => (r.r.model < (a?.r.model ?? Infinity) ? r : a), null);
   const bench = BENCH.filter(([k]) => m.series[k]);
   const isBes = m.kind === "bes";
   const desc = {
@@ -202,39 +224,39 @@ function modelPage(m, asOf, pageNo, total) {
   }[m.key] || "";
 
   const cmp = bench.map(([k, label, color]) => {
-    const bt = ret(m.series[k], 0, n), diff = tot == null || bt == null ? null : tot - bt;
-    const beat = full.filter((r) => r.r.model != null && r.r[k] != null && r.r.model > r.r[k]).length;
+    const bt = ret(y.series[k], 0, n), diff = tot == null || bt == null ? null : tot - bt;
+    const beat = yFull.filter((r) => r.r.model != null && r.r[k] != null && r.r.model > r.r[k]).length;
     return { k, label, color, bt, diff, beat };
   });
   const maxDiff = Math.max(...cmp.map((c) => Math.abs(c.diff || 0)), 1);
 
   return `<article class="rp-page">
     ${cover(isBes ? "BES MODELİ" : "FON MODELİ", `${esc(m.label)}${isBes ? "" : " Model"} · Aylık Performans`,
-      `${dateTR(m.dates[0])} – ${dateTR(m.dates[n])} · ${full.length} tamamlanmış ay · ${esc(desc)}`)}
+      `Son 12 ay: ${dateTR(y.dates[0])} – ${dateTR(y.dates[n])} · ${esc(desc)}`)}
     <div class="rp-kpis">
-      <div class="${tone(tot)}"><span>Toplam getiri</span><b>${pctS(tot)}</b><em>Yıllık bileşik ${pctS(yr)}</em></div>
-      <div><span>Pozitif ay</span><b>${pos} / ${full.length}</b><em>%${num((pos / Math.max(full.length, 1)) * 100, 0)} isabet</em></div>
+      <div class="${tone(tot)}"><span>Son 12 ay getirisi</span><b>${pctS(tot)}</b><em>${monthLong(y.dates[0])} başından</em></div>
+      <div><span>Pozitif ay · son 12 ay</span><b>${pos} / ${yFull.length}</b><em>%${num((pos / Math.max(yFull.length, 1)) * 100, 0)} isabet</em></div>
       <div class="up"><span>En iyi ay</span><b>${pctS(best?.r.model)}</b><em>${best ? monthLong(best.start) : "—"}</em></div>
       <div class="down"><span>En kötü ay</span><b>${pctS(worst?.r.model)}</b><em>${worst ? monthLong(worst.start) : "—"}</em></div>
     </div>
 
     <div class="rp-two mr-two">
       <section class="rp-block">
-        <h3><span class="rp-dot brand"></span>Birikimli getiri (başlangıç = 100)</h3>
-        ${chart(m.dates, modelLines(m), 210, 470)}
+        <h3><span class="rp-dot brand"></span>Birikimli getiri · son 12 ay (${monthLabel(y.dates[0])} = 100)</h3>
+        ${chart(y.dates, modelLines(y), 210, 470)}
       </section>
       <section class="rp-block">
-        <h3><span class="rp-dot brand"></span>Kıyaslara karşı toplam fark</h3>
+        <h3><span class="rp-dot brand"></span>Kıyaslara karşı fark · son 12 ay</h3>
         <div class="mr-cmp">${cmp.map((c) => `<div class="mr-cmp-row">
           <span class="mr-cmp-name"><i style="background:${c.color}"></i>${esc(c.label)}</span>
           <span class="rp-cat-track"><span class="rp-cat-mid"></span><i class="${(c.diff ?? 0) >= 0 ? "up" : "down"}" style="width:${((Math.abs(c.diff || 0) / maxDiff) * 50).toFixed(1)}%"></i></span>
           <span class="num ${tone(c.diff)}"><b>${ptsS(c.diff)}</b></span>
-          <span class="mr-cmp-sub">kıyas ${pctS(c.bt)} · ${c.beat}/${full.length} ay önde</span></div>`).join("")}</div>
+          <span class="mr-cmp-sub">kıyas ${pctS(c.bt)} · ${c.beat}/${yFull.length} ay önde</span></div>`).join("")}</div>
       </section>
     </div>
 
     <section class="rp-block">
-      <h3><span class="rp-dot brand"></span>Aylık getiriler (%) · model ve kıyaslar</h3>
+      <h3><span class="rp-dot brand"></span>Aylık getiriler (%) · model ve kıyaslar · ${monthLong(TABLE_FROM + "-01")} başından bugüne</h3>
       <table class="rp-table mr-month ${rows.length > 28 ? "mr-dense" : ""}">
         <thead><tr><th>Ay</th><th class="r">${esc(m.label)}</th>${bench.map(([, l]) => `<th class="r">${esc(l)}</th>`).join("")}<th class="r">PPF'ye fark</th><th>Ayın en iyisi</th></tr></thead>
         <tbody>${rows.slice().reverse().map((r) => {

@@ -78,10 +78,10 @@ export async function render(app, _route, store) {
 
   app.innerHTML = `
   <section class="method-intro card">
-    <h2>Model Portföyler <span class="model-tag">2 aylık dönem</span></h2>
+    <h2>Model Portföyler <span class="model-tag">aylık dönem</span></h2>
     <p>Üç risk profilinde, son <b>1-2-3 yılda vergi sonrası istikrarlı</b> getiri vermiş, TEFAS Quant notu ve risk bayrakları temiz,
-      getirisi tek bir sıçramaya dayanmayan ${R.minFunds}–${R.maxFunds} fonluk ağırlıklı sepetler. Sepetler <b>2 ayda bir</b>
-      (çift ayların son işlem günü) kurulur ve dönem boyunca sabit kalır; iyi kalan fonlar yeni dönemde de sepette kalabilir, ağırlıklar yeniden hesaplanır.
+      getirisi tek bir sıçramaya dayanmayan ${R.minFunds}–${R.maxFunds} fonluk ağırlıklı sepetler. Sepetler <b>her ay</b>
+      (ayın son işlem günü) yeniden kurulur ve ay boyunca sabit kalır; iyi kalan fonlar yeni ayda da sepette kalabilir, yalnızca ağırlıkları değişebilir.
       Köklü kurucuların (devlet bankaları ve büyük özel bankaların portföy şirketleri) fonlarına öncelik verilir.</p>
     <p class="dim">Son kurulum: ${dateTR(m.profiles[state.profile].formed)} · Sonraki yenileme: <b>${dateTR(m.nextRebalance)}</b> · Veri: ${dateTR(m.asOf)}</p>
   </section>
@@ -176,7 +176,7 @@ export async function render(app, _route, store) {
             <td>${pct(p.bench["1y"]?.tufe, 1)}</td><td>${pct(p.bench["2y"]?.tufe, 1)}</td><td>${pct(p.bench["3y"]?.tufe, 1)}</td><td colspan="6"></td></tr>
         </tfoot>
       </table></div>
-      ${warnN ? `<div class="notice warn"><b>${warnN} fonda dönem içinde uyarı var.</b> Sepet 2 aylık dönem boyunca sabit kalır; uyarılar bir sonraki
+      ${warnN ? `<div class="notice warn"><b>${warnN} fonda dönem içinde uyarı var.</b> Sepet ay boyunca sabit kalır; uyarılar bir sonraki
         kurulumda (${dateTR(m.nextRebalance)}) değerlendirilir ve bayraklı fon o zaman sepete alınmaz.</div>` : ""}
     </section>
 
@@ -188,8 +188,8 @@ export async function render(app, _route, store) {
       <p class="chart-note dim" id="mdlRange"></p>
       <div class="table-wrap"><table id="mdlStats"></table></div>
       <div class="notice">Her dönem başında sepet <b>yalnızca o gün bilinen verilerle</b> (o günkü not, bayraklar, fiyatlar) aynı kurallarla yeniden kuruldu,
-        ertesi işlem günü (T+1) alındı ve 2 ay tutuldu. Getiriler stopaj öncesidir (kıyaslarla aynı). "En kötü / en iyi ay" sütunu 2 aylık dönemleri gösterir.
-        Model 3 yıllık geçmiş istediği için ${dateTR(bt.dates[0])} tarihinde başlıyor; ${p.history.length} dönemlik kısa bir test, sonuçlar dikkatle okunmalı.</div>
+        ertesi işlem günü (T+1) alındı ve bir ay tutuldu. Getiriler stopaj öncesidir (kıyaslarla aynı).
+        Model 3 yıllık geçmiş istediği için ${dateTR(bt.dates[0])} tarihinde başlıyor; ${p.history.length} aylık kısa bir test, sonuçlar dikkatle okunmalı.</div>
     </section>` : ""}
 
     ${months.length ? `<section class="card">
@@ -227,11 +227,11 @@ export async function render(app, _route, store) {
         const d = bt.dates.slice(i0);
         lineChart(app.querySelector("#mdlChart"), keys.map((k) => ({ name: k === "model" ? `${p.label} model` : LABELS[k] || k, d, v: windowed(bt.series[k], i0), color: COLORS[k] })),
           { base: 100, height: 300, format: (v) => num(v, 0) });
-        app.querySelector("#mdlRange").textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · 2 ayda bir yeniden kurulum`;
+        app.querySelector("#mdlRange").textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · aylık yeniden kurulum`;
         const ppfW = bt.series.ppf ? windowed(bt.series.ppf, i0) : null;
         app.querySelector("#mdlStats").innerHTML = `
           <thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th>
-            <th>En kötü / en iyi dönem</th><th>Pozitif dönem</th><th>PPF'yi geçen dönem</th></tr></thead>
+            <th>En kötü / en iyi ay</th><th>Pozitif ay</th><th>PPF'yi geçen ay</th></tr></thead>
           <tbody>${keys.map((k, i) => statRow(k === "model" ? `${p.label} model` : LABELS[k] || k, windowStats(d, windowed(bt.series[k], i0), k === "ppf" ? null : ppfW), i === 0 ? "is-self" : "")).join("")}</tbody>`;
       };
       app.querySelector("#mdlPeriod").addEventListener("click", (e) => {

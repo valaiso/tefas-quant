@@ -6,8 +6,8 @@ dayanmayan az sayıda fondan kompakt bir sepet kurmak.
 
 Dönem
 -----
-Sepetler 2 ayda bir (çift ayların son işlem günü) kurulur, ertesi işlem günü
-(T+1) alınır ve 2 ay tutulur. Yeni dönemde iyi kalan fonlar sepette kalır
+Sepetler her ay (ayın son işlem günü) kurulur, ertesi işlem günü (T+1) alınır
+ve bir ay tutulur. Yeni dönemde iyi kalan fonlar sepette kalır
 (mevcut fona küçük süreklilik avantajı verilir); ağırlıklar yeniden hesaplanır.
 
 Adımlar (her profil için)
@@ -49,7 +49,7 @@ OK_GRADES = ("A+", "A", "B")
 MAX_CORR = 0.85
 MIN_W, MAX_W, STEP = 0.05, 0.35, 0.05
 SPIKE_SHARE, SPIKE_Z, SPIKE_DAY = 0.40, 2.5, 0.15
-PERIOD_MONTHS = 2
+PERIOD_MONTHS = 1
 BANK_BONUS = 2.0
 STAY_BONUS = 3.0
 PPF_STOPAJ = 0.175
@@ -415,7 +415,7 @@ def pick(m: pd.DataFrame, wk: pd.DataFrame | None, profile: dict, prev: list[str
 
 
 def formation_days(dates: pd.DatetimeIndex) -> list[int]:
-    """Çift ayların son işlem günleri (Şubat, Nisan, Haziran, Ağustos, Ekim, Aralık)."""
+    """Yeniden kurulum günleri: her PERIOD_MONTHS ayda bir, ayın son işlem günü."""
     return [i for i in scoring.month_ends(dates) if dates[i].month % PERIOD_MONTHS == 0]
 
 
@@ -432,7 +432,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
     px = price.ffill()
     scores_at = {b["signal"]: b["scores"] for b in (baskets or []) if "scores" in b}
 
-    # 2 ayda bir kurulan sepetler (point-in-time), son kurulan = bugünkü sepet
+    # Her dönem kurulan sepetler (point-in-time), son kurulan = bugünkü sepet
     forms = [i for i in formation_days(dates) if i >= MIN_HISTORY and i + 1 < len(dates) and (not scores_at or i in scores_at)]
     history = {k: [] for k in PROFILES}
     last = {}
@@ -510,7 +510,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
                 spiky.append({"c": c, "n": funds.at[c, "name"] if c in funds.index else c, "k": row["category"],
                               "r1": _r(row["cagr_1y"]), "why": res["spiky"][c]})
 
-        # Geçmiş performans: her dönem T+1 alış, 2 ay tutuş
+        # Geçmiş performans: her dönem T+1 alış, bir sonraki kuruluma kadar tutuş
         rets, points, items = [], [], []
         for k, h in enumerate(hist):
             a = dates[h["i"] + 1]
@@ -565,7 +565,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
         y, mth = last_form.year, last_form.month + PERIOD_MONTHS
         if mth > 12:
             y, mth = y + 1, mth - 12
-        nxt = (pd.Timestamp(year=y, month=mth, day=1) + pd.offsets.MonthEnd(0)).strftime("%Y-%m-%d")
+        nxt = (pd.Timestamp(year=y, month=mth, day=1) + pd.offsets.BMonthEnd(0)).strftime("%Y-%m-%d")
     return {
         "asOf": dates[-1].strftime("%Y-%m-%d"),
         "nextRebalance": nxt,

@@ -372,24 +372,58 @@ const wsum = (basket, f) => {
   return tw ? xs.reduce((s, [w, v]) => s + w * v, 0) / tw : null;
 };
 
-function basketHtml(p, idp) {
+const BES_TONE = { koruyucu: "safe", dengeli: "mid", buyume: "risk" };
+
+/** Model Portföyler'deki profil kartlarıyla aynı düzen: her BES modeli için tıklanabilir kart. */
+function besCards(P, keys) {
+  return keys.map((k) => {
+    const p = P[k];
+    const st = p.backtest.available ? p.backtest.stats.model : null;
+    return `<button class="profile-card tone-${BES_TONE[k] || "mid"}" data-k="${k}" aria-pressed="${k === state.bprof}">
+      <span class="pc-label">${esc(p.label || k)}</span>
+      <span class="pc-main">${st ? pct(st.total, 1) : "—"}</span>
+      <span class="pc-sub">geçmiş test (${p.backtest.available ? dateTR(p.backtest.dates[0]) : "—"}'den) · en büyük düşüş ${st ? pct(st.mdd, 1) : "—"}</span>
+      <span class="pc-sub">${p.basket.length} fon · dönem başından ${pct(p.sinceEntry, 2)}</span>
+    </button>`;
+  }).join("");
+}
+
+// Kıyas serisinin son n ayda birikimli getirisi (model geçmiş testinin noktalarından)
+const benchCum = (bt, key, months) => {
+  const s = bt?.series?.[key];
+  if (!s) return null;
+  const i0 = startIndex(bt.dates, months);
+  const a = s[i0], b = s[s.length - 1];
+  return a && b && bt.dates.length - 1 > i0 ? (b / a - 1) * 100 : null;
+};
+
+function basketHtml(p, idp, m) {
   const bt = p.backtest;
   const months = p.history.map((h) => h.date);
-  const bar = p.basket.map((b, i) => `<span style="width:${b.w}%;background:${SLICE[i % SLICE.length]}">${esc(b.c)} %${b.w}</span>`).join("");
+  const ust = bt.available ? bt.stats : null;
+  const ppfBeat = ust ? ust.model.total - ust.ppf.total : null;
+  const bar = p.basket.map((b, i) => `<span style="width:${b.w}%;background:${SLICE[i % SLICE.length]}" title="${esc(b.c)} %${b.w}">${esc(b.c)} %${b.w}</span>`).join("");
   const tags = (b) => (b.fx ? `<span class="fx-tag">YABANCI</span>` : "") + (b.tk ? `<span class="fx-tag">TEKNOLOJİ</span>` : "")
     + (b.fill ? `<span class="ax-tag" title="3 yıllık getirisi TÜFE'yi geçen fon 3'ten az olduğu için TÜFE'ye en yakın fonla tamamlandı">TÜFE ALTI</span>` : "")
     + (b.bf ? `<span class="ax-tag" title="BEFAS'tan alınamaz (${esc(b.bf)})">ŞİRKET İÇİ</span>` : "");
+  const w1 = wsum(p.basket, (b) => b.r["1y"]), w2 = wsum(p.basket, (b) => cum(b.r2, 2)), w3 = wsum(p.basket, (b) => cum(b.r["3y"], 3));
+  const vol = wsum(p.basket, (b) => b.vol);
+  const warnN = p.basket.filter((b) => b.warn).length;
   return `
+  <section class="card">
+    <div class="card-head"><h2>${esc(p.label)} sepet</h2>
+      <span class="sub">${dateTR(p.formed)} kuruldu · ${dateTR(p.entry)} alış · sonraki yenileme ${dateTR(m.nextRebalance)}</span></div>
+    <p class="dim">${esc(p.desc || "")}</p>
     <div class="kpi-row">
-      <div><span>Dönem başından</span><b class="${(p.sinceEntry ?? 0) >= 0 ? "up" : "down"}">${pct(p.sinceEntry, 2)}</b></div>
-      <div><span>1 yıl</span><b>${pct(wsum(p.basket, (b) => b.r["1y"]), 1)}</b></div>
-      <div><span>2 yıl</span><b>${pct(wsum(p.basket, (b) => cum(b.r2, 2)), 1)}</b></div>
-      <div><span>3 yıl</span><b>${pct(wsum(p.basket, (b) => cum(b.r["3y"], 3)), 1)}</b></div>
-      <div><span>Kuruluş</span><b>${dateTR(p.formed)}</b></div>
+      <div><span>Dönem başından bugüne</span><b class="${(p.sinceEntry ?? 0) >= 0 ? "up" : "down"}">${pct(p.sinceEntry, 2)}</b></div>
+      <div><span>1 yıl</span><b>${pct(w1, 1)}</b></div>
+      <div><span>2 yıl</span><b>${pct(w2, 1)}</b></div>
+      <div><span>3 yıl</span><b>${pct(w3, 1)}</b></div>
+      <div><span>Ağırlıklı oynaklık</span><b>%${num(vol, 1)}</b></div>
     </div>
     <div class="weight-bar">${bar}</div>
     <div class="table-wrap"><table class="model-table">
-      <thead><tr><th class="left">Fon</th><th class="left">Şirket</th><th class="left">Varlık sınıfı</th><th>Ağırlık</th><th>Puan</th><th>Not</th>
+      <thead><tr><th class="left">Fon</th><th class="left">Şirket</th><th class="left">Varlık sınıfı</th><th>Ağırlık</th><th title="Model puanı (0-100)">Puan</th><th>Not</th>
         <th title="Son 1 yılın getirisi">1 yıl</th><th title="Son 2 yılın birikimli getirisi">2 yıl</th><th title="Son 3 yılın birikimli getirisi">3 yıl</th>
         <th title="12 aylık dönemlerin kaçında TÜFE'yi geçti">TÜFE'yi geçen 12A</th><th title="Son 1 yılda zirveden en büyük düşüş">Maks. düşüş (1 yıl)</th><th>Oynaklık</th><th class="left">Bugünkü durum</th></tr></thead>
       <tbody>${p.basket.map((b, i) => `<tr>
@@ -400,15 +434,38 @@ function basketHtml(p, idp) {
         <td>${pct(b.r["1y"], 1)}</td><td>${pct(cum(b.r2, 2), 1)}</td><td>${pct(cum(b.r["3y"], 3), 1)}</td>
         <td>%${num(b.realWin, 0)}</td><td class="down">${pct(b.mdd1 ?? b.mdd, 1)}</td><td>%${num(b.vol, 1)}</td>
         <td class="left">${b.warn ? `<span class="warn-tag">${esc(b.warn)}</span>` : `<span class="dim">—</span>`}</td></tr>`).join("")}</tbody>
+      <tfoot>
+        <tr class="is-self"><td class="left"><b>Sepet (ağırlıklı)</b></td><td></td><td></td><td><b>%100</b></td><td></td><td></td>
+          <td><b>${pct(w1, 1)}</b></td><td><b>${pct(w2, 1)}</b></td><td><b>${pct(w3, 1)}</b></td><td colspan="4"></td></tr>
+        <tr><td class="left dim">PPF ortalaması (yatırım fonu)</td><td></td><td></td><td></td><td></td><td></td>
+          <td>${pct(benchCum(bt, "ppf", 12), 1)}</td><td>${pct(benchCum(bt, "ppf", 24), 1)}</td><td>${pct(benchCum(bt, "ppf", 36), 1)}</td><td colspan="4"></td></tr>
+        <tr><td class="left dim">TÜFE</td><td></td><td></td><td></td><td></td><td></td>
+          <td>${pct(benchCum(bt, "tufe", 12), 1)}</td><td>${pct(benchCum(bt, "tufe", 24), 1)}</td><td>${pct(benchCum(bt, "tufe", 36), 1)}</td><td colspan="4"></td></tr>
+      </tfoot>
     </table></div>
-    ${bt.available ? `<div class="card-head sub-head"><h3>Geçmişte</h3>
-        <div class="seg" id="${idp}Period">${PERIODS.map(([k, l]) => `<button data-p="${k}" aria-pressed="${k === state.period}">${l}</button>`).join("")}</div></div>
-      <div class="chart" id="${idp}Chart"></div>
-      <p class="chart-note dim" id="${idp}Range"></p>
-      <div class="table-wrap"><table id="${idp}Stats"></table></div>` : ""}
-    ${months.length ? `<div class="card-head sub-head"><h3>Geçmiş dönem dağılımları</h3>
-        <select id="${idp}Month">${months.slice().reverse().map((d) => `<option value="${d}">${dateTR(d)}</option>`).join("")}</select></div>
-      <div id="${idp}Hold"></div>` : ""}`;
+    ${warnN ? `<div class="notice warn"><b>${warnN} fonda dönem içinde uyarı var.</b> Sepet 2 aylık dönem boyunca sabit kalır; uyarılar bir sonraki
+      kurulumda (${dateTR(m.nextRebalance)}) değerlendirilir.</div>` : ""}
+  </section>
+
+  ${bt.available ? `<section class="card">
+    <div class="card-head"><h2>${esc(p.label)} model geçmişte nasıl sonuç verdi?</h2>
+      <div class="seg" id="${idp}Period">${PERIODS.map(([k, l]) => `<button data-p="${k}" aria-pressed="${k === state.period}">${l}</button>`).join("")}</div></div>
+    <div class="chart" id="${idp}Chart"></div>
+    <p class="chart-note dim" id="${idp}Range"></p>
+    <div class="table-wrap"><table id="${idp}Stats"></table></div>
+    <div class="notice ${ppfBeat >= 0 ? "good" : ""}">${dateTR(bt.dates[0])}'den bu yana ${esc(p.label)} modeli ${pct(ust.model.total, 1)} getirdi;
+      PPF ortalaması (yatırım fonu) ${pct(ust.ppf?.total, 1)}, BEFAS'a açık tüm uygun fonların eşit sepeti ${pct(ust.universe?.total, 1)}, gram altın ${pct(ust.gold?.total, 1)},
+      TÜFE ${pct(ust.tufe?.total, 1)}. PPF'ye göre ${ppfBeat >= 0 ? "önde" : "geride"}: ${num(Math.abs(ppfBeat), 1)} puan.
+      Her dönem başında sepet yalnızca o gün bilinen verilerle kuruldu ve ertesi işlem günü alındı. PPF burada vergisiz gösteriliyor; normal hesapta para piyasası
+      fonu kazancından bugün %17,5 stopaj kesilir, BES'te birikim boyunca kesilmez ve devlet katkısı eklenir. 2024–2026'daki çok yüksek faiz döneminde
+      (PPF yılda %50–60) uzun vadeli fonların çoğu PPF'nin gerisinde kaldı; 2022–2023'te ise hisse ve altın PPF'yi çok geride bıraktı.</div>
+  </section>` : ""}
+
+  ${months.length ? `<section class="card">
+    <div class="card-head"><h2>Geçmiş dönem sepetleri</h2>
+      <select id="${idp}Month">${months.slice().reverse().map((d) => `<option value="${d}">${dateTR(d)}</option>`).join("")}</select></div>
+    <div id="${idp}Hold"></div>
+  </section>` : ""}`;
 }
 
 function bindBasket(body, p, idp, label) {
@@ -462,28 +519,20 @@ async function renderModel(body) {
   const pkeys = Object.keys(P).filter((k) => P[k]);
   if (!pkeys.includes(state.bprof)) state.bprof = pkeys.includes("dengeli") ? "dengeli" : pkeys[0];
   const B = P[state.bprof];
-  const ust = B?.backtest.available ? B.backtest.stats : null;
-  const ppfBeat = ust ? ust.model.total - ust.ppf.total : null;
 
   body.innerHTML = `
-  <section class="card">
-    <div class="card-head"><h2>Uzun vadeli BES modelleri (BEFAS)</h2><span class="sub">2 ayda bir · son kurulum ${B ? dateTR(B.formed) : "—"} · sonraki ${dateTR(m.nextRebalance)}</span></div>
-    <div class="seg bes-prof" id="besProf">${pkeys.map((k) => `<button data-k="${k}" aria-pressed="${k === state.bprof}">${esc(P[k].label || k)}</button>`).join("")}</div>
-    ${B?.desc ? `<p class="bes-prof-desc"><b>${esc(B.label)}:</b> ${esc(B.desc)}</p>` : ""}
+  <section class="method-intro card">
+    <h2>Uzun vadeli BES modelleri <span class="model-tag">2 ayda bir · BEFAS</span></h2>
     <p><b>BEFAS</b> (Takasbank'ın emeklilik fonu platformu, Temmuz 2021'den beri) sayesinde hangi emeklilik şirketinde olursan ol, kendi şirketinin
       uygulamasından <b>başka şirketlerin fonlarını</b> da alabilirsin. İstisnalar (EGM): grup fonları, unvanında "yabancı" ibaresi olan fonlar,
-      para piyasası, katkı ve başlangıç fonları; bunlar yalnızca kendi şirketinin sözleşmesinde. Bu yüzden ana sepet, tüm şirketlerin
-      <b>BEFAS'a açık</b> fonları arasından kurulur; herkes kendi sözleşmesinden uygulayabilir.</p>
-    <p>5–10 yıllık birikim için: PPF benzeri faiz fonları alınmaz; 3 yılda enflasyonu (TÜFE) geçmiş, tek bir sıçramaya dayanmayan, notu ve risk bayrakları
-      temiz fonlar seçilir. Sepet varlık sınıfı başına (altın, yerli hisse, teknoloji-yabancı, çok varlıklı) en fazla ${R.perCat} ve şirket başına en fazla
-      ${R.perCompany} fon içerir; ağırlıklar <b>eşit</b> dağıtılır (tahmine dayalı ağırlıklar uzun vadede eşit ağırlığı genelde geçemez; DeMiguel, Garlappi ve Uppal, 2009).</p>
-    ${B ? basketHtml(B, "bf") : `<p class="dim">BEFAS sepeti için yeterli fon yok.</p>`}
-    ${ust ? `<div class="notice ${ppfBeat >= 0 ? "good" : ""}">${dateTR(B.backtest.dates[0])}'den bu yana ${esc(B.label)} modeli ${pct(ust.model.total, 1)} getirdi;
-      PPF ortalaması (yatırım fonu) ${pct(ust.ppf?.total, 1)}, BEFAS'a açık tüm uygun fonların eşit sepeti ${pct(ust.universe?.total, 1)}, gram altın ${pct(ust.gold?.total, 1)},
-      TÜFE ${pct(ust.tufe?.total, 1)}. PPF'ye göre ${ppfBeat >= 0 ? "önde" : "geride"}: ${num(Math.abs(ppfBeat), 1)} puan.
-      Not: PPF burada vergisiz gösteriliyor; normal hesapta para piyasası fonu kazancından bugün %17,5 stopaj kesilir, BES'te birikim boyunca kesilmez ve devlet katkısı eklenir.
-      2024–2026'daki çok yüksek faiz döneminde (PPF yılda %50–60) uzun vadeli fonların çoğu PPF'nin gerisinde kaldı; 2022–2023'te ise hisse ve altın PPF'yi çok geride bıraktı.</div>` : ""}
+      para piyasası, katkı ve başlangıç fonları. Bu yüzden üç model de tüm şirketlerin <b>BEFAS'a açık</b> fonlarından kurulur; herkes kendi sözleşmesinden uygulayabilir.
+      Sepetlerde varlık sınıfı başına en fazla ${R.perCat}, şirket başına en fazla ${R.perCompany} fon bulunur ve ağırlıklar <b>eşit</b> dağıtılır
+      (DeMiguel, Garlappi ve Uppal, 2009).</p>
+    <p class="dim">Son kurulum: ${B ? dateTR(B.formed) : "—"} · Sonraki yenileme: <b>${dateTR(m.nextRebalance)}</b> · Veri: ${dateTR(m.asOf)}</p>
   </section>
+
+  <div class="profile-cards" id="besProf">${besCards(P, pkeys)}</div>
+  ${B ? basketHtml(B, "bf", m) : `<div class="card empty"><h3>Bu model için yeterli fon yok</h3></div>`}
 
   ${comparatorHtml(loadCmp(), cacheFunds.funds.filter((f) => !f.ax))}
 
@@ -515,7 +564,7 @@ async function renderModel(body) {
 
   if (B) bindBasket(body, B, "bf", `${B.label || "BEFAS"} BES modeli`);
   body.querySelector("#besProf")?.addEventListener("click", (e) => {
-    const b = e.target.closest("button");
+    const b = e.target.closest(".profile-card");
     if (!b || b.dataset.k === state.bprof) return;
     state.bprof = b.dataset.k;
     renderModel(body);

@@ -61,7 +61,6 @@ export async function render(app, _route, store) {
       <div><dt>Gözlem</dt><dd>Kaç A+ alımının sonucu ölçülebildi · bu alımların kaç farklı aydan geldiği. Uzun vadelerde ölçüm için
         yeterli süre geçmiş aylar azaldığından gözlem düşer; az gözlemli sonuçlar daha az güvenilirdir.</dd></div>
     </dl>
-    <div class="btn-row"><a class="btn" href="#/simulasyon">◫ Portföy Simülasyonu: aylık A+ sepetinin geçmişi →</a></div>
   </section>
 
   <div class="grid bt-grid">${hs.map((h) => kpi(h, bt.overall[h])).join("")}</div>

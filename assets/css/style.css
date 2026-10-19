@@ -217,7 +217,8 @@ select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
 
 .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; font-size: .86rem; color: var(--text-dim); user-select: none; }
-.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch { position: relative; }
+#app .switch input, .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; min-width: 0; }
 .switch-ui { width: 34px; height: 20px; border-radius: 999px; background: var(--border); position: relative; transition: background .16s; flex: none; }
 .switch-ui::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .16s; }
 .switch input:checked + .switch-ui { background: var(--accent); }
@@ -524,10 +525,10 @@ table.bt-grades td { white-space: nowrap; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
-  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Değer, Model Rapor ve
-     Portföy Karşılaştırması yalnızca masaüstünde */
+  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Değer, ve Model Raporu
+     yalnızca masaüstünde */
   .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"], .tab[data-view="deger"],
-  .tab[data-view="modelrapor"], .tab[data-view="portfoykarsilastir"] { display: none; }
+  .tab[data-view="modelrapor"] { display: none; }
   /* Telefonda sol üstte sayfa etiketi yerine logo ve marka adı */
   .topbar-logo { display: block; flex: none; margin-right: -6px; }
   .topbar-brand { display: block; }
@@ -671,9 +672,9 @@ table.bt-grades td { white-space: nowrap; }
   color: var(--rp-dim); border-top: 1px solid var(--rp-line); background: var(--rp-soft); }
 .rp-footer span:last-child { white-space: nowrap; font-weight: 700; }
 
-/* BES model sekmeleri */
-.bes-prof { margin: 4px 0 10px; }
-.bes-prof-desc { margin: 0 0 12px; }
+/* BES modelleri: Model Portföyler düzeni, kartlar arası boşluk */
+#besProf { margin: 16px 0; }
+#besProf ~ .card, #besProf ~ section { margin-top: 16px; }
 
 /* Quant / Backtest terimleri */
 .bt-terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 18px; margin: 14px 0 4px; }
@@ -774,6 +775,10 @@ table.bt-grades td { white-space: nowrap; }
 .mr-month.mr-dense td { padding-top: 1.6px; padding-bottom: 1.6px; font-size: 9px; }
 
 @media (max-width: 760px) {
+  /* Telefonda yatay taşma: anahtar-değer tabloları ve filtre alanları ekrana sığsın */
+  table.kv { table-layout: fixed; width: 100%; }
+  table.kv th, table.kv td { white-space: normal; overflow-wrap: anywhere; }
+  #app input, #app select { max-width: 100%; min-width: 0; }
   .rp-page { aspect-ratio: auto; font-size: 10px; }
   .rp-kpis { grid-template-columns: 1fr 1fr; padding: 12px 14px 4px; }
   .rp-block, .rp-cover, .rp-footer { padding-left: 14px; padding-right: 14px; }

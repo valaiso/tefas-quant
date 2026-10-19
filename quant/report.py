@@ -47,4 +47,12 @@ def build(mdl: dict, bes_model: dict | None, bench: pd.DataFrame) -> dict:
         e = _entry("bes", "BES Öneri", "bes", mo["dates"], mo["model"], bench)
         if e:
             models.append(e)
-    return {"asOf": mdl.get("asOf"), "models": models}
+    # Üç BES modeli (Koruyucu / Dengeli / Büyüme): Modellerle Karşılaştır sayfası için ayrı liste
+    bes_profiles = []
+    for key, p in ((bes_model or {}).get("profiles") or {}).items():
+        mo = (p.get("backtest") or {}).get("monthly")
+        if mo:
+            e = _entry(f"bes_{key}", f"BES {p.get('label', key)}", "besprof", mo["dates"], mo["model"], bench)
+            if e:
+                bes_profiles.append(e)
+    return {"asOf": mdl.get("asOf"), "models": models, "besProfiles": bes_profiles}

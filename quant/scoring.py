@@ -47,7 +47,8 @@ def adjust_splits(panel: dict[str, pd.DataFrame]) -> list[dict]:
     Bölünmede fon büyüklüğü değişmez; fiyat 10'un bir kuvvetine bölünür, pay
     adedi aynı oranda artar (ör. İş Portföy TI2: 1003,6 -> 0,102, pay ×10.000).
     Düzeltilmezse -%99,99 sahte getiri oluşur. Gerçek çöküşte (ör. Pardus,
-    Ekim 2026) pay adedi değişmez, büyüklük de çöker: o durum düzeltilmez.
+    Ekim 2026) pay adedi değişmez, büyüklük de çöker: o durum düzeltilmez. Pay adedi ve büyüklük
+    çökerken fiyatın 5 katından fazla sıçradığı yapısal kırılmalar da geriye doğru ölçeklenir.
     """
     price, shares, size = panel["price"], panel["shares"], panel["size"]
     ratio = price / price.shift(1)
@@ -57,10 +58,18 @@ def adjust_splits(panel: dict[str, pd.DataFrame]) -> list[dict]:
     for (day, code), r in candidates.items():
         i = price.index.get_loc(day)
         k = 10 ** round(np.log10(1 / r))           # bölünme oranı: 10, 100, 1000, ...
-        if abs(np.log10(1 / r) - np.log10(k)) > 0.05:
-            continue
         sh_ratio = shares[code].iloc[i] / shares[code].iloc[i - 1]
         size_ratio = size[code].iloc[i] / size[code].iloc[i - 1]
+        if r > 5 and sh_ratio < 0.2 and not (0.5 < size_ratio / r < 2):
+            # Yapısal kırılma (ör. OSF Eylül 2025): pay adedi ve büyüklük çökerken fiyat sıçrar; bu bir piyasa
+            # getirisi değildir (fon yeniden yapılandırılmış / boşalmıştır). Önceki fiyatlar sıçrama oranıyla
+            # ölçeklenir, böylece kırılmayı kapsayan dönem getirileri sahte yükselişi içermez.
+            before = price.index[:i]
+            price.loc[before, code] = price.loc[before, code] * r
+            splits.append({"code": code, "date": day.strftime("%Y-%m-%d"), "factor": round(float(1 / r), 6), "kind": "kırılma"})
+            continue
+        if abs(np.log10(1 / r) - np.log10(k)) > 0.05:
+            continue
         if not (0.7 < sh_ratio / k < 1.3 and 0.8 < size_ratio < 1.25):
             continue
         before = price.index[:i]

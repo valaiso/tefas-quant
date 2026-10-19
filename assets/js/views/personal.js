@@ -1,4 +1,4 @@
-// Kişisel portföy: Analiz'deki gerçek portföy (Portföy Özeti, Portföy Karşılaştırması, A4 Portföy Raporu).
+// Kişisel portföy: Analiz'deki gerçek portföy (Modellerle Karşılaştır sayfası ve A4 Portföy Raporu).
 //
 // Portföy herkese açık siteye hiç yazılmaz. Sayfa açıldığında tarayıcıda okunur:
 //   1. Analiz hesabı: aynı kökende (valaiso.github.io) Analiz'in Supabase oturumu paylaşılır,
@@ -7,7 +7,7 @@
 //   3. Aylık e-postada CI, portföyü sayfaya window.__TQ_PORTFOLIO__ olarak verir.
 // Pozisyonlar Analiz Panel'in kaydettiği son aylık fotoğraftan (monthlySnapshots), fiyat geçmişleri
 // Analiz'in yayımladığı dosyalardan gelir. Karşılaştırma bugünkü pozisyonları geriye doğru tutar.
-import { esc, num, dateTR, monthLabel, codeChip } from "../util.js";
+import { esc, num, dateTR, monthLabel } from "../util.js";
 import { lineChart } from "../chart.js";
 import * as R from "./modelreport.js";
 import * as PR from "../portfolio-report.js";
@@ -16,11 +16,12 @@ const ANALIZ = new URL("/Analiz/", "https://valaiso.github.io").href;
 const SUPABASE_URL = "https://jqmfvinbzgqyitqquzdc.supabase.co";
 const SUPABASE_KEY = "sb_publishable_uw979hCwS6xyLRTexQX55A_ZqgWidDs";  // tarayıcı anahtarı; veriyi RLS korur
 const LOCAL_KEY = "tefas-portfoy-v1";
-const GROUP_COLORS = { Fon: "#1f5fbf", Hisse: "#db2777", ETF: "#7c3aed", Kripto: "#c58b12", Nakit: "#64748b", Diğer: "#0891b2" };
-const MODEL_COLORS = { guvenli: "#0b7a45", dengeli: "#1f5fbf", atak: "#db2777", bes: "#0891b2" };
+const MODEL_COLORS = { guvenli: "#0b7a45", dengeli: "#1f5fbf", atak: "#db2777", bes: "#0891b2",
+  bes_koruyucu: "#64748b", bes_dengeli: "#0891b2", bes_buyume: "#7c2d12" };
 const PORT_COLOR = "#0b2a5b";
 // Ekrandaki grafik (koyu / açık tema): lacivert ve mavi koyu zeminde kayboluyordu
-const SCREEN_COLORS = { guvenli: "#10b981", dengeli: "#f59e0b", atak: "#ec4899", bes: "#06b6d4" };
+const SCREEN_COLORS = { guvenli: "#10b981", dengeli: "#f59e0b", atak: "#ec4899", bes: "#06b6d4",
+  bes_koruyucu: "#94a3b8", bes_dengeli: "#06b6d4", bes_buyume: "#ef4444" };
 const tl = (v) => (v == null || !isFinite(v) ? "—" : `${num(v, 0)} ₺`);
 const tlS = (v) => (v == null || !isFinite(v) ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${num(Math.abs(v), 0)} ₺`);
 
@@ -139,7 +140,8 @@ async function compareSet(pos, snap) {
     const map = new Map(m.dates.map((_, i) => [pointKey(m.dates, i), m.series.model[i]]));
     return { ...m, dates: ref.dates, series: { ...ref.series, model: ref.dates.map((_, i) => map.get(pointKey(ref.dates, i)) ?? null) } };
   };
-  return { rep, ref, portfolio, models: rep.models.map((m) => (m === ref ? m : align(m))) };
+  const list = rep.besProfiles?.length ? [...rep.models.filter((m) => m.kind === "fon"), ...rep.besProfiles] : rep.models;
+  return { rep, ref, portfolio, models: list.map((m) => (m === ref ? m : align(m))) };
 }
 
 const missingNote = (pos) => {
@@ -167,82 +169,6 @@ async function loadAll(app) {
   if (!snap) { emptyState(app, "Hesapta henüz aylık pozisyon fotoğrafı yok."); return null; }
   const pos = await positions(snap);
   return { ps, snap, pos };
-}
-
-// ------------------------------------------------------------------ Portföy Özeti
-async function renderSummary(app, store) {
-  const d = await loadAll(app);
-  if (!d) return;
-  const { ps, snap, pos } = d;
-  const groups = groupBy(pos.rows);
-  const pl = pos.rows.reduce((s, r) => s + (r.pl || 0), 0);
-  const hist = Object.entries(ps.state.valueHistory || {}).filter(([, v]) => v > 0).sort(([a], [b]) => a.localeCompare(b));
-  const src = { hesap: "Analiz hesabı", "tarayıcı": "bu tarayıcıdaki Analiz kaydı", rapor: "rapor verisi" }[ps.source];
-
-  app.innerHTML = `
-  <section class="method-intro card">
-    <h2>Portföy Özeti <span class="model-tag">ANALİZ</span></h2>
-    <p>Gerçek portföyün, ${esc(src)} üzerinden ${dateTR(snap.date)} tarihli pozisyon fotoğrafından okundu
-      (Analiz Panel'i her açışında güncellenir). Bu bilgi yalnızca senin tarayıcında görünür.</p>
-    <div class="btn-row"><a class="btn btn-primary" href="#/portfoyrapor">▤ Portföy raporu (PDF)</a>
-      <a class="btn" href="#/portfoykarsilastir">⇆ Modellerle karşılaştır</a>
-      <a class="btn" href="${ANALIZ}#panel" target="_blank" rel="noopener">Analiz Panel ↗</a></div>
-  </section>
-
-  <section class="card">
-    <div class="kpi-row">
-      <div><span>Toplam değer</span><b>${tl(pos.total)}</b></div>
-      <div><span>Pozisyon</span><b>${pos.rows.filter((r) => !r.cash).length}</b></div>
-      <div><span>Nakit</span><b>${tl(snap.cash || 0)}</b></div>
-      <div><span>Toplam kâr / zarar</span><b class="${R.tone(pl)}">${tlS(pl)}</b></div>
-      <div><span>En büyük pozisyon</span><b>${esc(pos.rows[0]?.code || "—")} · %${num(pos.rows[0]?.w, 1)}</b></div>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-head"><h2>Varlık sınıfları</h2><span class="sub">Toplam değere göre pay</span></div>
-    ${classBar(groups)}
-  </section>
-
-  <section class="card">
-    <div class="card-head"><h2>Pozisyonlar</h2><span class="sub">TEFAS fonlarında Quant notu ve fon sayfası bağlantısı</span></div>
-    <div class="table-wrap"><table class="model-table">
-      <thead><tr><th class="left">Varlık</th><th class="left">Sınıf</th><th>Değer</th><th>Ağırlık</th><th>Toplam K/Z</th><th>K/Z %</th><th>Quant notu</th></tr></thead>
-      <tbody>${pos.rows.map((r) => {
-        const g = fundGrade(store, r.code);
-        return `<tr><td class="left">${store.byCode.has(r.code) ? codeChip(r.code) : `<span class="code-chip muted-chip">${esc(r.code)}</span>`}
-            <span class="fund-name">${esc(r.name)}</span></td>
-          <td class="left dim">${esc(r.group)}${r.label && r.label !== r.group ? ` · ${esc(r.label)}` : ""}</td>
-          <td><b>${tl(r.value)}</b></td><td>%${num(r.w, 1)}</td>
-          <td class="${R.tone(r.pl)}">${r.pl == null ? "—" : tlS(r.pl)}</td><td class="${R.tone(r.plPct)}">${r.plPct == null ? "—" : R.pctS(r.plPct)}</td>
-          <td>${g ? `<span class="grade ${g === "A+" ? "sig-aplus" : `sig-${g.toLowerCase()}`}">${esc(g)}</span>` : `<span class="dim">—</span>`}</td></tr>`;
-      }).join("")}</tbody></table></div>
-  </section>
-
-  <section class="card">
-    <div class="card-head"><h2>Kayıtlı gerçek değer</h2><span class="sub">Analiz Panel'in günlük kaydettiği toplam değer</span></div>
-    ${hist.length >= 2 ? `<div class="chart" id="pfHist"></div>` : `<div class="empty">Henüz ${hist.length} günlük kayıt var; grafik kayıt biriktikçe görünür.</div>`}
-    <p class="chart-note dim">Gerçek değer kaydı para girişi ve çıkışlarını da içerir; getiri karşılaştırması için Modellerle Karşılaştır sayfasına bakın.</p>
-  </section>`;
-  if (hist.length >= 2) {
-    lineChart(app.querySelector("#pfHist"), [{ name: "Portföy değeri", d: hist.map(([k]) => k), v: hist.map(([, v]) => v), color: "var(--brand-3)" }],
-      { height: 240, format: (v) => `${num(v / 1000, 0)} bin ₺` });
-  }
-}
-
-function groupBy(rows) {
-  const m = new Map();
-  for (const r of rows) {
-    const g = m.get(r.group) || { name: r.group, value: 0, w: 0, n: 0 };
-    g.value += r.value; g.w += r.w; g.n += 1;
-    m.set(r.group, g);
-  }
-  return [...m.values()].sort((a, b) => b.value - a.value);
-}
-
-function classBar(groups) {
-  return `<div class="pf-bar">${groups.map((g) => `<i style="width:${g.w.toFixed(2)}%;background:${GROUP_COLORS[g.name] || "#94a3b8"}" title="${esc(g.name)} %${num(g.w, 1)}"></i>`).join("")}</div>
-    <div class="pf-legend">${groups.map((g) => `<span><i style="background:${GROUP_COLORS[g.name] || "#94a3b8"}"></i>${esc(g.name)} <b>%${num(g.w, 1)}</b> <em>${tl(g.value)}</em></span>`).join("")}</div>`;
 }
 
 // Gerçek getiri: Analiz'in günlük değer kaydından (para giriş/çıkışından arındırılmış)
@@ -601,7 +527,7 @@ async function renderReport(app, store, route) {
   <div class="rp-toolbar no-print">
     <div><h2>Kişisel portföy raporu</h2>
       <p class="dim">Analiz'in aylık portföy raporu + TEFAS Quant model portföyleri · PDF için yazdırma penceresinde "PDF olarak kaydet"</p></div>
-    <div class="rp-actions"><a class="btn" href="#/portfoy">← Portföy Özeti</a>
+    <div class="rp-actions"><a class="btn" href="#/portfoykarsilastir">← Modellerle Karşılaştır</a>
       <select id="prMonth" aria-label="Rapor ayı">${months.map((mo) => `<option value="${mo}" ${mo === month ? "selected" : ""}>${PR.monthLabel(mo)}</option>`).join("")}</select>
       <button class="btn btn-primary" id="prPrint" type="button">⤓ PDF olarak indir</button></div>
   </div>
@@ -618,9 +544,8 @@ async function renderReport(app, store, route) {
 export async function render(app, route, store) {
   window.__TQ_READY__ = false;
   try {
-    if (route.view === "portfoykarsilastir") await renderCompare(app, store);
-    else if (route.view === "portfoyrapor") await renderReport(app, store, route);
-    else await renderSummary(app, store);
+    if (route.view === "portfoyrapor") await renderReport(app, store, route);
+    else await renderCompare(app, store);
   } finally {
     window.__TQ_READY__ = true;  // CI PDF basımı bu bayrağı bekler
   }

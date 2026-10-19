@@ -95,8 +95,10 @@ def main() -> int:
         time.sleep(wait)
 
     title, body, tags = message(kind, a.slot, today)
-    payload = {"topic": topic, "title": title, "message": body, "tags": tags, "priority": 4,
-               "click": os.environ.get("SITE_URL") or "https://valaiso.github.io/tefas-quant/"}
+    site = (os.environ.get("SITE_URL") or "https://valaiso.github.io/tefas-quant/").rstrip("/") + "/"
+    # iPhone'da uygulama ikonu değiştirilemez; logo ek olarak gider ve bildirimde küçük görsel olarak görünür
+    payload = {"topic": topic, "title": title, "message": body, "tags": tags, "priority": 4, "click": site,
+               "icon": site + "assets/img/logo-192.png", "attach": site + "assets/img/logo-192.png", "filename": "tefas-quant.png"}
     req = urllib.request.Request("https://ntfy.sh/", data=json.dumps(payload).encode("utf-8"),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as r:

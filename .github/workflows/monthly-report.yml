@@ -3,8 +3,9 @@ name: Aylık Model Rapor e-postası
 # Her ayın 1'inde 17:15 TR: yayındaki sitenin Model Rapor sayfası PDF'e basılır ve e-postayla
 # gönderilir (18:00'e kadar ulaşır). Site önceki akşam ayın son işlem günüyle güncellendiği için
 # rapor biten ayı kapsar. GitHub sırası yoğunken çalışma saatlerce gecikebilir ya da hiç başlamayabilir;
-# bu yüzden iş 13:00'te başlar ve 17:15'e kadar hazır bekler (ilki başlamazsa 14:30 ve 17:15
-# başlangıçları devreye girer). 18:30 ve 19:30'daki yedek çalışmalar e-posta gitmediyse gönderir,
+# bu yüzden iş 13:07'de başlar ve 17:15'e kadar hazır bekler (ilki başlamazsa 14:41 ve 17:13
+# başlangıçları devreye girer; saat başı/buçuk en çok atlanan dakikalar olduğu için kaçınılır).
+# 18:37, 19:29 ve 20:23'teki yedek çalışmalar e-posta gitmediyse gönderir,
 # gittiyse hiçbir şey yapmaz (önbellekteki işaret).
 #
 # Gerekli secret'lar: MAIL_USER (gönderen Gmail), MAIL_APP_PASSWORD (Gmail uygulama şifresi),
@@ -14,11 +15,12 @@ name: Aylık Model Rapor e-postası
 
 on:
   schedule:
-    - cron: '0 10 1 * *'     # hazırlık 13:00 TR, 17:15'e kadar bekler
-    - cron: '30 11 1 * *'    # hazırlık 14:30 TR
-    - cron: '15 14 1 * *'    # 17:15 TR
-    - cron: '30 15 1 * *'    # yedek 18:30 TR
-    - cron: '30 16 1 * *'    # yedek 19:30 TR
+    - cron: '7 10 1 * *'     # hazırlık 13:07 TR, 17:15'e kadar bekler
+    - cron: '41 11 1 * *'    # hazırlık 14:41 TR
+    - cron: '13 14 1 * *'    # 17:13 TR
+    - cron: '37 15 1 * *'    # yedek 18:37 TR
+    - cron: '29 16 1 * *'    # yedek 19:29 TR
+    - cron: '23 17 1 * *'    # yedek 20:23 TR
   workflow_dispatch:
 
 permissions:

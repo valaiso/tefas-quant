@@ -7,15 +7,17 @@ export function render(app, _route, store) {
   const counts = Object.fromEntries(SIGNALS.map((s) => [s.key, funds.filter((f) => f.sig === s.key).length]));
   const total = funds.length || 1;
 
-  // Kategori liderleri: kategori içi 1. sıradaki fon (en az 5 fonluk kategoriler)
+  // Kategori liderleri: kategori içi en yüksek skorlu, önerilebilir (A+ / A) fon; nitelikli / serbest fonlar
+  // ve 1 yıldan kısa geçmişli fonlar önerilmez (notları en fazla B)
   const byCat = new Map();
   for (const f of funds) {
-    if (f.ct < 5) continue;
+    if (f.ct < 5 || f.q || !["A+", "A"].includes(f.g)) continue;
     const cur = byCat.get(f.k);
     if (!cur || f.s > cur.s) byCat.set(f.k, f);
   }
   const leaders = [...byCat.values()].sort((a, b) => b.ct - a.ct);
-  const top = [...funds].sort((a, b) => b.s - a.s).slice(0, 15);
+  // En yüksek skorlular: önerilemeyen fonlar (kısa geçmiş, nitelikli / serbest) bu listeye girmez
+  const top = funds.filter((f) => !f.cap?.young && !f.cap?.qualified).sort((a, b) => b.s - a.s).slice(0, 15);
   const anomalies = funds.filter((f) => (f.p.anomaly || 0) > 0).sort((a, b) => b.p.anomaly - a.p.anomaly);
 
   app.innerHTML = `

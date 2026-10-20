@@ -367,9 +367,14 @@ def portfolio_score(g: pd.DataFrame) -> pd.Series:
 def anomaly_penalty(g: pd.DataFrame) -> pd.Series:
     if len(g) < config.MIN_CATEGORY_SIZE:
         return pd.Series(0.0, index=g.index)
-    r = g["r_1y"]
-    iqr = r.quantile(0.75) - r.quantile(0.25)
-    z = (r - r.median()) / max(iqr, 1e-6)
+    def zscore(r):
+        iqr = r.quantile(0.75) - r.quantile(0.25)
+        return (r - r.median()) / max(iqr, 1e-6)
+    # Skordaki r_1y, 1 yıllık geçmişi olmayan fonda 6 aylık getiriyle doldurulur; 6 aylık getiriyi diğer fonların
+    # 1 yıllığıyla kıyaslamak sıçramayı gizler. Bu fonlarda 6 aylık getiri, kategorinin 6 aylıklarıyla kıyaslanır.
+    z = zscore(g["r_1y"])
+    if "raw_r_1y" in g and "raw_r_6a" in g:
+        z = z.where(g["raw_r_1y"].notna(), zscore(g["raw_r_6a"]))
     return ((z - config.ANOMALY_Z_THRESHOLD).clip(lower=0) * config.ANOMALY_PENALTY_PER_Z).clip(
         upper=config.ANOMALY_MAX_PENALTY
     ).fillna(0)
@@ -433,7 +438,7 @@ def founder_risk(funds: pd.DataFrame, scored_codes, excluded: list) -> dict:
 
 
 def score_funds(m: pd.DataFrame, founder_flag: pd.Series | None = None,
-                prev_grades: list[pd.Series] | None = None) -> pd.DataFrame:
+                prev_grades: list[pd.Series] | None = None, qualified: pd.Series | None = None) -> pd.DataFrame:
     """founder_flag: kurucu riski taşıyan fonlar (True); prev_grades: önceki ay
     sonlarının temel notları (süreklilik şartı için). İkisi de verilmezse
     yalnızca temel (göreli) notlar üretilir."""
@@ -486,6 +491,8 @@ def score_funds(m: pd.DataFrame, founder_flag: pd.Series | None = None,
     s["base_grade"] = [g for g, _ in graded]
     s["grade"] = s["base_grade"]
     s["signal"] = [sig for _, sig in graded]
+    s["qualified_fund"] = (qualified.reindex(s.index).fillna(0).astype(bool)
+                           if qualified is not None else pd.Series(False, index=s.index))
     if prev_grades is not None:
         apply_strong_buy(s, prev_grades)
     s["overall_rank"] = s["score"].rank(ascending=False, method="min").astype(int)
@@ -519,6 +526,12 @@ def apply_strong_buy(s: pd.DataFrame, prev_grades: list[pd.Series]) -> None:
     cap = config.FOUNDER_RISK["max_grade"]
     capped = s["founder_risk"] & grade.map(GRADE_ORDER.index).lt(GRADE_ORDER.index(cap))
     grade = grade.mask(capped, cap)
+    # Önerilemeyen fonlar (config.RECOMMEND_CAPS): nitelikli / serbest ve 1 yıldan kısa geçmişli
+    rc = config.RECOMMEND_CAPS
+    s["cap_young"] = s["history_days"] < rc["min_history_days"]
+    s["cap_qualified"] = s["qualified_fund"] if rc["qualified"] else False
+    above = grade.map(GRADE_ORDER.index).lt(GRADE_ORDER.index(rc["max_grade"]))
+    grade = grade.mask((s["cap_young"] | s["cap_qualified"]) & above, rc["max_grade"])
     s["grade"] = grade
     s["signal"] = grade.map(GRADE_SIGNAL)
 
@@ -551,7 +564,7 @@ def run(conn: sqlite3.Connection) -> dict:
 
     risky = founder_risk(funds, metrics.index, excluded)
     flag = funds["founder"].reindex(metrics.index).isin(risky)
-    scored = score_funds(metrics, founder_flag=flag, prev_grades=prev)
+    scored = score_funds(metrics, founder_flag=flag, prev_grades=prev, qualified=funds["qualified"])
     scored = scored.join(funds[["name", "qualified", "category_src", "founder"]], how="left")
 
     as_of = panel["price"].index[-1].strftime("%Y-%m-%d")

@@ -4,9 +4,9 @@ const QKEY = "tq-include-qualified";
 
 export function includeQualified() {
   try {
-    return localStorage.getItem(QKEY) !== "0";
+    return localStorage.getItem(QKEY) === "1";  // varsayılan kapalı: nitelikli fonlar önerilmez
   } catch {
-    return true;
+    return false;
   }
 }
 

@@ -109,6 +109,13 @@ STRONG_BUY = {
 # işlem gören fonları da sıçrama (spillover) riski taşır.
 FOUNDER_RISK = {"min_share": 0.30, "min_funds": 3, "penalty": 10.0, "max_grade": "B"}
 
+# Önerilemeyen fonlar: notu en fazla B / İZLE (AL ve GÜÇLÜ AL verilmez).
+#  - Nitelikli yatırımcı / serbest fonlar: standart fonlardaki çeşitlendirme sınırları (bir ihraççıya en fazla
+#    %10, %5'i aşanların toplamı en fazla %40; III-52.1 m.17) bu fonlarda uygulanmayabilir; portföy 1-2 hisseye
+#    yoğunlaşabilir (ör. BS1, Ekim 2026). TEFAS hisse bazında dağılım vermediği için yoğunlaşma ölçülemez.
+#  - 1 yıldan kısa geçmişli fonlar: kısa geçmişte yüksek getiri tek bir sıçramadan gelebilir.
+RECOMMEND_CAPS = {"min_history_days": 252, "qualified": True, "max_grade": "B"}
+
 # ------------------------------------------------------------- risk bayrakları
 # Point-in-time test (Eki 2024 – Eyl 2026, 24 ay, ~28 bin fon-ay gözlemi):
 # * Son 3 ayda tepeden kategorisinden 10 puandan fazla düşüş: sonraki 1 yılda

@@ -102,6 +102,12 @@ export async function render(app, route, store, opts = {}) {
     ${store.meta.founderRisk?.[f.fd]?.total ?? "?"} fonundan ${store.meta.founderRisk?.[f.fd]?.problem ?? "birçoğu"} tanesi işleme kapalı, çökmüş ya da fiyatı durmuş.
     Aynı kurucunun işlem gören fonları da benzer riski taşıyabilir; bu fon −${num(f.p.founder, 0)} puan ceza aldı ve notu en fazla İZLE olabilir.</div>` : ""}
 
+  ${f.cap?.qualified ? `<div class="notice warn">⚠ <b>Önerilmez · nitelikli yatırımcı / serbest fon:</b> standart fonlardaki çeşitlendirme
+    sınırları (bir şirkete en fazla %10, %5'i aşanların toplamı en fazla %40) bu fonlarda uygulanmayabilir; portföy 1–2 hisseye
+    yoğunlaşabilir. TEFAS hisse bazında dağılım vermediği için yoğunlaşma ölçülemez; bu yüzden notu en fazla İZLE (B) olur.</div>` : ""}
+  ${f.cap?.young ? `<div class="notice warn">⚠ <b>Önerilmez · kısa geçmiş:</b> fonun ${num(f.hd, 0)} işlem günlük geçmişi var (1 yıldan az).
+    Kısa geçmişteki yüksek getiri tek bir sıçramadan gelebilir; bu yüzden notu en fazla İZLE (B) olur.</div>` : ""}
+
   ${(f.p.drawdown || 0) > 0 ? `<div class="notice warn">↘ <b>Sert düşüş:</b> son 3 ayda tepeden %${num(rk.dd3m, 1)} düştü,
     kategorisinin ${num(rk.ddRel, 1)} puan üstünde (−${num(f.p.drawdown, 0)} puan ceza). Testlerde böyle fonlar sonraki yıl kategorisinin gerisinde kaldı.</div>` : ""}
 

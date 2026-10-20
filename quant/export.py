@@ -88,6 +88,7 @@ def _fund_record(code: str, f: pd.Series) -> dict:
         "fee": _r(f["fee"]),
         "fd": f["founder"] if isinstance(f.get("founder"), str) else None,
         "fk": bool(f.get("founder_risk", False)),
+        "cap": {"young": bool(f.get("cap_young", False)), "qualified": bool(f.get("cap_qualified", False))},
         "sb": {k: bool(f[f"sb_{k}"]) for k in ("top", "history", "investors", "aum", "anomaly", "streak",
                                                 "founder", "tail", "hot") if f"sb_{k}" in f},
         "rk2": {

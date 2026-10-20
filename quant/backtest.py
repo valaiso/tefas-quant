@@ -49,7 +49,7 @@ def run(panel: dict, funds: pd.DataFrame, grade: str = "A+") -> dict:
         # Canlı skorla aynı kurallar: o tarihteki kurucu riski + sıkı GÜÇLÜ AL
         risky = scoring.founder_risk(funds, m.index, excluded_then)
         flag = funds["founder"].reindex(m.index).isin(risky)
-        s = scoring.score_funds(m, founder_flag=flag, prev_grades=prev_base)
+        s = scoring.score_funds(m, founder_flag=flag, prev_grades=prev_base, qualified=funds["qualified"])
         prev_base.append(scoring.score_funds(m)["base_grade"])
         qualified = funds["qualified"].reindex(s.index).fillna(0).astype(bool)
         baskets.append({

@@ -1,6 +1,7 @@
 // Bağımlılıksız SVG çizgi grafiği (çoklu seri, ızgara, ipucu)
 import { esc, monthLabel, dateTR, num } from "./util.js";
 
+const MONTHS_SHORT = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
 const PALETTE = ["var(--c1)", "var(--c2)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c3)"];
 
 /**
@@ -53,15 +54,25 @@ function draw(el, series, opts, full) {
       `<text x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end" class="axis">${esc(fmt(v))}</text>`);
   }
   const months = [];
-  let last = "";
-  const stepMonths = Math.max(1, Math.round((t1 - t0) / (86400000 * 30) / 8));
-  dates.forEach((d) => {
-    const key = d.slice(0, 7);
-    if (key !== last && (+d.slice(5, 7) - 1) % stepMonths === 0) {
-      months.push(`<text x="${x(d)}" y="${H - 6}" text-anchor="middle" class="axis">${monthLabel(d)}</text>`);
-    }
-    last = key;
-  });
+  if (t1 - t0 <= 100 * 86400000) {
+    // Kısa aralık (≈3 aya kadar): ay etiketi ("Eki 26" = Ekim 2026) gün sanılmasın diye gün ve ay yazılır
+    const n = Math.min(dates.length, Math.max(2, Math.floor((W - pad.l - pad.r) / 70)));
+    const picks = [...new Set(Array.from({ length: n }, (_, i) => dates[Math.round((i * (dates.length - 1)) / Math.max(1, n - 1))]))];
+    picks.forEach((d, i) => {
+      const anchor = picks.length > 1 && i === 0 ? "start" : picks.length > 1 && i === picks.length - 1 ? "end" : "middle";
+      months.push(`<text x="${x(d)}" y="${H - 6}" text-anchor="${anchor}" class="axis">${+d.slice(8, 10)} ${MONTHS_SHORT[+d.slice(5, 7) - 1]}</text>`);
+    });
+  } else {
+    let last = "";
+    const stepMonths = Math.max(1, Math.round((t1 - t0) / (86400000 * 30) / 8));
+    dates.forEach((d) => {
+      const key = d.slice(0, 7);
+      if (key !== last && (+d.slice(5, 7) - 1) % stepMonths === 0) {
+        months.push(`<text x="${x(d)}" y="${H - 6}" text-anchor="middle" class="axis">${monthLabel(d)}</text>`);
+      }
+      last = key;
+    });
+  }
   if (opts.base != null && opts.base >= lo && opts.base <= hi) {
     grid.push(`<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(opts.base)}" y2="${y(opts.base)}" class="base-line"/>`);
   }

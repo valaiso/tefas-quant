@@ -187,7 +187,7 @@ select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 
 .method-intro.card { border: 0; padding: 26px 30px; }
 .method-intro h2 { font-size: 1.3rem; margin-bottom: 8px; }
-.model-tag { font-size: .72rem; font-weight: 700; letter-spacing: .06em; vertical-align: middle; padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.3); margin-left: 8px; }
+.model-tag { font-size: .72rem; font-weight: 700; letter-spacing: .06em; vertical-align: middle; padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.3); margin-left: 8px; white-space: nowrap; display: inline-block; }
 .method-intro p { color: rgba(255,255,255,.85); max-width: 900px; margin: 0 0 12px; }
 .steps { margin: 0; padding-left: 20px; color: rgba(255,255,255,.9); display: grid; gap: 4px; max-width: 980px; }
 
@@ -539,9 +539,12 @@ table.bt-grades td { white-space: nowrap; }
   .page-heading { flex: 1; }
   .page-heading h1 { font-size: .8rem; font-weight: 600; color: var(--text-dim); letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .topbar-brand { white-space: nowrap; }
-  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  /* Alt menü sayfa akışında en sonda durur ve ekranın altına yapışır (sticky). position: fixed iPhone ana ekran
+     uygulamasında (özellikle tarih seçici / klavye kapandıktan sonra) kaydırırken ekranın ortasında kalabiliyordu. */
+  .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr auto; }
   .sidebar {
-    position: fixed; inset: auto 0 0; width: 100%; height: auto; padding: 0 8px env(safe-area-inset-bottom);
+    position: sticky; top: auto; bottom: 0; order: 2; align-self: end; width: 100%; height: auto;
+    padding: 0 8px env(safe-area-inset-bottom);
     border: 0; border-top: 1px solid var(--border);
     background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(16px);
   }
@@ -549,7 +552,6 @@ table.bt-grades td { white-space: nowrap; }
   .sidebar-nav { flex-direction: row; gap: 0; overflow-x: auto; padding: 5px 0; }
   .nav-section { display: contents; }
   .tab { flex: 1 1 0; flex-direction: column; justify-content: center; gap: 3px; min-height: 56px; padding: 5px 4px; border: 0; font-size: .68rem; }
-  .main-column { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
   .fund-hero { grid-template-columns: 1fr; }
   .fund-hero-score { grid-row: 1; justify-items: start; grid-auto-flow: column; align-items: center; }
   .ring { width: 108px; height: 108px; }
@@ -792,6 +794,13 @@ table.bt-grades td { white-space: nowrap; }
   #app input, #app select { max-width: 100%; min-width: 0; }
   .rp-page { aspect-ratio: auto; font-size: 10px; }
   .rp-kpis { grid-template-columns: 1fr 1fr; padding: 12px 14px 4px; }
+  .rp-kpis.mr-kpis6 { grid-template-columns: 1fr 1fr; }
+  /* Telefonda geniş rapor tabloları sıkışmasın: blok içinde yatay kaydırılır */
+  .rp-block { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .rp-block > .rp-table.mr-sum, .rp-block > .rp-table.mr-beat, .rp-block > .rp-table.mr-month, .rp-block .pa-table { min-width: 560px; }
+  .rp-block > .rp-table.mr-heatmap { min-width: 720px; }
+  /* Grafik açıklamaları parmakla basılabilsin */
+  .chart-legend .item, .mr-chip { min-height: 32px; padding: 4px 8px; }
   .rp-block, .rp-cover, .rp-footer { padding-left: 14px; padding-right: 14px; }
   .rp-two { grid-template-columns: 1fr; }
   .rp-two .rp-block:first-child, .rp-two .rp-block:last-child { padding: 8px 14px 0; }
@@ -835,3 +844,5 @@ table.bt-grades td { white-space: nowrap; }
 .push-toast { position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50;
   max-width: calc(100vw - 32px); padding: 10px 14px; border-radius: 10px; background: #12233d; color: #fff; font-size: .85rem;
   box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+/* Telefonda dönem düğmeleri ("1 Hafta", "Başından Beri") iki satıra bölünmesin: tek satır, gerekirse yatay kaydırma */
+@media (max-width: 640px) { #pfWin { max-width: 100%; overflow-x: auto; } #pfWin button { white-space: nowrap; } }

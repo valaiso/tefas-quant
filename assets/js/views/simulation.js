@@ -50,6 +50,31 @@ export function windowStats(dates, lvl, ppf) {
     positive: (rets.filter((r) => r > 0).length / rets.length) * 100, beatPpf: beat,
   };
 }
+/**
+ * Günlük seriden pencere istatistikleri: toplam, yıllık, maks. düşüş, yıllık oynaklık (günlük, √252);
+ * en kötü / en iyi ay ve pozitif ay oranı ay sonlarından.
+ */
+export function dailyStats(dates, lvl) {
+  const pts = lvl.map((v, i) => [dates[i], v]).filter(([, v]) => v != null);
+  if (pts.length < 2) return null;
+  const first = pts[0][1], last = pts[pts.length - 1][1];
+  const years = (Date.parse(pts[pts.length - 1][0]) - Date.parse(pts[0][0])) / (365.25 * 86400000);
+  let peak = -Infinity, mdd = 0;
+  for (const [, v] of pts) { peak = Math.max(peak, v); mdd = Math.min(mdd, (v / peak - 1) * 100); }
+  const lr = pts.slice(1).map(([, v], i) => Math.log(v / pts[i][1]));
+  const mean = lr.reduce((a, b) => a + b, 0) / lr.length;
+  const vol = lr.length > 10 ? Math.sqrt(lr.reduce((a, r) => a + (r - mean) ** 2, 0) / (lr.length - 1)) * Math.sqrt(252) * 100 : null;
+  const ends = [pts[0]];
+  pts.forEach((p, i) => { if (i === pts.length - 1 || pts[i + 1][0].slice(0, 7) !== p[0].slice(0, 7)) ends.push(p); });
+  const mr = ends.slice(1).map(([, v], i) => v / ends[i][1] - 1).filter((r, i) => i > 0 || ends[1][0] !== ends[0][0]);
+  const rets = mr.length ? mr : [last / first - 1];
+  return {
+    total: (last / first - 1) * 100, cagr: years > 0.95 ? ((last / first) ** (1 / years) - 1) * 100 : null, mdd, vol,
+    best: Math.max(...rets) * 100, worst: Math.min(...rets) * 100,
+    positive: (rets.filter((r) => r > 0).length / rets.length) * 100, beatPpf: null,
+  };
+}
+
 let cache = null;
 
 async function load() {

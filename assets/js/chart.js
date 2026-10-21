@@ -56,8 +56,14 @@ function draw(el, series, opts, full) {
   const months = [];
   if (t1 - t0 <= 100 * 86400000) {
     // Kısa aralık (≈3 aya kadar): ay etiketi ("Eki 26" = Ekim 2026) gün sanılmasın diye gün ve ay yazılır
-    const n = Math.min(dates.length, Math.max(2, Math.floor((W - pad.l - pad.r) / 70)));
-    const picks = [...new Set(Array.from({ length: n }, (_, i) => dates[Math.round((i * (dates.length - 1)) / Math.max(1, n - 1))]))];
+    // Zamana göre eşit aralıklı hedeflere en yakın günler; etiketler arasında en az 60 px (hafta sonu boşlukları üst üste bindirmesin)
+    const n = Math.min(dates.length, Math.max(2, Math.floor((W - pad.l - pad.r) / 80)));
+    const near = (t) => dates.reduce((a, d) => (Math.abs(Date.parse(d) - t) < Math.abs(Date.parse(a) - t) ? d : a), dates[0]);
+    const picks = [];
+    for (const d of [...new Set(Array.from({ length: n }, (_, i) => near(t0 + ((t1 - t0) * i) / Math.max(1, n - 1))))]) {
+      if (!picks.length || x(d) - x(picks[picks.length - 1]) >= 60) picks.push(d);
+    }
+    if (picks.length > 1 && x(dates[dates.length - 1]) - x(picks[picks.length - 1]) < 60) picks[picks.length - 1] = dates[dates.length - 1];
     picks.forEach((d, i) => {
       const anchor = picks.length > 1 && i === 0 ? "start" : picks.length > 1 && i === picks.length - 1 ? "end" : "middle";
       months.push(`<text x="${x(d)}" y="${H - 6}" text-anchor="${anchor}" class="axis">${+d.slice(8, 10)} ${MONTHS_SHORT[+d.slice(5, 7) - 1]}</text>`);

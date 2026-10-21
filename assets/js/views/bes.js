@@ -1,6 +1,7 @@
 import { esc, num, pct, pctCell, money, dateTR, gradeBadge, scoreBar, SIGNALS, trUpper, debounce } from "../util.js";
 import { lineChart } from "../chart.js";
-import { startIndex, windowed, windowStats, statRow } from "./simulation.js";
+import { startIndex, windowed, windowStats, statRow, dailyStats } from "./simulation.js";
+import { loadModelReport } from "./modelreport.js";
 import { besHistory, benchData, basketSeries, rebaseFrom, weeklyStats } from "../portfolio.js";
 import * as fund from "./fund.js";
 
@@ -15,7 +16,7 @@ const ACCESS = {
 const COLORS = { model: "var(--brand-3)", universe: "var(--text-dim)", gold: "var(--c7, #ca8a04)", usd: "var(--c4)", tufe: "var(--c2)", ppf: "var(--c6)" };
 const LABELS = { gold: "Gram altın", usd: "Dolar/TL", tufe: "TÜFE", ppf: "PPF ortalaması (yatırım fonu)" };
 const SLICE = ["#0f766e", "#2563eb", "#ca8a04", "#7c3aed", "#db2777", "#0891b2"];
-const PERIODS = [["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["5y", "5Y", 60], ["all", "Tümü", null]];
+const PERIODS = [["1a", "1A", 1], ["3a", "3A", 3], ["6a", "6A", 6], ["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["5y", "5Y", 60]];
 const COLUMNS = [
   { key: "rk", label: "Sıra", get: (f) => f.rk },
   { key: "c", label: "Fon", get: (f) => f.c, left: true },
@@ -31,7 +32,7 @@ const COLUMNS = [
   { key: "inv", label: "Katılımcı", get: (f) => f.inv },
   { key: "aum", label: "Büyüklük", get: (f) => f.aum },
 ];
-const state = { tab: "siralama", q: "", co: "", cat: "", sig: "", ax: "open", sort: "s", dir: -1, page: 0, company: null, period: "all", month: {} };
+const state = { tab: "siralama", q: "", co: "", cat: "", sig: "", ax: "open", sort: "s", dir: -1, page: 0, company: null, period: "5y", month: {} };
 let cacheFunds = null, cacheModel = null;
 
 const get = async (p) => {
@@ -218,9 +219,9 @@ function renderRanking(body, funds) {
 }
 
 // ------------------------------------------------------------------ karşılaştırma
-// Kullanıcının kendi BES dağılımı ile BEFAS modelini haftalık fiyatlardan karşılaştırır.
+// Kullanıcının kendi BES dağılımını üç BES modeliyle (gerçek geçmiş) ve kıyaslarla karşılaştırır.
 const CMP_KEY = "tq_bes_compare";
-const CMP_PERIODS = [["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["5y", "5Y", 60]];
+const CMP_PERIODS = PERIODS;
 
 function loadCmp() {
   try {
@@ -237,8 +238,8 @@ function comparatorHtml(cmp, funds) {
   return `<section class="card">
     <div class="card-head"><h2>Kendi BES dağılımını modelle karşılaştır</h2>
       <div class="seg" id="cmpPeriod">${CMP_PERIODS.map(([k, l]) => `<button data-p="${k}" aria-pressed="${k === cmp.period}">${l}</button>`).join("")}</div></div>
-    <p class="dim">Kendi fonlarını ve yüzdelerini gir; dağılımın, BEFAS modelinin bugünkü sepeti ve modelin gerçek (her dönem o günkü veriyle kurulan) geçmişiyle
-      aynı tarihlerde karşılaştırılır. Fiyatlar haftalık, 5 yıla kadar. Girdiğin dağılım yalnızca bu tarayıcıda saklanır.</p>
+    <p class="dim">Kendi fonlarını ve yüzdelerini gir; dağılımın, Koruyucu, Dengeli ve Büyüme BES modellerinin gerçek (her dönem o günkü veriyle kurulan) geçmişiyle
+      ve altın, TÜFE, dolarla aynı tarihlerde karşılaştırılır. Fiyatlar haftalık, 5 yıla kadar. Girdiğin dağılım yalnızca bu tarayıcıda saklanır.</p>
     <datalist id="besCodes">${opts}</datalist>
     <div class="cmp-rows" id="cmpRows"></div>
     <div class="btn-row cmp-actions">
@@ -258,7 +259,6 @@ function comparatorHtml(cmp, funds) {
 function bindComparator(body, m, funds) {
   const cmp = loadCmp();
   const byCode = new Map(funds.map((f) => [f.c, f]));
-  const B = m.befas;
   const rowsEl = body.querySelector("#cmpRows");
   const drawRows = () => {
     rowsEl.innerHTML = cmp.rows.map((r, i) => {
@@ -277,46 +277,45 @@ function bindComparator(body, m, funds) {
     body.querySelector("#cmpSum").innerHTML = `Toplam: <b class="${Math.abs(total - 100) < 0.01 ? "" : "down"}">%${num(total, 0)}</b>${Math.abs(total - 100) < 0.01 ? "" : " (oranlar 100'e ölçeklenir)"}`;
     const mine = {};
     cmp.rows.forEach((r) => { const c = (r.c || "").toUpperCase(); if (byCode.has(c) && +r.w > 0) mine[c] = (mine[c] || 0) + +r.w; });
-    const modelW = Object.fromEntries((B?.basket || []).map((b) => [b.c, b.w]));
-    const codes = [...new Set([...Object.keys(mine), ...Object.keys(modelW)])];
+    const codes = Object.keys(mine);
     const hists = Object.fromEntries(await Promise.all(codes.map(async (c) => [c, await besHistory(c)])));
     const bench = await benchData();
-    const lastDate = Object.values(hists).filter(Boolean).map((h) => h.d[h.d.length - 1]).sort().pop();
+    const models = PROFILE_KEYS.map((k) => m.profiles?.[k]).filter((q) => q?.backtest?.available && q.backtest.daily?.dates?.length);
+    const lastDate = [...Object.values(hists).filter(Boolean).map((h) => h.d[h.d.length - 1]), ...models.map((q) => q.backtest.daily.dates.at(-1))].sort().pop();
     if (!lastDate) { body.querySelector("#cmpChart").innerHTML = `<div class="empty">Fiyat verisi yok</div>`; return; }
     const end = new Date(lastDate); end.setMonth(end.getMonth() - months());
     const from = end.toISOString().slice(0, 10);
     const rw = cmp.rebal === "2m" ? 9 : cmp.rebal === "12m" ? 52 : 0;
 
-    const my = Object.keys(mine).length ? basketSeries(mine, hists, from, rw) : null;
-    const mdl = basketSeries(modelW, hists, from, rw);
-    const start = [from, my?.d[0], mdl?.d[0]].filter(Boolean).sort().pop();
+    const my = codes.length ? basketSeries(mine, hists, from, rw) : null;
+    const start = [from, my?.d[0]].filter(Boolean).sort().pop();
     const at = (s, d) => { let v = null; s.d.forEach((x, i) => { if (x <= d && s.v[i] != null) v = s.v[i]; }); return v; };
     const series = [];
     if (my) series.push({ key: "mine", name: "Benim dağılımım", ...rebaseFrom(my.d, my.v, start), color: "#db2777" });
-    if (mdl) series.push({ key: "now", name: "BEFAS modeli · bugünkü sepet (geriye dönük)", ...rebaseFrom(mdl.d, mdl.v, start), color: "var(--brand-3)", dashed: true });
+    // BES modellerinin gerçek geçmişi (her dönem o günkü veriyle kurulan sepetler, günlük): başladığı gün
+    // "benim dağılımım" ile aynı noktadan çizilir
+    const real = [];
+    for (const q of models) {
+      const r = rebaseFrom(q.backtest.daily.dates, q.backtest.daily.model, start);
+      if (!r) continue;
+      const anchor = series[0] ? at(series[0], r.d[0]) || 100 : 100;
+      real.push({ key: `m_${q.key}`, name: `${q.label} BES modeli`, d: r.d, v: r.v.map((x) => (x == null ? null : (x / 100) * anchor)),
+        color: PROFILE_COLORS[q.key] || "var(--brand-3)" });
+    }
+    series.push(...real);
     if (bench) {
       for (const [k, label, color] of [["gold", "Gram altın", "var(--c7, #ca8a04)"], ["tufe", "TÜFE", "var(--c2)"], ["usd", "Dolar/TL", "var(--c4)"]]) {
         const sr = bench.s[k];
         const r = sr && rebaseFrom(bench.d, sr.v, start);
-        if (r) series.push({ key: k, name: label, ...r, color });
-      }
-    }
-    // Gerçek model geçmişi: kendi başladığı tarihte "benim dağılımım" ile aynı noktadan çizilir
-    let real = null;
-    if (B?.backtest.available) {
-      const r = rebaseFrom(B.backtest.dates, B.backtest.series.model, start);
-      if (r) {
-        const anchor = series[0] ? at(series[0], r.d[0]) : 100;
-        real = { key: "real", name: `BEFAS modeli · gerçek geçmiş (${dateTR(r.d[0])}'den)`, d: r.d, v: r.v.map((x) => (x == null ? null : (x / 100) * (anchor || 100))),
-          color: "var(--brand-3)" };
-        series.splice(2, 0, real);
+        if (r) series.push({ key: k, name: label, ...r, color, dashed: true });
       }
     }
     lineChart(body.querySelector("#cmpChart"), series, { base: 100, height: 320, format: (v) => num(v, 0) });
-    const firsts = [my && ["dağılımındaki fonlar", my.d[0]], mdl && ["model sepetindeki fonlar", mdl.d[0]]].filter(Boolean);
-    const late = start > from ? ` Seçilen dönemin başında ${firsts.filter(([, d]) => d >= start).map(([n]) => n).join(" ve ")} için veri olmadığından karşılaştırma ${dateTR(start)}'den başlıyor.` : "";
-    body.querySelector("#cmpNote").textContent = `${dateTR(start)} – ${dateTR(lastDate)} · başlangıç = 100 · ${cmp.rebal === "hold" ? "al ve tut" : cmp.rebal === "12m" ? "yılda bir yeniden dengeleme" : "2 ayda bir yeniden dengeleme"}.${late}`
-      + " Bugünkü sepet geriye dönük gösterimdir (o tarihte bilinmiyordu); gerçek geçmiş, modelin her dönem yalnızca o günkü veriyle kurduğu sepetlerdir.";
+    const r0 = real.length ? real.map((s) => s.d[0]).sort().pop() : null;
+    const late = my && start > from ? ` Seçilen dönemin başında dağılımındaki fonlar için veri olmadığından karşılaştırma ${dateTR(start)}'den başlıyor.` : "";
+    body.querySelector("#cmpNote").textContent = `${dateTR(start)} – ${dateTR(lastDate)} · başlangıç = 100 · senin dağılımın ${cmp.rebal === "hold" ? "al ve tut" : cmp.rebal === "12m" ? "yılda bir yeniden dengelenir" : "2 ayda bir yeniden dengelenir"}.${late}`
+      + (r0 && r0 > start ? ` BES modellerinin gerçek geçmişi ${dateTR(r0)}'de başlıyor; model çizgileri o gün senin dağılımınla aynı noktadan çizilir.` : "")
+      + " Modeller, her dönem yalnızca o günkü veriyle kurulan sepetlerdir.";
 
     const row = (s, from2) => {
       const r = from2 ? rebaseFrom(s.d, s.v, from2) : s;
@@ -326,14 +325,15 @@ function bindComparator(body, m, funds) {
         <td>%${num(st.vol, 1)}</td></tr>` : "";
     };
     const head = (t) => `<tr class="group-row"><td class="left" colspan="5"><b>${t}</b></td></tr>`;
-    let html = `<thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th></tr></thead><tbody>`
-      + head(`Seçilen dönem: ${dateTR(start)} – ${dateTR(lastDate)}`) + series.filter((s) => s.key !== "real").map((s) => row(s)).join("");
-    if (real) {
-      const r0 = real.d[0];
-      const uni = B.backtest.series.universe ? { key: "uni", name: "BEFAS evreni (uygun tüm fonlar, eşit)", d: B.backtest.dates, v: B.backtest.series.universe } : null;
-      html += head(`Modelin gerçek geçmiş dönemi: ${dateTR(r0)} – ${dateTR(lastDate)}`)
-        + [series.find((s) => s.key === "mine"), real, uni, ...series.filter((s) => ["gold", "tufe", "usd"].includes(s.key))]
-          .filter(Boolean).map((s) => row(s, r0)).join("");
+    const benchRows = series.filter((s) => ["gold", "tufe", "usd"].includes(s.key));
+    let html = `<thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th></tr></thead><tbody>`;
+    if (r0 && r0 > start) {
+      // Modellerin geçmişi seçilen dönemden kısa: önce tüm dönem (dağılım + kıyaslar), sonra modellerle ortak dönem
+      html += head(`Seçilen dönem: ${dateTR(start)} – ${dateTR(lastDate)}`) + [my && series[0], ...benchRows].filter(Boolean).map((s) => row(s)).join("")
+        + head(`BES modelleriyle aynı dönem: ${dateTR(r0)} – ${dateTR(lastDate)}`)
+        + [my && series[0], ...real, ...benchRows].filter(Boolean).map((s) => row(s, r0)).join("");
+    } else {
+      html += head(`${dateTR(start)} – ${dateTR(lastDate)}`) + [my && series[0], ...real, ...benchRows].filter(Boolean).map((s) => row(s)).join("");
     }
     body.querySelector("#cmpStats").innerHTML = html + "</tbody>";
   };
@@ -473,6 +473,7 @@ function basketHtml(p, idp, m) {
 }
 
 const PROFILE_COLORS = { koruyucu: "#94a3b8", dengeli: "#0ea5e9", buyume: "#ef4444" };
+const PROFILE_KEYS = ["koruyucu", "dengeli", "buyume"];
 
 function bindBasket(body, p, idp, label, all = []) {
   const bt = p.backtest;
@@ -485,8 +486,28 @@ function bindBasket(body, p, idp, label, all = []) {
     const other = Object.fromEntries(others.map((q) => [`m_${q.key}`, q]));
     const name = (k) => (k === "model" ? label : other[k] ? `${other[k].label} BES modeli` : k === "universe" ? "BEFAS evreni (uygun tüm fonlar, eşit)" : LABELS[k] || k);
     const color = (k) => (k === "model" ? PROFILE_COLORS[p.key] || COLORS.model : other[k] ? PROFILE_COLORS[other[k].key] : COLORS[k] || "var(--text-dim)");
-    const pm = () => PERIODS.find(([k]) => k === state.period)[2];
-    const draw = () => {
+    const pm = () => PERIODS.find(([k]) => k === state.period)?.[2] ?? 60;
+    const repP = loadModelReport().catch(() => null);
+    const ff = (srcD, srcV, dates) => { let j = 0, last = null; return dates.map((d) => { while (j < srcD.length && srcD[j] <= d) { if (srcV[j] != null) last = srcV[j]; j++; } return last; }); };
+    const drawDaily = async () => {
+      // 3 yıla kadar: modeller ve kıyaslar günlük (Model Raporu günlük serileri); BEFAS evreni yalnızca aylık olduğu için yok
+      const months = pm(), dd = bt.daily?.dates, D = (await repP)?.daily;
+      if (!dd?.length || !D || months > 36) return false;
+      const i0 = startIndex(dd, months);
+      if (dd[i0] < D.dates[0]) return false;
+      const d = dd.slice(i0);
+      const lines = [["model", bt.daily.model], ...others.filter((q) => q.backtest.daily?.dates?.length === dd.length).map((q) => [`m_${q.key}`, q.backtest.daily.model]),
+        ...["gold", "usd", "tufe", "ppf"].filter((k) => D.series[k]).map((k) => [k, ff(D.dates, D.series[k], dd)])];
+      lineChart(body.querySelector(`#${idp}Chart`), lines.map(([k, v]) => ({ name: name(k), d, v: windowed(v, i0),
+        color: color(k), dashed: k === "ppf" })), { base: 100, height: 320, format: (v) => num(v, 1) });
+      body.querySelector(`#${idp}Range`).textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · günlük seri · 2 ayda bir yeniden kurulum (o gün bilinen veriyle, T+1 alış)`;
+      body.querySelector(`#${idp}Stats`).innerHTML = `<thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th>
+        <th>En kötü / en iyi ay</th><th>Pozitif ay</th><th>—</th></tr></thead>
+        <tbody>${lines.map(([k, v], i) => statRow(name(k), dailyStats(d, windowed(v, i0)), i === 0 ? "is-self" : "")).join("")}</tbody>`;
+      return true;
+    };
+    const draw = async () => {
+      if (await drawDaily()) return;
       const i0 = startIndex(bt.dates, pm());
       const d = bt.dates.slice(i0);
       lineChart(body.querySelector(`#${idp}Chart`), keys.map((k) => ({ name: name(k), d, v: windowed(series[k], i0),

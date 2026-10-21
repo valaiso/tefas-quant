@@ -5,7 +5,7 @@ import { startIndex, windowed, windowStats, statRow } from "./simulation.js";
 const COLORS = { model: "var(--brand-3)", ppf: "var(--c6)", gold: "var(--c7, #ca8a04)", tufe: "var(--c2)", usd: "var(--c4)" };
 const LABELS = { ppf: "PPF ortalaması", gold: "Gram altın", tufe: "TÜFE", usd: "Dolar/TL" };
 const SLICE = ["#0f766e", "#2563eb", "#ca8a04", "#7c3aed", "#db2777", "#0891b2", "#65a30d", "#ea580c", "#475569", "#9333ea"];
-const PERIODS = [["6a", "6A", 6], ["1y", "1Y", 12], ["all", "Tümü", null]];
+const PERIODS = [["3a", "3A", 3], ["6a", "6A", 6], ["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["5y", "5Y", 60]];
 const ORDER = ["guvenli", "dengeli", "atak"];
 const TONE = { guvenli: "safe", dengeli: "mid", atak: "risk" };
 const BLURB = {
@@ -44,7 +44,7 @@ const GLOSSARY = [
   ["Havuz", "O profilin tüm kapılarını (oynaklık, düşüş, kıyas, sıçrama, not ve bayraklar) geçen aday fon sayısı."],
   ["T+1 alış / o gün bilinen veri", "Geçmiş testte sepet kurulum günü yalnızca o güne kadar bilinen verilerle seçilir ve ertesi işlem günü fiyatından alınmış sayılır; gelecek bilgisi kullanılmaz."],
 ];
-const state = { profile: "guvenli", period: "all", month: {} };
+const state = { profile: "guvenli", period: "3y", month: {} };
 let cache = null;
 
 async function load() {

@@ -15,10 +15,17 @@ on:
     # `kontrol` adımı derlemeyi atlar, yani gün başına tek derleme olur.
     - cron: '0 16 * * 1-5'
     - cron: '0 18 * * 1-5'
+  # GitHub zamanlayıcısı 19.10.2026'dan beri çalışmaların çoğunu düşürdüğü için akşam turu
+  # Analiz'in Supabase zamanlayıcısından da "yoklama: true" ile tetiklenir; bu çalışma
+  # zamanlanmış tur gibi yalnızca yeni kapanış varsa derler.
   workflow_dispatch:
     inputs:
       full:
         description: '5 yıllık veriyi baştan çek (cache yok sayılır)'
+        type: boolean
+        default: false
+      yoklama:
+        description: 'Zamanlanmış tur gibi: yalnızca yeni kapanış varsa derle (dış zamanlayıcı)'
         type: boolean
         default: false
   push:
@@ -59,7 +66,7 @@ jobs:
   build:
     needs: kontrol
     # Zamanlanmış çalışmada yalnızca yeni kapanış varsa; elle ve kod değişikliğinde her zaman.
-    if: ${{ github.event_name != 'schedule' || needs.kontrol.outputs.run == 'true' }}
+    if: ${{ (github.event_name != 'schedule' && github.event.inputs.yoklama != 'true') || needs.kontrol.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

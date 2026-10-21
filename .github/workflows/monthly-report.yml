@@ -21,7 +21,13 @@ on:
     - cron: '37 15 1 * *'    # yedek 18:37 TR
     - cron: '29 16 1 * *'    # yedek 19:29 TR
     - cron: '23 17 1 * *'    # yedek 20:23 TR
+  # Dış zamanlayıcı (Analiz'in Supabase'i) "otomatik: true" ile tetikler; zamanlanmış gibi davranır.
   workflow_dispatch:
+    inputs:
+      otomatik:
+        description: 'Zamanlanmış gibi: 17:15 bekle, ay içinde yalnızca bir kez gönder (dış zamanlayıcı)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,7 +50,7 @@ jobs:
         run: echo "ay=$(TZ=Europe/Istanbul date +%Y-%m)" >> "$GITHUB_OUTPUT"
       - name: Bu ayın e-postası gönderildi mi?
         id: isaret
-        if: github.event_name == 'schedule'
+        if: (github.event_name == 'schedule' || github.event.inputs.otomatik == 'true')
         uses: actions/cache/restore@v4
         with:
           path: mail-sent.flag
@@ -53,7 +59,7 @@ jobs:
         if: steps.isaret.outputs.cache-hit == 'true'
         run: echo "Bu ayın raporu daha önce gönderildi; bu çalışma bir şey yapmıyor."
       - name: 17:15'e kadar bekle
-        if: github.event_name == 'schedule' && steps.isaret.outputs.cache-hit != 'true'
+        if: (github.event_name == 'schedule' || github.event.inputs.otomatik == 'true') && steps.isaret.outputs.cache-hit != 'true'
         run: |
           now=$(date -u +%s); target=$(date -u -d "$(date -u +%F) 14:15" +%s)
           if [ "$target" -gt "$now" ]; then echo "$(( (target - now) / 60 )) dk bekleniyor"; sleep $(( target - now )); fi
@@ -95,7 +101,7 @@ jobs:
           python scripts/send_report.py --site-url "${SITE_URL}" --pdf model-rapor.pdf --portfolio-pdf portfoy-rapor.pdf
           date +%F > mail-sent.flag
       - name: Gönderildi işaretini kaydet
-        if: github.event_name == 'schedule' && steps.isaret.outputs.cache-hit != 'true' && hashFiles('mail-sent.flag') != ''
+        if: (github.event_name == 'schedule' || github.event.inputs.otomatik == 'true') && steps.isaret.outputs.cache-hit != 'true' && hashFiles('mail-sent.flag') != ''
         uses: actions/cache/save@v4
         with:
           path: mail-sent.flag

@@ -69,9 +69,6 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && github.event.inputs.yoklama != 'true') || needs.kontrol.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      # Cloudflare anahtarları depo sırlarına eklenmediyse Cloudflare adımı atlanır.
-      CF_HAZIR: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -113,16 +110,6 @@ jobs:
         with:
           path: data
           key: tefas-quant-db-${{ github.run_id }}
-
-      # Aynı site Cloudflare Pages'e de yayınlanır (fondedektifi.pages.dev).
-      # GitHub Pages yayını değişmeden devam eder.
-      - name: Cloudflare Pages'e yayınla
-        if: ${{ env.CF_HAZIR == 'true' }}
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=fondedektifi --branch=main --commit-dirty=true
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

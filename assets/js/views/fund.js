@@ -105,6 +105,12 @@ export async function render(app, route, store, opts = {}) {
   ${f.cap?.qualified ? `<div class="notice warn">⚠ <b>Önerilmez · nitelikli yatırımcı / serbest fon:</b> standart fonlardaki çeşitlendirme
     sınırları (bir şirkete en fazla %10, %5'i aşanların toplamı en fazla %40) bu fonlarda uygulanmayabilir; portföy 1–2 hisseye
     yoğunlaşabilir. TEFAS hisse bazında dağılım vermediği için yoğunlaşma ölçülemez; bu yüzden notu en fazla İZLE (B) olur.</div>` : ""}
+  ${f.cap?.concentration ? `<div class="notice danger">⛔ <b>Önerilmez · hisse yoğunlaşması (KAP ${esc(f.kap?.per || "")} raporu):</b>
+    en büyük hisse ${esc(f.kap?.name || "—")} portföyün %${num(f.kap?.max, 1)} kadarı, en büyük 3 hissenin toplamı %${num(f.kap?.top3, 1)}.
+    Tek bir şirketteki sorun fonu sert düşürebilir; notu en fazla İZLE (B) olur.</div>` : ""}
+  ${f.kap && f.kap.n > 0 && !f.cap?.concentration ? `<div class="notice">▦ <b>Portföy (KAP ${esc(f.kap.per || "")} raporu, ${esc((f.kap.date || "").slice(0, 10))}):</b>
+    ${num(f.kap.n, 0)} hisse, hisselerin portföydeki payı %${num(f.kap.eq, 1)} · en büyük hisse ${esc(f.kap.name || "—")} %${num(f.kap.max, 1)} ·
+    ilk 3 hisse %${num(f.kap.top3, 1)}, ilk 5 hisse %${num(f.kap.top5, 1)}.</div>` : ""}
   ${f.cap?.young ? `<div class="notice warn">⚠ <b>Önerilmez · kısa geçmiş:</b> fonun ${num(f.hd, 0)} işlem günlük geçmişi var (1 yıldan az).
     Kısa geçmişteki yüksek getiri tek bir sıçramadan gelebilir; bu yüzden notu en fazla İZLE (B) olur.</div>` : ""}
 

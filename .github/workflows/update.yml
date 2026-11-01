@@ -68,7 +68,10 @@ jobs:
     # Zamanlanmış çalışmada yalnızca yeni kapanış varsa; elle ve kod değişikliğinde her zaman.
     if: ${{ (github.event_name != 'schedule' && github.event.inputs.yoklama != 'true') || needs.kontrol.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      # Cloudflare anahtarları depo sırlarına eklenmediyse Cloudflare adımı atlanır.
+      CF_HAZIR: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -97,12 +100,12 @@ jobs:
       # çalışmaya yayılır ama site her seferinde güncel fiyatla yayınlanır.
       # Her 28 günlük parça hemen kaydedildiği için kesintide ilerleme kaybolmaz.
       - name: Veriyi güncelle, skorla, siteyi üret
-        timeout-minutes: 35
+        timeout-minutes: 48
         env:
           PYTHONIOENCODING: utf-8
           # TÜFE için TCMB EVDS anahtarı (yoksa Portföy Analiz yayınındaki seri kullanılır)
           EVDS_API_KEY: ${{ secrets.EVDS_API_KEY }}
-        run: python scripts/update.py --delay 3.0 --budget-min 20 ${{ github.event.inputs.full == 'true' && '--full' || '' }}
+        run: python scripts/update.py --delay 3.0 --budget-min 20 --kap-budget-min 12 ${{ github.event.inputs.full == 'true' && '--full' || '' }}
 
       - name: Veri deposunu kaydet
         if: always()
@@ -110,6 +113,16 @@ jobs:
         with:
           path: data
           key: tefas-quant-db-${{ github.run_id }}
+
+      # Aynı site Cloudflare Pages'e de yayınlanır (fondedektifi.pages.dev).
+      # GitHub Pages yayını değişmeden devam eder.
+      - name: Cloudflare Pages'e yayınla
+        if: ${{ env.CF_HAZIR == 'true' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=fondedektifi --branch=main --commit-dirty=true
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

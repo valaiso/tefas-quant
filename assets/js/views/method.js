@@ -64,6 +64,8 @@ export function render(app, _route, store) {
         <tr><th colspan="2">Önerilmeyen fonlar</th></tr>
         <tr><td>Nitelikli yatırımcı / serbest fonlar: standart fonlardaki çeşitlendirme sınırları (bir şirkete en fazla %10,
           %5'i aşanların toplamı en fazla %40) bu fonlarda uygulanmayabilir, portföy 1–2 hisseye yoğunlaşabilir; not en fazla İZLE</td><td>B</td></tr>
+        <tr><td>Hisse yoğunlaşması: KAP'taki son Portföy Dağılım Raporu'na göre tek bir hisse portföyün %${num(c.concentration?.max_single ?? 20, 0)}'sinden
+          ya da en büyük 3 hisse %${num(c.concentration?.top3 ?? 45, 0)}'inden fazlaysa (standart fonlarda yasal sınır tek şirket %10); not en fazla İZLE</td><td>B</td></tr>
         <tr><td>1 yıldan kısa geçmişli fonlar (yüksek getiri tek bir sıçramadan gelebilir); not en fazla İZLE.
           1 yıllık geçmişi olmayan fonda olağan dışı getiri, 6 aylık getiri kategorinin 6 aylıklarıyla kıyaslanarak aranır</td><td>B</td></tr>
         <tr><th colspan="2">Sert düşüş cezası</th></tr>

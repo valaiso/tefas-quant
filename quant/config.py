@@ -116,6 +116,12 @@ FOUNDER_RISK = {"min_share": 0.30, "min_funds": 3, "penalty": 10.0, "max_grade":
 #  - 1 yıldan kısa geçmişli fonlar: kısa geçmişte yüksek getiri tek bir sıçramadan gelebilir.
 RECOMMEND_CAPS = {"min_history_days": 252, "qualified": True, "max_grade": "B"}
 
+# Hisse yoğunlaşması (KAP Portföy Dağılım Raporu, fon portföy değerine göre %): tek bir hisse max_single'ı ya da
+# en büyük 3 hisse top3'ü aşarsa not en fazla B. Standart fonlarda yasal sınır tek ihraççı %10, %5'i aşanların
+# toplamı %40 (III-52.1 m.17); eşikler bunun belirgin üstünde, fiyat hareketiyle oluşan küçük aşımları cezalandırmaz.
+# Rapor en fazla max_age_days eski olmalı (serbest fonlar haftalık, diğerleri aylık yayımlar).
+CONCENTRATION = {"max_single": 20.0, "top3": 45.0, "max_age_days": 75, "min_coverage": 0.9, "max_grade": "B"}
+
 # ------------------------------------------------------------- risk bayrakları
 # Point-in-time test (Eki 2024 – Eyl 2026, 24 ay, ~28 bin fon-ay gözlemi):
 # * Son 3 ayda tepeden kategorisinden 10 puandan fazla düşüş: sonraki 1 yılda

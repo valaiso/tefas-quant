@@ -88,7 +88,11 @@ def _fund_record(code: str, f: pd.Series) -> dict:
         "fee": _r(f["fee"]),
         "fd": f["founder"] if isinstance(f.get("founder"), str) else None,
         "fk": bool(f.get("founder_risk", False)),
-        "cap": {"young": bool(f.get("cap_young", False)), "qualified": bool(f.get("cap_qualified", False))},
+        "cap": {"young": bool(f.get("cap_young", False)), "qualified": bool(f.get("cap_qualified", False)),
+                "concentration": bool(f.get("cap_concentration", False))},
+        "kap": ({"n": int(f["kap_n_stocks"]), "eq": _r(f["kap_equity"]), "max": _r(f["kap_max_w"]), "top3": _r(f["kap_top3"]),
+                 "top5": _r(f["kap_top5"]), "name": f.get("kap_top_name"), "per": f.get("kap_period"), "date": f.get("kap_publish_date")}
+                if not pd.isna(f.get("kap_n_stocks", np.nan)) else None),
         "sb": {k: bool(f[f"sb_{k}"]) for k in ("top", "history", "investors", "aum", "anomaly", "streak",
                                                 "founder", "tail", "hot") if f"sb_{k}" in f},
         "rk2": {
@@ -230,6 +234,7 @@ def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
             "ratingMode": config.RATING_MODE,
             "strongBuy": config.STRONG_BUY,
             "founderRisk": config.FOUNDER_RISK,
+            "concentration": config.CONCENTRATION,
             "riskFlags": config.RISK_FLAGS,
         },
     }

@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from quant import backtest, benchmarks, bes, export, fetch, model, report, scoring, simulation  # noqa: E402
+from quant import backtest, benchmarks, bes, export, fetch, kap, model, report, scoring, simulation  # noqa: E402
 from quant.db import DEFAULT_DB, ROOT, open_db  # noqa: E402
 
 
@@ -30,12 +30,24 @@ def main() -> int:
     parser.add_argument("--budget-min", type=float, default=None,
                         help="Geçmiş doldurma için azami dakika (CI'da ilk kurulumu böler)")
     parser.add_argument("--skip-fetch", action="store_true")
+    parser.add_argument("--kap-budget-min", type=float, default=12.0,
+                        help="KAP Portföy Dağılım Raporu taraması için azami dakika (0: atla)")
     args = parser.parse_args()
 
     started = time.time()
     conn = open_db(args.db)
     if not args.skip_fetch:
         fetch.update(conn, delay=args.delay, full=args.full, budget_min=args.budget_min)
+        if args.kap_budget_min > 0:
+            try:
+                # Yalnızca halka açık fonlar (nitelikli / serbest zaten en fazla B); önce son notu A+ / A olanlar
+                prio = [r[0] for r in conn.execute(
+                    "SELECT f.code FROM funds f LEFT JOIN (SELECT code, signal FROM scores WHERE date = (SELECT MAX(date) FROM scores)) s"
+                    " ON s.code = f.code ORDER BY CASE s.signal WHEN 'GÜÇLÜ AL' THEN 0 WHEN 'AL' THEN 1 WHEN 'İZLE' THEN 2 ELSE 3 END")]
+                public = set(scoring.load_funds(conn).query("qualified == 0").index)
+                kap.update(conn, codes=[c for c in prio if c in public], budget_min=args.kap_budget_min)
+            except Exception as e:  # noqa: BLE001 - KAP erişilemezse eski raporlarla devam
+                print(f"[kap] tarama atlandı: {e}", flush=True)
     result = scoring.run(conn)
     meta = export.build(result, Path(args.out))
     funds = scoring.load_funds(conn)

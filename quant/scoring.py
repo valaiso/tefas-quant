@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from . import config
+from . import kap
 from .categorize import categorize
 
 TRADING_DAYS = 252
@@ -438,7 +439,8 @@ def founder_risk(funds: pd.DataFrame, scored_codes, excluded: list) -> dict:
 
 
 def score_funds(m: pd.DataFrame, founder_flag: pd.Series | None = None,
-                prev_grades: list[pd.Series] | None = None, qualified: pd.Series | None = None) -> pd.DataFrame:
+                prev_grades: list[pd.Series] | None = None, qualified: pd.Series | None = None,
+                concentration: pd.DataFrame | None = None) -> pd.DataFrame:
     """founder_flag: kurucu riski taşıyan fonlar (True); prev_grades: önceki ay
     sonlarının temel notları (süreklilik şartı için). İkisi de verilmezse
     yalnızca temel (göreli) notlar üretilir."""
@@ -493,6 +495,16 @@ def score_funds(m: pd.DataFrame, founder_flag: pd.Series | None = None,
     s["signal"] = [sig for _, sig in graded]
     s["qualified_fund"] = (qualified.reindex(s.index).fillna(0).astype(bool)
                            if qualified is not None else pd.Series(False, index=s.index))
+    # KAP Portföy Dağılım Raporu: hisse yoğunlaşması (yalnızca güncel notlar; geçmiş raporlar saklanmaz)
+    cc = config.CONCENTRATION
+    kp = concentration.reindex(s.index) if concentration is not None and len(concentration) else None
+    for col in ("n_stocks", "equity", "max_w", "top3", "top5", "top_name", "period", "publish_date", "coverage"):
+        s[f"kap_{col}"] = kp[col] if kp is not None and col in kp else np.nan
+    # Fon sepetleri yabancı ETF'leri hisse bölümünde gösterebilir (ETF kendi içinde dağınıktır): kural uygulanmaz.
+    # Okunan satırlar raporun kendi hisse toplamının en az %90'ı değilse (ayrıştırma eksik) karar verilmez.
+    reliable = s["kap_coverage"].astype(float).between(cc["min_coverage"], 1.05) & ~s["category"].astype(str).str.contains("Fon Sepeti")
+    s["cap_concentration"] = (reliable & ((s["kap_max_w"].astype(float) > cc["max_single"])
+                                          | (s["kap_top3"].astype(float) > cc["top3"]))).fillna(False)
     if prev_grades is not None:
         apply_strong_buy(s, prev_grades)
     s["overall_rank"] = s["score"].rank(ascending=False, method="min").astype(int)
@@ -531,7 +543,7 @@ def apply_strong_buy(s: pd.DataFrame, prev_grades: list[pd.Series]) -> None:
     s["cap_young"] = s["history_days"] < rc["min_history_days"]
     s["cap_qualified"] = s["qualified_fund"] if rc["qualified"] else False
     above = grade.map(GRADE_ORDER.index).lt(GRADE_ORDER.index(rc["max_grade"]))
-    grade = grade.mask((s["cap_young"] | s["cap_qualified"]) & above, rc["max_grade"])
+    grade = grade.mask((s["cap_young"] | s["cap_qualified"] | s["cap_concentration"]) & above, rc["max_grade"])
     s["grade"] = grade
     s["signal"] = grade.map(GRADE_SIGNAL)
 
@@ -564,7 +576,8 @@ def run(conn: sqlite3.Connection) -> dict:
 
     risky = founder_risk(funds, metrics.index, excluded)
     flag = funds["founder"].reindex(metrics.index).isin(risky)
-    scored = score_funds(metrics, founder_flag=flag, prev_grades=prev, qualified=funds["qualified"])
+    scored = score_funds(metrics, founder_flag=flag, prev_grades=prev, qualified=funds["qualified"],
+                         concentration=kap.recent(conn, config.CONCENTRATION["max_age_days"]))
     scored = scored.join(funds[["name", "qualified", "category_src", "founder"]], how="left")
 
     as_of = panel["price"].index[-1].strftime("%Y-%m-%d")

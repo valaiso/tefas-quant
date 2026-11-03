@@ -99,3 +99,12 @@ export function searchFunds(funds, query, { limit = 10, exclude = [] } = {}) {
     .slice(0, limit)
     .map(([, f]) => f);
 }
+
+/** Ekranın altında kısa bildirim (birkaç saniye). */
+export function toast(text, ms = 3400) {
+  const t = document.createElement("div");
+  t.className = "push-toast";
+  t.textContent = text;
+  document.body.append(t);
+  setTimeout(() => t.remove(), ms);
+}

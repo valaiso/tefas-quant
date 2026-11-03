@@ -3,6 +3,7 @@
 // ana ekrana eklenmiş uygulamada ve bir dokunuşla izin verdirir. Abonelik Analiz hesabına
 // (Supabase push_subscriptions, app: "tefas-quant") yazılır; gönderimi Analiz deposundaki GitHub işi yapar.
 import { supabaseClient } from "./supabase.js";
+import { toast } from "./util.js";
 
 const VAPID_PUBLIC_KEY = "BCqEzXeK-J1lFgWvYoOmd1SnveNzmq1L-Ch_IalHNbSeRc79o0fJ7bUAIbMn42ZAcqc0wqfOHMzW4gmN2AZ6yQQ";
 const BASE = new URL("./", location.href).pathname;  // /tefas-quant/
@@ -60,14 +61,6 @@ async function disable(sb) {
 const BELL = '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>';
 const icon = (on) => `<svg viewBox="0 0 24 24" width="18" height="18" fill="${on ? "currentColor" : "none"}" stroke="currentColor"
   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${BELL}${on ? "" : '<path d="M3 3l18 18"/>'}</svg>`;
-
-function toast(text) {
-  const t = document.createElement("div");
-  t.className = "push-toast";
-  t.textContent = text;
-  document.body.append(t);
-  setTimeout(() => t.remove(), 3200);
-}
 
 /** Kurulum adımı gerektiğinde (giriş, ana ekrana ekleme, izin) üstte kısa bir kart gösterir. */
 function card(inner) {

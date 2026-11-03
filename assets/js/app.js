@@ -1,5 +1,5 @@
 // TEFAS Quant - uygulama girişi: veri yükleme, yönlendirme, tema, arama
-import { esc, dateTR } from "./util.js";
+import { esc, dateTR, toast } from "./util.js";
 import { initPush } from "./push.js";
 import * as overview from "./views/overview.js";
 import * as ranking from "./views/ranking.js";
@@ -13,13 +13,11 @@ import * as modelreport from "./views/modelreport.js";
 import * as personal from "./views/personal.js";
 import * as model from "./views/model.js";
 import * as bes from "./views/bes.js";
-import * as deger from "./views/deger.js";
 
 const VIEWS = {
   genel: { mod: overview, title: "Genel Bakış", eyebrow: "PİYASA ÖZETİ" },
   siralama: { mod: ranking, title: "Fon Sıralaması", eyebrow: "KATEGORİ İÇİ DERECELENDİRME" },
   bes: { mod: bes, title: "BES Fonları", eyebrow: "BİREYSEL EMEKLİLİK FONLARI" },
-  deger: { mod: deger, title: "Değer", eyebrow: "FON + BES DAĞILIMI DEĞERLENDİRME" },
   fon: { mod: fund, title: "Fon Detayı", eyebrow: "FON ANALİZİ", nav: "genel" },
   karsilastir: { mod: compare, title: "Karşılaştır", eyebrow: "FON KIYASLAMA" },
   backtest: { mod: backtest, title: "Quant / Backtest", eyebrow: "GEÇMİŞ A+ PERFORMANSI" },
@@ -110,7 +108,81 @@ document.getElementById("themeBtn").addEventListener("click", () => {
 });
 
 window.addEventListener("hashchange", render);
+// ---------------------------------------------------------------- yenile ve denetle
+// ↻: sunucuda yeni veri ya da yeni site sürümü varsa sayfa yeniden yüklenir (görünümler veriyi kendi içinde
+// önbellekte tuttuğu için en güvenli yol); yoksa "veriler güncel" denir. Her iki durumda derlemedeki denetimin
+// (data/checks.json) ve tarayıcıda yüklenen verinin hızlı denetiminin sonucu gösterilir.
+const REFRESH_FLAG = "tq-refreshed";
+const noStore = (p) => fetch(`${p}${p.includes("?") ? "&" : "?"}r=${Date.now()}`, { cache: "no-store" });
+
+function clientChecks() {
+  const errors = [], warnings = [];
+  const funds = store.funds || [];
+  if (!funds.length) errors.push("fon listesi boş");
+  const codes = new Set();
+  for (const f of funds) {
+    if (codes.has(f.c)) errors.push(`tekrarlanan fon kodu: ${f.c}`);
+    codes.add(f.c);
+    if (typeof f.s !== "number" || !Number.isFinite(f.s) || f.s < 0 || f.s > 100) errors.push(`geçersiz skor: ${f.c}`);
+  }
+  const last = store.meta?.lastDataDate;
+  const age = last ? Math.round((Date.now() - Date.parse(`${last}T18:00:00+03:00`)) / 86400000) : null;
+  if (age != null && age > 6) warnings.push(`son fiyat günü ${dateTR(last)} (${age} gün önce)`);
+  return { errors: errors.slice(0, 10), warnings };
+}
+
+function showChecks(server, fresh) {
+  const local = clientChecks();
+  const errors = [...(server?.errors || []), ...local.errors];
+  // Derleme denetimi zaten "son fiyat günü" uyarısı verdiyse tarayıcıdaki aynı uyarı tekrarlanmaz
+  const serverStale = (server?.warnings || []).some((w) => w.startsWith("son fiyat"));
+  const warnings = [...(server?.warnings || []), ...local.warnings.filter((w) => !(serverStale && w.startsWith("son fiyat")))];
+  const head = `${fresh ? "Yeni veriler yüklendi" : "Veriler güncel"} · son fiyat ${dateTR(store.meta?.lastDataDate)}`;
+  toast(errors.length ? `${head} · ${errors.length} veri hatası` : warnings.length ? `${head} · ${warnings.length} uyarı` : `${head} · denetim: sorun yok`);
+  const panel = document.getElementById("checkPanel");
+  if (!panel) return;
+  if (!errors.length && !warnings.length) { panel.hidden = true; return; }
+  panel.innerHTML = `<section class="card check-card ${errors.length ? "has-error" : ""}">
+    <div class="card-head"><h2>Veri denetimi</h2><button class="icon-btn" type="button" id="checkClose" aria-label="Kapat">✕</button></div>
+    ${server?.at ? `<p class="dim">Derleme denetimi: ${esc(new Date(server.at).toLocaleString("tr-TR"))}</p>` : ""}
+    <ul>${errors.map((e) => `<li class="down"><b>Hata:</b> ${esc(e)}</li>`).join("")}${warnings.map((w) => `<li><b>Uyarı:</b> ${esc(w)}</li>`).join("")}</ul></section>`;
+  panel.hidden = false;
+  panel.querySelector("#checkClose").addEventListener("click", () => (panel.hidden = true));
+}
+
+async function refreshSite() {
+  const btn = document.getElementById("refreshBtn");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add("spinning");
+  try {
+    const [meta, html, checks] = await Promise.all([
+      noStore("data/meta.json").then((r) => r.json()),
+      noStore("./").then((r) => (r.ok ? r.text() : "")).catch(() => ""),
+      noStore("data/checks.json").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    const cur = document.querySelector('script[type="module"][src*="assets/js/app.js"]')?.getAttribute("src");
+    const next = html.match(/src="([^"]*assets\/js\/app\.js)"/)?.[1];
+    if (meta.generated !== store.meta?.generated || meta.lastDataDate !== store.meta?.lastDataDate || (cur && next && cur !== next)) {
+      try { sessionStorage.setItem(REFRESH_FLAG, "1"); } catch { /* yok say */ }
+      location.reload();
+      return;
+    }
+    showChecks(checks, false);
+  } catch {
+    toast("Yenilenemedi · internet bağlantını kontrol et");
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("spinning");
+  }
+}
+document.getElementById("refreshBtn")?.addEventListener("click", refreshSite);
+
 initPush().catch((err) => console.warn("bildirim kurulumu", err));
-load().then(render).catch((err) => {
+load().then(async () => {
+  let refreshed = false;
+  try { refreshed = sessionStorage.getItem(REFRESH_FLAG) === "1"; sessionStorage.removeItem(REFRESH_FLAG); } catch { /* yok say */ }
+  if (refreshed) showChecks(await noStore("data/checks.json").then((r) => (r.ok ? r.json() : null)).catch(() => null), true);
+}).then(render).catch((err) => {
   app.innerHTML = `<div class="card empty"><h3>Veriler yüklenemedi</h3><p>${esc(err.message)}</p></div>`;
 });

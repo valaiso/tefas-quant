@@ -111,6 +111,13 @@ jobs:
           path: data
           key: tefas-quant-db-${{ github.run_id }}
 
+      # Yayından önce veri denetimi: ciddi hata varsa (bozuk dosya, geçersiz skor, ağırlık toplamı 100 değil…)
+      # yayın durur, eski site yerinde kalır. Sonuç dist/data/checks.json'da; sitedeki ↻ düğmesi gösterir.
+      - name: Veri denetimi
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python scripts/validate_site.py --out dist
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

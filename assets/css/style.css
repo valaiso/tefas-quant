@@ -528,9 +528,9 @@ table.bt-grades td { white-space: nowrap; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 900px) {
-  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Değer, Model Raporu ve Portföy Simülasyonu
+  /* Telefonda alt menü kalabalık olmasın: Metodoloji, Karşılaştır, BES, Model Raporu ve Portföy Simülasyonu
      yalnızca masaüstünde */
-  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"], .tab[data-view="deger"],
+  .tab[data-view="metodoloji"], .tab[data-view="karsilastir"], .tab[data-view="bes"],
   .tab[data-view="modelrapor"], .tab[data-view="simulasyon"] { display: none; }
   /* Telefonda sol üstte sayfa etiketi yerine logo ve marka adı */
   .topbar-logo { display: block; flex: none; margin-right: -6px; }
@@ -846,3 +846,10 @@ table.bt-grades td { white-space: nowrap; }
   box-shadow: 0 6px 24px rgba(0,0,0,.25); }
 /* Telefonda dönem düğmeleri ("1 Hafta", "Başından Beri") iki satıra bölünmesin: tek satır, gerekirse yatay kaydırma */
 @media (max-width: 640px) { #pfWin { max-width: 100%; overflow-x: auto; } #pfWin button { white-space: nowrap; } }
+
+/* ↻ yenile ve veri denetimi paneli */
+.icon-btn.spinning { animation: spin .7s linear infinite; }
+.check-panel { padding: 16px 28px 0; }
+.check-card ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: .88rem; }
+.check-card.has-error { border-color: color-mix(in srgb, var(--down, #d6404a) 45%, var(--border)); }
+@media (max-width: 640px) { .check-panel { padding: 12px 12px 0; } }

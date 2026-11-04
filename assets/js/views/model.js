@@ -81,7 +81,7 @@ export async function render(app, _route, store) {
   <section class="method-intro card">
     <h2>Model Portföyler <span class="model-tag">aylık dönem</span></h2>
     <p>Üç risk profilinde, son <b>1-2-3 yılda vergi sonrası istikrarlı</b> getiri vermiş, TEFAS Quant notu ve risk bayrakları temiz,
-      getirisi tek bir sıçramaya dayanmayan ${R.minFunds}–${R.maxFunds} fonluk ağırlıklı sepetler.
+      getirisi tek bir sıçramaya dayanmayan ${R.minFunds}–${R.maxFunds} fonluk (Güvenli 2 fon) ağırlıklı sepetler.
       Köklü kurucuların (devlet bankaları ve büyük özel bankaların portföy şirketleri) fonlarına öncelik verilir.</p>
     <p><b>Model portföyler ayda bir güncellenir:</b> fon seçimi ve oranlar her ayın son işlem gününde yeniden kurulur, ay boyunca sepet aynı kalır;
       iyi kalan fonlar yeni ayda da sepette kalabilir, yalnızca ağırlıkları değişebilir · sonraki güncelleme <b>${dateTR(m.nextRebalance)}</b>.</p>
@@ -103,17 +103,17 @@ export async function render(app, _route, store) {
         (z &gt; ${num(R.spikeZ, 1)}), son 1 yılda tek günde ±%${num(R.spikeDay * 100, 0)}'ten büyük hareket varsa ya da 1 yıllık getiri profil sınırını aşıyorsa fon alınmaz.</li>
       <li><b>Puan:</b> vergi sonrası getiri (1Y/2Y/3Y), istikrar (12 aylık dönemlerde PPF'yi geçme oranı), Sharpe (2 yıl), azami düşüş, TEFAS Quant skoru,
         yatırımcı sayısı ve yönetim ücreti; profil ağırlıkları aşağıda. Köklü kurucuya +${num(R.bankBonus, 0)}, önceki dönem sepette olan fona
-        +${num(R.stayBonus, 0)} süreklilik puanı.</li>
+        +${num(R.stayBonus, 0)} süreklilik puanı. <span class="dim">Neden: fon satışında stopaj ödenir; iyi kalan fonu tutmak vergiyi erteler,
+        sık değişim bu avantajı kaybettirir.</span></li>
       <li><b>Çeşitlendirme:</b> aynı portföy şirketinden tek fon; kategori başına sınır; seçilmiş bir fonla haftalık getiri korelasyonu &gt; ${num(R.maxCorr, 2)}
         olan fon alınmaz (Güvenli hariç: düşük oynaklıklı fonlar faizle birlikte hareket eder).</li>
       <li><b>Yönetici riski:</b> Güvenli sepetin en az %60'ı, Dengeli ve Atak'ın kendi fonlarının en az %50'si köklü kurucularda; diğer kurucuların tek fonu
-        Güvenli ve Atak'ta en fazla %20, Dengeli'de %15. Güvenli az fonla kurulur: köklü pay, köklü fonlara yüksek ağırlık verilerek (fon başına en fazla %40)
-        sağlanır; genelde 2 köklü + 1 diğer fon. <span class="dim">Para piyasası fonları birbirine çok benzer getirir; 5 fona yaymak getiriyi sulandırır,
-        riski azaltmaz.</span> <span class="dim">Neden: Ekim 2026'da Pardus Portföy'ün para piyasası fonu dahil fonları
+        Atak'ta en fazla %20, Dengeli'de %15. Güvenli 2 fonla kurulur: köklü pay (%60) tek köklü fonda, kalan %40 tek diğer fonda.
+        <span class="dim">Para piyasası fonları birbirine çok benzer getirir; 5 fona yaymak getiriyi sulandırır, riski azaltmaz.</span> <span class="dim">Neden: Ekim 2026'da Pardus Portföy'ün para piyasası fonu dahil fonları
         tek seferde ~%99 değer kaybetti; kuruluş günü fon temiz görünüyordu.</span></li>
       ${R.excludedFounders?.length ? `<li><b>Hariç tutulan kurucular:</b> ${R.excludedFounders.map((x) => `<b>${esc(x.name)}</b> (${x.funds} fon): ${esc(x.why)}`).join("; ")}.
         Bu kurucuların hiçbir fonu, notu ne olursa olsun hiçbir profile alınmaz.</li>` : ""}
-      <li><b>Ağırlık:</b> puan² / oynaklık ile orantılı; her fon %${num(R.minW * 100, 0)}–%${num(R.maxW * 100, 0)} (Güvenli'de köklü fon %40'a kadar), 5'in katlarına yuvarlanır.</li>
+      <li><b>Ağırlık:</b> ters oynaklık (oynaklığı düşük fon daha çok alır; puan fon seçiminde kullanılır); her fon %${num(R.minW * 100, 0)}–%${num(R.maxW * 100, 0)} (Güvenli'de köklü fon %60, diğer fon %40), 5'in katlarına yuvarlanır.</li>
       <li><b>Köklü kurucular:</b> <span class="dim">${R.banks.map(esc).join(", ")}</span></li>
     </ol>
     <h3 class="glossary-title">Kavramlar</h3>

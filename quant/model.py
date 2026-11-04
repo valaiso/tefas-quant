@@ -25,16 +25,19 @@ Adımlar (her profil için)
 4. Puan (havuz içinde yüzdelik): vergi sonrası getiri (1Y/2Y/3Y), istikrar
    (12 aylık dönemlerde PPF'yi geçme oranı), Sharpe, düşüş, TEFAS Quant skoru,
    yatırımcı sayısı ve yönetim ücreti; köklü kurucuya (devlet / büyük özel banka) +2,
-   önceki sepette olan fona +3 süreklilik puanı.
+   önceki sepette olan fona +10 süreklilik puanı (iyi kalan fon sepette kalır;
+   her satışta stopaj ödendiği için sık fon değişimi vergi ertelemesini kaybettirir).
 5. Seçim: puan sırasıyla; kategori başına sınır, aynı portföy şirketinden tek
    fon, seçilmiş fonla haftalık korelasyonu > 0,85 olan fon alınmaz; en az 3,
    en fazla 10 fon (tavan).
-6. Ağırlık ∝ puan² / oynaklık^v; her fon %5-%35, 5'in katlarına yuvarlanır.
-   Köklü kurucu dışındaki fon Güvenli'de en fazla %20, Dengeli'de %15 alır
+6. Ağırlık ∝ 1 / oynaklık (ters oynaklık; puan seçimde kullanılır, ağırlıkta değil);
+   her fon %5-%35, 5'in katlarına yuvarlanır. Testte (Kas 2023 – Eki 2026) puan² / oynaklık
+   ağırlığından Atak'ta daha yüksek getiri ve daha düşük azami düşüş verdi.
+   Köklü kurucu dışındaki fon Atak'ta en fazla %20, Dengeli'de %15 alır
    (tek bir yöneticinin çöküşü sepeti batırmasın; ör. Pardus, Ekim 2026).
-   Güvenli az fonla kurulur (compact): köklü fon %40'a kadar alır ve köklü payı
-   ağırlıkla sağlanır; genelde 2 köklü + 1 diğer fon (%40 / %40 / %20). PPF'ler
-   birbirine çok benzer, 5 fona yaymak getiriyi sulandırır, riski azaltmaz.
+   Güvenli 2 fonla kurulur (compact): köklü payı (%60) tek köklü fona, kalan %40
+   tek diğer fona verilir. PPF'ler birbirine çok benzer getirir; 5 fona yaymak
+   getiriyi sulandırır (3 yıllık testte 5 fon %248, 2 fon %252).
 """
 from __future__ import annotations
 
@@ -57,7 +60,7 @@ MIN_W, MAX_W, STEP = 0.05, 0.35, 0.05
 SPIKE_SHARE, SPIKE_Z, SPIKE_DAY = 0.40, 2.5, 0.15
 PERIOD_MONTHS = 1
 BANK_BONUS = 2.0
-STAY_BONUS = 3.0
+STAY_BONUS = 10.0   # testte 3'e göre aylık fon değişimi azaldı, getiri aynı ya da daha iyi
 PPF_STOPAJ = 0.175
 PPF_TOLERANCE = 0.02     # Güvenli: vergi sonrası yıllık getiri PPF'nin en fazla 2 puan altında
 RET_WINDOWS = {"1y": (252, 0.3), "2y": (504, 0.4), "3y": (756, 0.3)}
@@ -79,21 +82,21 @@ BANK_FOUNDERS = {
 PROFILES = {
     "guvenli": {
         "label": "Güvenli", "vol": (0.0, 0.06), "mdd": -0.05, "beat": "ppf_near", "win": 0.0,
-        "max_1y": 1.0, "per_cat": 3, "v_power": 1.0, "min_score": 40, "nonbank_max": 0.20, "bank_min": 0.6,
-        "bank_max": 0.40, "compact": True,  # köklü payı az fona yüksek ağırlıkla: 2 köklü + 1 diğer
+        "max_1y": 1.0, "per_cat": 3, "min_score": 40, "nonbank_max": 0.40, "bank_min": 0.6,
+        "bank_max": 0.60, "compact": True, "min_funds": 2,  # 2 fon: köklü %60 + diğer %40
         "max_corr": None,  # düşük oynaklıklı fonlar faizle birlikte hareket eder; çeşitlilik kurucu ile sağlanır
         "weights": {"ret": 25, "win": 25, "sharpe": 15, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
     "dengeli": {
         "label": "Dengeli", "vol": (0.04, 0.20), "mdd": -0.20, "beat": "tufe_all", "win": 0.3,
         "trend": True,  # 200g ort. altı ya da 6 ayda PPF gerisindeki fon alınmaz (testte iki yarıda da daha iyi)
-        "max_1y": 1.5, "per_cat": 2, "v_power": 0.5, "min_score": 40, "safe_share": 0.4, "nonbank_max": 0.15, "bank_min": 0.5,
+        "max_1y": 1.5, "per_cat": 2, "min_score": 40, "safe_share": 0.4, "nonbank_max": 0.15, "bank_min": 0.5,
         "weights": {"ret": 30, "win": 15, "sharpe": 20, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
     "atak": {
         "label": "Atak", "vol": (0.08, 0.35), "mdd": -0.35, "beat": "tufe_all", "win": 0.3,
         "trend": True,
-        "max_1y": 2.0, "per_cat": 2, "v_power": 0.5, "min_score": 40, "min_risky": 0.8, "bank_min": 0.5, "nonbank_max": 0.20,
+        "max_1y": 2.0, "per_cat": 2, "min_score": 40, "min_risky": 0.8, "bank_min": 0.5, "nonbank_max": 0.20,
         "weights": {"ret": 35, "win": 10, "sharpe": 20, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
 }
@@ -348,7 +351,7 @@ def _choose(pool: pd.DataFrame, wk: pd.DataFrame, profile: dict, limit: int, tak
         peers = [x for x in (*against, *chosen) if x in wk.columns]
         if peers and max_corr is not None and wk[peers].corrwith(wk[c]).max() > max_corr:
             continue
-        if len(chosen) >= MIN_FUNDS and caps >= cap_room - 1e-9 and pool.at[c, "score"] < profile["min_score"]:
+        if len(chosen) >= profile.get("min_funds", MIN_FUNDS) and caps >= cap_room - 1e-9 and pool.at[c, "score"] < profile["min_score"]:
             break
         chosen.append(c)
         per_cat[cat] = per_cat.get(cat, 0) + 1
@@ -396,8 +399,9 @@ def pick(m: pd.DataFrame, wk: pd.DataFrame | None, profile: dict, prev: list[str
                           founders=founders | {pool.at[c, "founder"] for c in risky_b},
                           cap_room=n_room, enough=1,
                           against=risky_b + list(taken)) if len(n_pool) and (n_room > 1e-9 or not compact) else []
-        if compact and len(risky_b) + len(risky_n) < MIN_FUNDS:  # en az 3 fon: eksik kalanı köklü fonlarla tamamla
-            risky_b += _choose(b_pool, wk, profile, MIN_FUNDS - len(risky_b) - len(risky_n), taken=taken | set(risky_b) | set(risky_n),
+        min_n = profile.get("min_funds", MIN_FUNDS)
+        if compact and len(risky_b) + len(risky_n) < min_n:  # en az fon sayısı: eksik kalanı köklü fonlarla tamamla
+            risky_b += _choose(b_pool, wk, profile, min_n - len(risky_b) - len(risky_n), taken=taken | set(risky_b) | set(risky_n),
                                founders=founders | {pool.at[c, "founder"] for c in risky_b + risky_n},
                                cap_room=0.0, against=risky_b + risky_n + list(taken))
         risky = risky_b + risky_n
@@ -423,7 +427,7 @@ def pick(m: pd.DataFrame, wk: pd.DataFrame | None, profile: dict, prev: list[str
         cash = [f["code"] for f in safe["funds"] if f["code"] not in risky][: MIN_FUNDS - len(risky)]
 
     rows = {c: pool.loc[c].to_dict() for c in risky}
-    raw = pd.Series({c: rows[c]["score"] ** 2 / max(rows[c]["vol"], 0.02) ** profile["v_power"] for c in risky}, dtype=float)
+    raw = pd.Series({c: 1.0 / max(rows[c]["vol"], 0.02) for c in risky}, dtype=float)  # ters oynaklık
     if legs and any(v == "all" for v in legs.values()) and any(v == "bank" for v in legs.values()):
         grp = pd.Series(legs)
         b_share = bank_min

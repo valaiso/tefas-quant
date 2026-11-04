@@ -115,6 +115,9 @@ def validate(out: Path, max_age_days: int = 6) -> dict:
                 if gone:
                     warnings.append(f"{label} {pk}: sıralamada olmayan fon {', '.join(gone)}")
             bt = p.get("backtest") or {}
+            # TÜFE alınamazsa Dengeli / Atak'ın "enflasyonu geçmiş" şartı sessizce devre dışı kalır, sepet değişir
+            if key == "model" and pk != "guvenli" and not any((v or {}).get("tufe") is not None for v in (p.get("bench") or {}).values()):
+                errors.append(f"{label} {pk}: TÜFE kıyası yok (TÜFE verisi alınamamış); sepet enflasyon şartı olmadan kurulmuş olur")
             if bt.get("available") and not _sorted_dates(bt.get("dates") or []):
                 errors.append(f"{label} {pk}: geçmiş test tarihleri sıralı değil")
 

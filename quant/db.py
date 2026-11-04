@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS bes_prices (
 
 CREATE TABLE IF NOT EXISTS bes_funds (code TEXT PRIMARY KEY, name TEXT);
 
+-- Ücret / stopaj geçmişi (FVT güncellemesinde değişen değerler, tarihli)
+CREATE TABLE IF NOT EXISTS fee_history (
+    code TEXT NOT NULL,
+    date TEXT NOT NULL,
+    fee REAL,
+    stopaj REAL,
+    PRIMARY KEY (code, date)
+) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE INDEX IF NOT EXISTS idx_prices_date ON prices (date);
 """

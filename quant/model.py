@@ -66,6 +66,129 @@ PPF_TOLERANCE = 0.02     # Güvenli: vergi sonrası yıllık getiri PPF'nin en f
 RET_WINDOWS = {"1y": (252, 0.3), "2y": (504, 0.4), "3y": (756, 0.3)}
 CASH_CATEGORY = "Para Piyasası"
 
+# ---------------------------------------------------------------- gerçekçi geçmiş test
+# Satış valörü (işlem günü): satılan fonun parası bu kadar gün sonra yeni fona geçer, arada getiri yoktur.
+# TEFAS verisinde fon bazında valör yok; kategoriye göre yaklaşık değerler kullanılır.
+VALOR_DAYS = {"Para Piyasası": 0, "Borçlanma Araçları": 1, "Katılım": 1}
+VALOR_DEFAULT = 2                                   # hisse, değişken, karma, fon sepeti, kıymetli madenler
+VALOR_FOREIGN, FOREIGN_WORDS = 3, ("YABANCI", "EUROBOND", "DÖVİZ")
+LOCK_DAYS = 5          # fiyatı bu kadar işlem günü değişmeyen fon satılamaz (işleme kapalı / tasfiyede): para kilitli kalır
+PPF_KEY = "__PPF__"    # sepet boş kalan dönemde para PPF ortalamasında bekler
+
+# ---------------------------------------------------------------- kategoriye göre puan
+# Kategori içi test (Haz 2022 – Eki 2026): hangi ölçüt sonraki 6-12 ayın getirisini gerçekten öngörüyor?
+#  * Para piyasası: geçmiş getiri (sıra korelasyonu +0,67) ve düşük ücret (+0,36) çok güçlü; Sharpe ve düşüş ~0 (gürültü).
+#  * Borçlanma: geçmiş getiri +0,51, Sharpe +0,39 işe yarıyor; düşüş katkı vermiyor.
+#  * Katılım: Sharpe ters çalışıyor (-0,24; pürüzsüz fiyatlı fonlar sonra geride kalıyor).
+#  * Hisse / değişken: TEFAS Quant skoru kazananı seçmiyor (+0,03 / +0,10; A notluların isabeti ~%50), yalnızca
+#    kötüleri eliyor (C/D zaten havuza alınmaz); skor ağırlığı risk ölçülerine aktarılır.
+#  * Kıymetli madenler: fonlar aynı varlığı tutar, fark ücretten gelir (1Y'de +0,23).
+# (kaynak ölçü, aktarılan pay, hedef ölçüler)
+CATEGORY_SCORE_SHIFT = {
+    "Para Piyasası": [("sharpe", 1.0, ("ret", "fee")), ("mdd", 1.0, ("ret", "fee"))],
+    "Borçlanma Araçları": [("mdd", 1.0, ("ret",))],
+    "Katılım": [("sharpe", 1.0, ("ret",))],
+    "Hisse Senedi": [("quant", 1.0, ("sharpe", "mdd"))],
+    "Değişken": [("quant", 1.0, ("sharpe", "mdd"))],
+    "Kıymetli Madenler": [("ret", 0.5, ("fee",))],
+}
+
+
+def _cat_weights(w: dict, cat) -> dict:
+    """Profil puan ağırlıklarını fonun kategorisine göre kaydırır (toplam değişmez)."""
+    rules = CATEGORY_SCORE_SHIFT.get(cat)
+    if not rules:
+        return w
+    w = dict(w)
+    for src, share, dsts in rules:
+        moved = w.get(src, 0) * share
+        if not moved:
+            continue
+        w[src] -= moved
+        for d in dsts:
+            w[d] = w.get(d, 0) + moved / len(dsts)
+    return w
+
+
+def _valor(code, funds: pd.DataFrame) -> int:
+    if code == PPF_KEY:
+        return 0
+    name = str(funds["name"].get(code, "")).upper() if "name" in funds else ""
+    if any(k in name for k in FOREIGN_WORDS):
+        return VALOR_FOREIGN
+    return VALOR_DAYS.get(funds["category"].get(code), VALOR_DEFAULT)
+
+
+def _realistic(hist: list[dict], dates: pd.DatetimeIndex, px: pd.DataFrame, ppf: pd.Series, funds: pd.DataFrame) -> dict:
+    """Sepet geçmişini gerçek bir yatırımcı gibi uygular: fon satışında kazanç üzerinden stopaj ödenir, satılan
+    fonun parası valör günü kadar boşta bekler, fiyatı duran (işleme kapalı) fon satılamaz. Değer, her noktada
+    "bugün hepsini satsam eline geçen" (birikmiş stopaj düşülmüş) tutardır. Getiri kıyası vergi sonrası PPF iledir."""
+    rate = (funds["stopaj"].fillna(PPF_STOPAJ * 100).clip(0, 100) / 100) if "stopaj" in funds else pd.Series(dtype=float)
+    tax_of = lambda c: PPF_STOPAJ if c == PPF_KEY else float(rate.get(c, PPF_STOPAJ))
+    cols = {c: k for k, c in enumerate(px.columns)}
+    P, PP = px.values, ppf.values
+
+    def price(c, k):
+        return float(PP[k]) if c == PPF_KEY else float(P[k, cols[c]]) if c in cols else float("nan")
+
+    def stale(c, k):
+        if c == PPF_KEY or c not in cols or k < LOCK_DAYS:
+            return False
+        win = P[k - LOCK_DAYS:k + 1, cols[c]]
+        return bool(np.all(win == win[-1]))
+
+    def liquid(pos, cash, k):
+        return cash + sum(u * price(c, k) - tax_of(c) * max(u * price(c, k) - cost, 0.0) for c, (u, cost) in pos.items())
+
+    pos, cash, vals, tax_paid, lag_days, locked_n, switches = {}, 100.0, [], 0.0, [], 0, 0
+    for k, h in enumerate(hist):
+        ka = h["i"] + 1
+        ke = hist[k + 1]["i"] + 1 if k + 1 < len(hist) else len(dates) - 1
+        if ke <= ka:
+            continue
+        if not vals:
+            vals.append(100.0)
+        w = {f["code"]: f["w"] for f in h["funds"]} or {PPF_KEY: 1.0}
+        cur = {c: u * price(c, ka) for c, (u, _) in pos.items()}
+        V = cash + sum(cur.values())
+        locked = {c for c in pos if stale(c, ka)}
+        locked_n += len(locked)
+        free = V - sum(cur[c] for c in locked)
+        tw = sum(v for c, v in w.items() if c not in locked)
+        tgt = {c: v / tw * free for c, v in w.items() if c not in locked} if tw > 0 else {}
+        lag = 0
+        for c in list(pos):
+            if c in locked:
+                continue
+            val, t = cur[c], tgt.get(c, 0.0)
+            if val > t + 1e-9:
+                frac = (val - t) / val
+                basis = pos[c][1] * frac
+                tax = tax_of(c) * max(val - t - basis, 0.0)
+                cash += val - t - tax
+                tax_paid += tax
+                pos[c] = [pos[c][0] * (1 - frac), pos[c][1] - basis]
+                if pos[c][0] <= 1e-12:
+                    del pos[c]
+                lag = max(lag, _valor(c, funds))
+                switches += 1
+        kb = min(ka + lag, ke)
+        if lag:
+            lag_days.append(kb - ka)
+        need = {c: t - (pos[c][0] * price(c, ka) if c in pos else 0.0) for c, t in tgt.items()}
+        need = {c: n for c, n in need.items() if n > 1e-9 and np.isfinite(price(c, kb)) and price(c, kb) > 0}
+        tot = sum(need.values())
+        if tot > 0 and cash > 0:
+            spend = cash
+            for c, n in need.items():
+                amt = spend * n / tot
+                u, cost = pos.get(c, [0.0, 0.0])
+                pos[c] = [u + amt / price(c, kb), cost + amt]
+                cash -= amt
+        vals.append(liquid(pos, cash, ke))
+    return {"values": vals, "taxPaid": tax_paid, "locked": locked_n, "switches": switches,
+            "avgLag": float(np.mean(lag_days)) if lag_days else 0.0}
+
 # Köklü kurucular: devlet bankaları ve büyük özel bankaların portföy şirketleri
 BANK_FOUNDERS = {
     "ZİRAAT PORTFÖY", "VAKIF PORTFÖY", "HALK PORTFÖY",            # devlet bankası kökenli
@@ -235,7 +358,10 @@ def _score(m: pd.DataFrame, w: dict) -> pd.Series:
         "inv": _pct(np.log(m["investors"].clip(lower=1))).fillna(50),
         "fee": _pct(m["fee"], higher=False).fillna(50),
     }
-    return sum(parts[k] * w[k] for k in w) / sum(w.values())
+    if not CATEGORY_SCORE_SHIFT or "category" not in m:
+        return sum(parts[k] * w[k] for k in w) / sum(w.values())
+    W = pd.DataFrame([_cat_weights(w, c) for c in m["category"]], index=m.index).fillna(0.0)
+    return sum(parts[k] * W[k] for k in W.columns if k in parts) / W.sum(axis=1)
 
 
 def _round_weights(raw: pd.Series, caps: pd.Series | None = None) -> pd.Series:
@@ -476,6 +602,21 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
     px = price.ffill()
     scores_at = {b["signal"]: b["scores"] for b in (baskets or []) if "scores" in b}
 
+    # Kıyas: aynı kategorilerin ortancası (fon seçimi katkısını ayırmak için) ve hisse fonu ortancası
+    size_p = panel["size"].reindex(columns=px.columns).ffill()
+    inv_p = panel["investors"].reindex(columns=px.columns).ffill()
+    is_public = ~(funds["qualified"].fillna(0).astype(bool) | funds["private"].fillna(False))
+    is_public = is_public.reindex(px.columns).fillna(False)
+    cat_all = funds["category"].reindex(px.columns)
+    med_cache = {}
+
+    def cat_medians(i, a, e):
+        if (a, e) not in med_cache:
+            r = px.loc[e] / px.loc[a] - 1
+            ok = r.notna() & (r.abs() < 3) & is_public & (size_p.iloc[i] >= MIN_AUM) & (inv_p.iloc[i] >= MIN_INVESTORS)
+            med_cache[(a, e)] = r[ok].groupby(cat_all[ok]).median().to_dict()
+        return med_cache[(a, e)]
+
     # Her dönem kurulan sepetler (point-in-time), son kurulan = bugünkü sepet
     forms = [i for i in formation_days(dates) if i >= EARLY_HISTORY and i + 1 < len(dates) and (not scores_at or i in scores_at)]
     history = {k: [] for k in PROFILES}
@@ -555,7 +696,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
                               "r1": _r(row["cagr_1y"]), "why": res["spiky"][c]})
 
         # Geçmiş performans: her dönem T+1 alış, bir sonraki kuruluma kadar tutuş
-        rets, points, items = [], [], []
+        rets, points, items, peer_r, eq_r = [], [], [], [], []
         daily_d, daily_v, lvl_now = [], [], 100.0  # günlük seviye (Model Simülasyonu ve kişisel rapor için)
         for k, h in enumerate(hist):
             a = dates[h["i"] + 1]
@@ -583,6 +724,14 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
                 points.append(a)
             rets.append(ret)
             points.append(e)
+            med = cat_medians(h["i"], a, e)
+            p_ret = float(ppf.loc[e] / ppf.loc[a] - 1)
+            if h["funds"]:
+                cw = pd.Series({f["code"]: f["w"] for f in h["funds"]}).groupby(funds["category"].reindex(w.index)).sum()
+                peer_r.append(float(sum(v * med.get(c, p_ret) for c, v in cw.items()) / cw.sum()))
+            else:
+                peer_r.append(p_ret)
+            eq_r.append(med.get("Hisse Senedi", np.nan))
         backtest = {"available": False}
         if len(rets) >= 2:
             rs = pd.Series(rets, index=points[1:])
@@ -598,8 +747,27 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
                 s = s / s.iloc[0] * 100
                 series[b] = [None if pd.isna(x) else round(float(x), 3) for x in s.values]
                 stats[b] = _stats(s, s.pct_change().dropna(), ppf_p if b != "ppf" else None)
+            # Kıyaslar: seçilen kategorilerin ortancası ve hisse fonu ortancası (stopaj öncesi)
+            for name, rr in (("peer", pd.Series(peer_r, index=points[1:])), ("equity", pd.Series(eq_r, index=points[1:]))):
+                if rr.notna().all():
+                    lv = pd.concat([pd.Series([100.0], index=[points[0]]), (1 + rr).cumprod() * 100])
+                    series[name] = [round(float(x), 3) for x in lv.values]
+                    stats[name] = _stats(lv, rr, ppf_p)
+            # Gerçekçi test: stopaj (her satışta), valör, işleme kapalı fon; kıyası vergi sonrası PPF
+            net = _realistic(hist, dates, px, ppf, funds)
+            costs = None
+            if len(net["values"]) == len(points):
+                lv_net = pd.Series(net["values"], index=points)
+                ppf_net = 100 * (1 + (ppf_l / ppf_l.iloc[0] - 1) * (1 - PPF_STOPAJ))
+                pn_m = ppf_net.pct_change().dropna()
+                series["modelNet"] = [round(float(x), 3) for x in lv_net.values]
+                series["ppfNet"] = [round(float(x), 3) for x in ppf_net.values]
+                stats["modelNet"] = _stats(lv_net, lv_net.pct_change().dropna(), pn_m)
+                stats["ppfNet"] = _stats(ppf_net, pn_m, None)
+                costs = {"taxPaid": round(net["taxPaid"], 2), "switches": net["switches"], "locked": net["locked"],
+                         "avgLag": round(net["avgLag"], 2)}
             backtest = {"available": True, "dates": [d.strftime("%Y-%m-%d") for d in points],
-                        "series": series, "stats": stats,
+                        "series": series, "stats": stats, "costs": costs,
                         "daily": {"dates": [d.strftime("%Y-%m-%d") for d in daily_d], "model": [round(float(x), 3) for x in daily_v]}}
 
         bm = m.attrs.get("bench", {}) if not m.empty else {}
@@ -638,5 +806,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
             "excludedFounders": [{"name": k, "why": v, "funds": int((funds["founder"].map(excluded_founder) == v).sum())}
                                  for k, v in EXCLUDED_FOUNDERS.items()],
             "retWindows": {k: w for k, (_, w) in RET_WINDOWS.items()},
+            "valor": {**VALOR_DAYS, "diğer": VALOR_DEFAULT, "yabancı / döviz": VALOR_FOREIGN}, "lockDays": LOCK_DAYS,
+            "categoryShift": {c: [[s, sh, list(d)] for s, sh, d in r] for c, r in CATEGORY_SCORE_SHIFT.items()},
         },
     }

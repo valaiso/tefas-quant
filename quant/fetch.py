@@ -210,6 +210,12 @@ def sync_fvt(conn: sqlite3.Connection, end: dt.date, force: bool = False,
                     futures[fut],
                 ),
             )
+            fee_, st_ = _num(fund.get("yonetimUcret")), _num(fund.get("stopaj"))
+            last = conn.execute("SELECT fee, stopaj FROM fee_history WHERE code = ? ORDER BY date DESC LIMIT 1",
+                                (futures[fut],)).fetchone()
+            if last is None or last[0] != fee_ or last[1] != st_:
+                conn.execute("INSERT OR REPLACE INTO fee_history (code, date, fee, stopaj) VALUES (?, ?, ?, ?)",
+                             (futures[fut], now[:10], fee_, st_))
             updated += 1
     finally:
         pool.shutdown(wait=False, cancel_futures=True)

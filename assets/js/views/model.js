@@ -2,8 +2,19 @@ import { esc, num, pct, dateTR, codeChip, gradeBadge } from "../util.js";
 import { lineChart } from "../chart.js";
 import { startIndex, windowed, windowStats, statRow } from "./simulation.js";
 
-const COLORS = { model: "var(--brand-3)", ppf: "var(--c6)", gold: "var(--c7, #ca8a04)", tufe: "var(--c2)", usd: "var(--c4)" };
-const LABELS = { ppf: "PPF ortalaması", gold: "Gram altın", tufe: "TÜFE", usd: "Dolar/TL" };
+const COLORS = {
+  modelNet: "var(--brand-3)", model: "var(--brand-3)", ppfNet: "var(--c6)", ppf: "var(--c6)",
+  peer: "#7c3aed", equity: "#db2777", gold: "var(--c7, #ca8a04)", tufe: "var(--c2)", usd: "var(--c4)",
+};
+const LABELS = {
+  ppfNet: "PPF (vergi sonrası, test boyunca tutulsa)", ppf: "PPF ortalaması (vergi öncesi)",
+  peer: "Seçilen kategorilerin ortancası", equity: "Hisse fonu ortancası", gold: "Gram altın", tufe: "TÜFE", usd: "Dolar/TL",
+};
+// Grafikte ve tabloda sıra; vergi öncesi PPF, altın ve dolar başta gizli (açıklamadan açılır)
+const SERIES_ORDER = ["modelNet", "model", "ppfNet", "ppf", "peer", "equity", "gold", "tufe", "usd"];
+const HIDDEN_AT_START = ["ppf", "gold", "usd"];
+const DASHED = new Set(["model", "ppf"]);
+const seriesName = (k, p) => k === "modelNet" ? `${p.label} model (vergi ve valör sonrası)` : k === "model" ? `${p.label} model (vergi öncesi)` : LABELS[k] || k;
 const SLICE = ["#0f766e", "#2563eb", "#ca8a04", "#7c3aed", "#db2777", "#0891b2", "#65a30d", "#ea580c", "#475569", "#9333ea"];
 const PERIODS = [["3a", "3A", 3], ["6a", "6A", 6], ["1y", "1Y", 12], ["2y", "2Y", 24], ["3y", "3Y", 36], ["5y", "5Y", 60]];
 const ORDER = ["guvenli", "dengeli", "atak"];
@@ -38,7 +49,10 @@ const GLOSSARY = [
   ["Sıçrama filtresi", "Getirinin büyük kısmı tek bir aydan, son 3 aydaki aşırı yükselişten ya da tek günlük büyük hareketten geliyorsa fon alınmaz."],
   ["Korelasyon", "İki fonun haftalık getirilerinin birlikte hareket etme derecesi. 0,85'in üstündeyse aynı fonu iki kez almak gibi olduğundan biri alınmaz."],
   ["Çapa (ÇAPA)", "Dengeli sepetin %40'ını oluşturan, Güvenli sepetten gelen düşük oynaklıklı fonlar; sepetin dalgalanmasını sınırlar."],
-  ["Süreklilik puanı", "Önceki dönem sepette olan fona yeni kurulumda verilen +3 puan; iyi kalan fonun gereksiz yere değiştirilmesini önler."],
+  ["Süreklilik puanı", "Önceki dönem sepette olan fona yeni kurulumda verilen +10 puan; iyi kalan fonun gereksiz yere değiştirilmesini önler (her satışta stopaj ödenir)."],
+  ["Fon seçimi katkısı", "Modelin getirisinin, aynı kategorilerdeki (aynı ağırlıklarla) büyük halka açık fonların ortanca getirisine oranı. Pozitifse model kategorisindeki tipik fondan iyi fon seçmiştir."],
+  ["Varlık dağılımı etkisi", "Seçilen kategorilerin ortanca getirisinin PPF'ye oranı. Negatifse o dönemde bu varlık türleri (ör. hisse) PPF'nin gerisinde kalmıştır; fon seçiminden bağımsızdır."],
+  ["Valör", "Fon satışında paranın hesaba geçme süresi (işlem günü). Bu sürede para getiri kazanmaz; geçmiş testte kategoriye göre yaklaşık değer kullanılır."],
   ["Trend kapısı", "Dengeli ve Atak'ta fiyatı 200 günlük ortalamasının altında olan ya da son 6 ayda PPF'nin gerisinde kalan fon sepete alınmaz; düşüş trendindeki fonları dışarıda tutar."],
   ["Nitelikli yatırımcı fonu", "Yalnızca belirli varlık eşiğini aşan yatırımcıların alabildiği (serbest) fonlar; modele alınmaz."],
   ["Havuz", "O profilin tüm kapılarını (oynaklık, düşüş, kıyas, sıçrama, not ve bayraklar) geçen aday fon sayısı."],
@@ -61,11 +75,12 @@ const nameOf = (store, b) => store.byCode.get(b.c)?.n || b.n;
 function overviewCards(m) {
   return ORDER.filter((k) => m.profiles[k]).map((k) => {
     const p = m.profiles[k];
-    const st = p.backtest.available ? p.backtest.stats.model : null;
+    const st = p.backtest.available ? (p.backtest.stats.modelNet || p.backtest.stats.model) : null;
+    const gross = p.backtest.available && p.backtest.stats.modelNet ? p.backtest.stats.model : null;
     return `<button class="profile-card tone-${TONE[k]}" data-p="${k}" aria-pressed="${k === state.profile}">
       <span class="pc-label">${esc(p.label)}</span>
       <span class="pc-main">${st ? pct(st.total, 1) : "—"}</span>
-      <span class="pc-sub">geçmiş test · en büyük düşüş ${st ? pct(st.mdd, 1) : "—"}</span>
+      <span class="pc-sub">geçmiş test${gross ? `, vergi ve valör sonrası (öncesi ${pct(gross.total, 0)})` : ""} · en büyük düşüş ${st ? pct(st.mdd, 1) : "—"}</span>
       <span class="pc-sub">${p.basket.length} fon · dönem başından ${pct(p.sinceEntry, 2)}</span>
     </button>`;
   }).join("");
@@ -113,6 +128,10 @@ export async function render(app, _route, store) {
         tek seferde ~%99 değer kaybetti; kuruluş günü fon temiz görünüyordu.</span></li>
       ${R.excludedFounders?.length ? `<li><b>Hariç tutulan kurucular:</b> ${R.excludedFounders.map((x) => `<b>${esc(x.name)}</b> (${x.funds} fon): ${esc(x.why)}`).join("; ")}.
         Bu kurucuların hiçbir fonu, notu ne olursa olsun hiçbir profile alınmaz.</li>` : ""}
+      <li><b>Kategoriye göre puan:</b> ölçülerin ağırlığı fonun kategorisine göre kaydırılır: para piyasasında Sharpe ve düşüş yerine getiri ve ücret,
+        borçlanmada düşüş yerine getiri, katılımda Sharpe yerine getiri, hisse ve değişkende TEFAS Quant skoru yerine Sharpe ve düşüş, kıymetli madenlerde
+        getirinin yarısı yerine ücret. <span class="dim">Neden: kategori içi testte (Haz 2022 – Eki 2026) bu ölçüler o kategoride sonraki getiriyi öngörmedi
+        ya da ters çalıştı; skor hisse ve değişkende kazananı seçmiyor, yalnızca kötüleri eliyor (C ve D notlular zaten alınmaz).</span></li>
       <li><b>Ağırlık:</b> ters oynaklık (oynaklığı düşük fon daha çok alır; puan fon seçiminde kullanılır); her fon %${num(R.minW * 100, 0)}–%${num(R.maxW * 100, 0)} (Güvenli'de köklü fon %60, diğer fon %40), 5'in katlarına yuvarlanır.</li>
       <li><b>Köklü kurucular:</b> <span class="dim">${R.banks.map(esc).join(", ")}</span></li>
     </ol>
@@ -190,9 +209,16 @@ export async function render(app, _route, store) {
       </div>
       <div class="chart" id="mdlChart"></div>
       <p class="chart-note dim" id="mdlRange"></p>
+      <div class="kpi-row attr-row" id="mdlAttr"></div>
       <div class="table-wrap"><table id="mdlStats"></table></div>
       <div class="notice">Her dönem başında sepet <b>yalnızca o gün bilinen verilerle</b> (o günkü not, bayraklar, fiyatlar) aynı kurallarla yeniden kuruldu,
-        ertesi işlem günü (T+1) alındı ve bir ay tutuldu. Getiriler stopaj öncesidir (kıyaslarla aynı).
+        ertesi işlem günü (T+1) alındı ve bir ay tutuldu.
+        <b>Vergi ve valör sonrası</b> çizgi gerçek bir yatırımcıyı izler: sepetten çıkan ya da payı azalan fonun satışında kazancın stopajı ödenir,
+        satılan fonun parası valör süresince boşta bekler (yaklaşık: para piyasası ${R.valor?.["Para Piyasası"] ?? 0}, borçlanma ve katılım 1,
+        diğerleri ${R.valor?.["diğer"] ?? 2}, yabancı / döviz fonları ${R.valor?.["yabancı / döviz"] ?? 3} işlem günü), fiyatı ${R.lockDays ?? 5} işlem günü değişmeyen
+        (işleme kapalı) fon satılamaz; her noktadaki değer "bugün hepsini satsam eline geçen" tutardır. Kıyası, test başında alınıp hiç satılmayan PPF'nin vergi sonrası değeridir.
+        ${bt.costs ? `Test boyunca ${num(bt.costs.switches, 0)} satış yapıldı, ödenen stopaj başlangıç tutarının %${num(bt.costs.taxPaid, 1)}'i${bt.costs.locked ? `, ${num(bt.costs.locked, 0)} kez fon işleme kapalı olduğu için satılamadı` : ""}.` : ""}
+        Vergi öncesi çizgi ve kategori kıyasları stopaj öncesidir. Stopaj oranları bugünkü oranlardır.
         Veri 5 yıllık olduğu için test ${dateTR(bt.dates[0])} tarihinde, 2 yıllık geçmişle başlıyor; ilk dönemlerde 3 yıllık pencere henüz yokken kurallar 1 ve 2 yıllık pencerelerle uygulandı (bugünkü sepet her zaman 3 yıllık kuralla kurulur). ${p.history.length} aylık bir test, sonuçlar dikkatle okunmalı.</div>
     </section>` : ""}
 
@@ -226,19 +252,32 @@ export async function render(app, _route, store) {
     </section>`;
 
     if (bt.available) {
-      const keys = Object.keys(bt.series);
+      const keys = SERIES_ORDER.filter((k) => bt.series[k]).concat(Object.keys(bt.series).filter((k) => !SERIES_ORDER.includes(k)));
       const periodMonths = () => PERIODS.find(([k]) => k === state.period)[2];
+      const chartEl = app.querySelector("#mdlChart");
+      chartEl._hidden = new Set(HIDDEN_AT_START.filter((k) => bt.series[k]).map((k) => seriesName(k, p)));
+      const total = (v) => (v.length > 1 && v[0] && v[v.length - 1] != null ? v[v.length - 1] / v[0] - 1 : null);
       const draw = () => {
         const i0 = startIndex(bt.dates, periodMonths());
         const d = bt.dates.slice(i0);
-        lineChart(app.querySelector("#mdlChart"), keys.map((k) => ({ name: k === "model" ? `${p.label} model` : LABELS[k] || k, d, v: windowed(bt.series[k], i0), color: COLORS[k] })),
+        const W = Object.fromEntries(keys.map((k) => [k, windowed(bt.series[k], i0)]));
+        lineChart(chartEl, keys.map((k) => ({ name: seriesName(k, p), d, v: W[k], color: COLORS[k], dashed: DASHED.has(k) })),
           { base: 100, height: 300, format: (v) => num(v, 0) });
-        app.querySelector("#mdlRange").textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · aylık yeniden kurulum`;
-        const ppfW = bt.series.ppf ? windowed(bt.series.ppf, i0) : null;
+        app.querySelector("#mdlRange").textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · aylık yeniden kurulum · açıklamadaki adlara basarak çizgileri aç / kapat`;
+        // Getiri ayrımı (stopaj öncesi): fon seçimi = model / aynı kategorilerin ortancası, varlık dağılımı = ortanca / PPF
+        const tM = total(W.model || []), tP = W.peer ? total(W.peer) : null, tF = W.ppf ? total(W.ppf) : null, tN = W.modelNet ? total(W.modelNet) : null;
+        const rel = (a, b) => (a == null || b == null ? null : ((1 + a) / (1 + b) - 1) * 100);
+        const box = (label, v, note) => `<div><span>${label}</span><b class="${v == null ? "" : v >= 0 ? "up" : "down"}">${v == null ? "—" : pct(v, 1)}</b><small class="dim">${note}</small></div>`;
+        app.querySelector("#mdlAttr").innerHTML = tP == null ? "" : [
+          box("Fon seçimi katkısı", rel(tM, tP), "model, aynı kategorilerdeki fonların ortancasına göre"),
+          box("Varlık dağılımı etkisi", rel(tP, tF), "seçilen kategorilerin ortancası, PPF'ye göre"),
+          box("Vergi ve valör etkisi", rel(tN, tM), "stopaj ve valör sonrası, öncesine göre"),
+        ].join("");
+        const ppfW = W.ppf || null, ppfNetW = W.ppfNet || ppfW;
         app.querySelector("#mdlStats").innerHTML = `
           <thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th>
             <th>En kötü / en iyi ay</th><th>Pozitif ay</th><th>PPF'yi geçen ay</th></tr></thead>
-          <tbody>${keys.map((k, i) => statRow(k === "model" ? `${p.label} model` : LABELS[k] || k, windowStats(d, windowed(bt.series[k], i0), k === "ppf" ? null : ppfW), i === 0 ? "is-self" : "")).join("")}</tbody>`;
+          <tbody>${keys.map((k, i) => statRow(seriesName(k, p), windowStats(d, W[k], k === "ppf" || k === "ppfNet" ? null : k === "modelNet" ? ppfNetW : ppfW), i === 0 ? "is-self" : "")).join("")}</tbody>`;
       };
       app.querySelector("#mdlPeriod").addEventListener("click", (e) => {
         const b = e.target.closest("button");

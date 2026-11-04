@@ -32,6 +32,9 @@ Adımlar (her profil için)
 6. Ağırlık ∝ puan² / oynaklık^v; her fon %5-%35, 5'in katlarına yuvarlanır.
    Köklü kurucu dışındaki fon Güvenli'de en fazla %20, Dengeli'de %15 alır
    (tek bir yöneticinin çöküşü sepeti batırmasın; ör. Pardus, Ekim 2026).
+   Güvenli az fonla kurulur (compact): köklü fon %40'a kadar alır ve köklü payı
+   ağırlıkla sağlanır; genelde 2 köklü + 1 diğer fon (%40 / %40 / %20). PPF'ler
+   birbirine çok benzer, 5 fona yaymak getiriyi sulandırır, riski azaltmaz.
 """
 from __future__ import annotations
 
@@ -77,6 +80,7 @@ PROFILES = {
     "guvenli": {
         "label": "Güvenli", "vol": (0.0, 0.06), "mdd": -0.05, "beat": "ppf_near", "win": 0.0,
         "max_1y": 1.0, "per_cat": 3, "v_power": 1.0, "min_score": 40, "nonbank_max": 0.20, "bank_min": 0.6,
+        "bank_max": 0.40, "compact": True,  # köklü payı az fona yüksek ağırlıkla: 2 köklü + 1 diğer
         "max_corr": None,  # düşük oynaklıklı fonlar faizle birlikte hareket eder; çeşitlilik kurucu ile sağlanır
         "weights": {"ret": 25, "win": 25, "sharpe": 15, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
@@ -320,7 +324,7 @@ def _gate(m: pd.DataFrame, profile: dict) -> tuple[pd.Series, pd.Series]:
 
 def _cap(bank: bool, profile: dict) -> float:
     """Köklü kurucu dışındaki fonun ağırlık sınırı (yönetici / operasyon riski)."""
-    return MAX_W if bank else profile.get("nonbank_max", MAX_W)
+    return profile.get("bank_max", MAX_W) if bank else profile.get("nonbank_max", MAX_W)
 
 
 def _choose(pool: pd.DataFrame, wk: pd.DataFrame, profile: dict, limit: int, taken=(),
@@ -379,14 +383,23 @@ def pick(m: pd.DataFrame, wk: pd.DataFrame | None, profile: dict, prev: list[str
     legs = {}  # fon -> ayağın sepetteki payı içindeki grup ("bank" / "all")
     if bank_min and len(pool) and pool["bank"].any():
         # Güvenli: sepetin en az bank_min'i köklü kurucuların fonlarında (karşı taraf / yönetici riski)
+        compact = bool(profile.get("compact"))
         b_pool = pool[pool["bank"]]
+        # compact: köklü payını karşılayacak kadar köklü fon (fazlası alınmaz)
         risky_b = _choose(b_pool, wk, profile, MAX_FUNDS - len(safe_funds), taken=taken, founders=founders,
-                          cap_room=bank_min * (1 - share), against=list(taken))
+                          cap_room=bank_min * (1 - share), against=list(taken), enough=1 if compact else None)
         n_pool = pool[~pool["bank"]]
+        # compact: diğer fonlar yalnızca köklü fonların sınırlarının dolduramadığı payı alır
+        n_room = (max(0.0, (1 - share) - len(risky_b) * _cap(True, profile)) if compact
+                  else (1 - bank_min) * (1 - share))
         risky_n = _choose(n_pool, wk, profile, MAX_FUNDS - len(safe_funds) - len(risky_b), taken=taken | set(risky_b),
                           founders=founders | {pool.at[c, "founder"] for c in risky_b},
-                          cap_room=(1 - bank_min) * (1 - share), enough=1,
-                          against=risky_b + list(taken)) if len(n_pool) else []
+                          cap_room=n_room, enough=1,
+                          against=risky_b + list(taken)) if len(n_pool) and (n_room > 1e-9 or not compact) else []
+        if compact and len(risky_b) + len(risky_n) < MIN_FUNDS:  # en az 3 fon: eksik kalanı köklü fonlarla tamamla
+            risky_b += _choose(b_pool, wk, profile, MIN_FUNDS - len(risky_b) - len(risky_n), taken=taken | set(risky_b) | set(risky_n),
+                               founders=founders | {pool.at[c, "founder"] for c in risky_b + risky_n},
+                               cap_room=0.0, against=risky_b + risky_n + list(taken))
         risky = risky_b + risky_n
         legs = {**{c: "bank" for c in risky_b}, **{c: "all" for c in risky_n}}
     else:
@@ -413,8 +426,11 @@ def pick(m: pd.DataFrame, wk: pd.DataFrame | None, profile: dict, prev: list[str
     raw = pd.Series({c: rows[c]["score"] ** 2 / max(rows[c]["vol"], 0.02) ** profile["v_power"] for c in risky}, dtype=float)
     if legs and any(v == "all" for v in legs.values()) and any(v == "bank" for v in legs.values()):
         grp = pd.Series(legs)
-        raw = pd.concat([raw[grp == "bank"] / raw[grp == "bank"].sum() * bank_min,
-                         raw[grp == "all"] / raw[grp == "all"].sum() * (1 - bank_min)])
+        b_share = bank_min
+        if profile.get("compact"):  # diğer fonlar sınırları kadar, kalan köklü fonlara
+            b_share = max(bank_min, 1 - sum(_cap(False, profile) for c in grp.index[grp == "all"]))
+        raw = pd.concat([raw[grp == "bank"] / raw[grp == "bank"].sum() * b_share,
+                         raw[grp == "all"] / raw[grp == "all"].sum() * (1 - b_share)])
     if safe_funds or cash:
         sf = {f["code"]: f for f in (safe["funds"] if safe else [])}
         legs = safe_funds if safe_funds else [sf[c] for c in cash]
@@ -591,6 +607,8 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
             "bench": {k: {"ppf": _r(v["ppf"]), "ppfNet": _r(v["ppf_net"]), "tufe": _r(v["tufe"])} for k, v in bm.items()},
             "spiky": spiky, "history": items, "backtest": backtest,
             "rules": {"vol": prof["vol"], "mdd": prof["mdd"], "beat": prof["beat"], "win": prof["win"],
+                      "bankMin": prof.get("bank_min"), "bankMax": prof.get("bank_max", MAX_W),
+                      "nonbankMax": prof.get("nonbank_max", MAX_W), "compact": bool(prof.get("compact")),
                       "trend": bool(prof.get("trend")),
                       "max1y": prof["max_1y"], "perCat": prof["per_cat"], "weights": prof["weights"]},
         }

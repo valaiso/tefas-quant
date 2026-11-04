@@ -107,11 +107,13 @@ export async function render(app, _route, store) {
       <li><b>Çeşitlendirme:</b> aynı portföy şirketinden tek fon; kategori başına sınır; seçilmiş bir fonla haftalık getiri korelasyonu &gt; ${num(R.maxCorr, 2)}
         olan fon alınmaz (Güvenli hariç: düşük oynaklıklı fonlar faizle birlikte hareket eder).</li>
       <li><b>Yönetici riski:</b> Güvenli sepetin en az %60'ı, Dengeli ve Atak'ın kendi fonlarının en az %50'si köklü kurucularda; diğer kurucuların tek fonu
-        Güvenli ve Atak'ta en fazla %20, Dengeli'de %15. <span class="dim">Neden: Ekim 2026'da Pardus Portföy'ün para piyasası fonu dahil fonları
+        Güvenli ve Atak'ta en fazla %20, Dengeli'de %15. Güvenli az fonla kurulur: köklü pay, köklü fonlara yüksek ağırlık verilerek (fon başına en fazla %40)
+        sağlanır; genelde 2 köklü + 1 diğer fon. <span class="dim">Para piyasası fonları birbirine çok benzer getirir; 5 fona yaymak getiriyi sulandırır,
+        riski azaltmaz.</span> <span class="dim">Neden: Ekim 2026'da Pardus Portföy'ün para piyasası fonu dahil fonları
         tek seferde ~%99 değer kaybetti; kuruluş günü fon temiz görünüyordu.</span></li>
       ${R.excludedFounders?.length ? `<li><b>Hariç tutulan kurucular:</b> ${R.excludedFounders.map((x) => `<b>${esc(x.name)}</b> (${x.funds} fon): ${esc(x.why)}`).join("; ")}.
         Bu kurucuların hiçbir fonu, notu ne olursa olsun hiçbir profile alınmaz.</li>` : ""}
-      <li><b>Ağırlık:</b> puan² / oynaklık ile orantılı; her fon %${num(R.minW * 100, 0)}–%${num(R.maxW * 100, 0)}, 5'in katlarına yuvarlanır.</li>
+      <li><b>Ağırlık:</b> puan² / oynaklık ile orantılı; her fon %${num(R.minW * 100, 0)}–%${num(R.maxW * 100, 0)} (Güvenli'de köklü fon %40'a kadar), 5'in katlarına yuvarlanır.</li>
       <li><b>Köklü kurucular:</b> <span class="dim">${R.banks.map(esc).join(", ")}</span></li>
     </ol>
     <h3 class="glossary-title">Kavramlar</h3>

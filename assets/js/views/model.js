@@ -52,6 +52,7 @@ const GLOSSARY = [
   ["Süreklilik puanı", "Önceki dönem sepette olan fona yeni kurulumda verilen +10 puan; iyi kalan fonun gereksiz yere değiştirilmesini önler (her satışta stopaj ödenir)."],
   ["Fon seçimi katkısı", "Modelin getirisinin, aynı kategorilerdeki (aynı ağırlıklarla) büyük halka açık fonların ortanca getirisine oranı. Pozitifse model kategorisindeki tipik fondan iyi fon seçmiştir."],
   ["Varlık dağılımı etkisi", "Seçilen kategorilerin ortanca getirisinin PPF'ye oranı. Negatifse o dönemde bu varlık türleri (ör. hisse) PPF'nin gerisinde kalmıştır; fon seçiminden bağımsızdır."],
+  ["Ayar aralığı / ileriye doğru test", "Geçmiş test, modelin ayarları bir adım oynatılarak tekrarlanır; çıkan aralık sonucun ne kadar şansa bağlı olduğunu gösterir. İleriye doğru testte ayar her ay yalnızca o güne kadarki veriye bakılarak seçilir (Bailey ve López de Prado, aşırı uyum)."],
   ["Valör", "Fon satışında paranın hesaba geçme süresi (işlem günü). Bu sürede para getiri kazanmaz; geçmiş testte kategoriye göre yaklaşık değer kullanılır."],
   ["Trend kapısı", "Dengeli ve Atak'ta fiyatı 200 günlük ortalamasının altında olan ya da son 6 ayda PPF'nin gerisinde kalan fon sepete alınmaz; düşüş trendindeki fonları dışarıda tutar."],
   ["Nitelikli yatırımcı fonu", "Yalnızca belirli varlık eşiğini aşan yatırımcıların alabildiği (serbest) fonlar; modele alınmaz."],
@@ -72,6 +73,27 @@ async function load() {
 
 const nameOf = (store, b) => store.byCode.get(b.c)?.n || b.n;
 
+// Sağlamlık: aynı test, ayarlar bir adım aşağı / yukarı oynatılarak; ve ayarı her ay geçmişe bakarak seçen ileriye doğru test
+function robustBox(p) {
+  const r = p.robust, wf = r.walkForward;
+  const rows = r.rows.map((x, i) => `<tr class="${i === 0 ? "is-self" : ""}"><td class="left">${esc(x.group)}</td><td class="left">${esc(x.label)}</td>
+    <td>${pct(x.net, 1)}</td><td class="dim">${pct(x.gross, 1)}</td></tr>`).join("");
+  return `<div class="notice robust-box">
+    <b>Bu sonuç ne kadar sağlam?</b> Model elle seçilmiş sayılarla (korelasyon sınırı, en düşük puan, risk sınırları…) çalışır ve bu sayılar aynı
+    geçmiş veriye bakılarak seçildi. Her ayar bir adım aşağı ve yukarı oynatılarak test tekrarlandı: vergi ve valör sonrası 3 yıllık sonuç
+    <b>${r.n} ayarla ${pct(r.min, 0)} – ${pct(r.max, 0)}</b> arasında (ortanca ${pct(r.median, 0)}; bugünkü ayar ${pct(r.base, 0)}).
+    ${wf ? `<br><b>İleriye doğru test</b> (${dateTR(wf.from)} – ${dateTR(wf.to)}, ${wf.months} ay): her ay yalnızca o güne kadarki son 12 ayda en iyi sonucu veren
+      ayar seçildi ve bir sonraki ay onunla geçirildi: ${pct(wf.total, 1)}; aynı dönemde bugünkü ayar ${pct(wf.base, 1)}. İkisi yakınsa ayarlar geçmişe
+      aşırı uydurulmamış demektir.` : ""}
+    <details><summary>Ayar ayar sonuçlar</summary>
+      <div class="table-wrap"><table class="compact"><thead><tr><th class="left">Ayar</th><th class="left">Değer</th><th>Vergi ve valör sonrası</th><th>Vergi öncesi</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <p class="dim">Risk sınırı "dar" / "geniş": Güvenli oynaklık %5 / %7, Dengeli %17,5 / %22,5, Atak %30 / %40 (azami düşüş de aynı oranda).
+        Risk sınırları profilin tanımıdır, getiriye göre seçilmez; burada yalnızca sonucun ne kadar hassas olduğu gösterilir.</p>
+    </details>
+  </div>`;
+}
+
 function overviewCards(m) {
   return ORDER.filter((k) => m.profiles[k]).map((k) => {
     const p = m.profiles[k];
@@ -81,6 +103,7 @@ function overviewCards(m) {
       <span class="pc-label">${esc(p.label)}</span>
       <span class="pc-main">${st ? pct(st.total, 1) : "—"}</span>
       <span class="pc-sub">geçmiş test${gross ? `, vergi ve valör sonrası (öncesi ${pct(gross.total, 0)})` : ""} · en büyük düşüş ${st ? pct(st.mdd, 1) : "—"}</span>
+      ${p.robust ? `<span class="pc-sub">ayarlara göre aralık ${pct(p.robust.min, 0)} – ${pct(p.robust.max, 0)}</span>` : ""}
       <span class="pc-sub">${p.basket.length} fon · dönem başından ${pct(p.sinceEntry, 2)}</span>
     </button>`;
   }).join("");
@@ -121,7 +144,7 @@ export async function render(app, _route, store) {
         +${num(R.stayBonus, 0)} süreklilik puanı. <span class="dim">Neden: fon satışında stopaj ödenir; iyi kalan fonu tutmak vergiyi erteler,
         sık değişim bu avantajı kaybettirir.</span></li>
       <li><b>Çeşitlendirme:</b> aynı portföy şirketinden tek fon; kategori başına sınır; seçilmiş bir fonla haftalık getiri korelasyonu &gt; ${num(R.maxCorr, 2)}
-        olan fon alınmaz (Güvenli hariç: düşük oynaklıklı fonlar faizle birlikte hareket eder).</li>
+        olan fon alınmaz (Atak'ta ${num(m.profiles.atak?.rules?.maxCorr ?? R.maxCorr, 2)}; Güvenli hariç: düşük oynaklıklı fonlar faizle birlikte hareket eder).</li>
       <li><b>Yönetici riski:</b> Güvenli sepetin en az %60'ı, Dengeli ve Atak'ın kendi fonlarının en az %50'si köklü kurucularda; diğer kurucuların tek fonu
         Atak'ta en fazla %20, Dengeli'de %15. Güvenli 2 fonla kurulur: köklü pay (%60) tek köklü fonda, kalan %40 tek diğer fonda.
         <span class="dim">Para piyasası fonları birbirine çok benzer getirir; 5 fona yaymak getiriyi sulandırır, riski azaltmaz.</span> <span class="dim">Neden: Ekim 2026'da Pardus Portföy'ün para piyasası fonu dahil fonları
@@ -210,6 +233,7 @@ export async function render(app, _route, store) {
       <div class="chart" id="mdlChart"></div>
       <p class="chart-note dim" id="mdlRange"></p>
       <div class="kpi-row attr-row" id="mdlAttr"></div>
+      ${p.robust ? robustBox(p) : ""}
       <div class="table-wrap"><table id="mdlStats"></table></div>
       <div class="notice">Her dönem başında sepet <b>yalnızca o gün bilinen verilerle</b> (o günkü not, bayraklar, fiyatlar) aynı kurallarla yeniden kuruldu,
         ertesi işlem günü (T+1) alındı ve bir ay tutuldu.

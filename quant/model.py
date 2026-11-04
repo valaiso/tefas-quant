@@ -220,6 +220,9 @@ PROFILES = {
         "label": "Atak", "vol": (0.08, 0.35), "mdd": -0.35, "beat": "tufe_all", "win": 0.3,
         "trend": True,
         "max_1y": 2.0, "per_cat": 2, "min_score": 40, "min_risky": 0.8, "bank_min": 0.5, "nonbank_max": 0.20,
+        # Ayar taraması (vergi ve valör sonrası, Kas 2023 – Eki 2026): Atak'ta 0,75-0,85 aynı düzlükte (%135-143),
+        # 0,90'da %120'ye, 0,95'te %111'e düşüyor; düzlüğün ortası seçildi (aynı zamanda daha fazla çeşitlendirme).
+        "max_corr": 0.80,
         "weights": {"ret": 35, "win": 10, "sharpe": 20, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
 }
@@ -779,6 +782,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
             "bench": {k: {"ppf": _r(v["ppf"]), "ppfNet": _r(v["ppf_net"]), "tufe": _r(v["tufe"])} for k, v in bm.items()},
             "spiky": spiky, "history": items, "backtest": backtest,
             "rules": {"vol": prof["vol"], "mdd": prof["mdd"], "beat": prof["beat"], "win": prof["win"],
+                      "maxCorr": prof.get("max_corr", MAX_CORR),
                       "bankMin": prof.get("bank_min"), "bankMax": prof.get("bank_max", MAX_W),
                       "nonbankMax": prof.get("nonbank_max", MAX_W), "compact": bool(prof.get("compact")),
                       "trend": bool(prof.get("trend")),

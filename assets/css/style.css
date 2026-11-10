@@ -863,3 +863,6 @@ table.bt-grades td { white-space: nowrap; }
 .robust-box { margin-top: 10px; }
 .robust-box details { margin-top: 8px; }
 .robust-box summary { cursor: pointer; font-weight: 600; }
+
+/* Model: getiri bağlamı kutusu */
+.context-box { margin-top: 10px; }

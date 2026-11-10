@@ -27,6 +27,8 @@ NEIGHBORS = [
     ("En düşük puan", {"profiles": {"*": {"min_score": 30}}}, "30"), ("En düşük puan", {"profiles": {"*": {"min_score": 50}}}, "50"),
     ("Süreklilik puanı", {"STAY_BONUS": 5.0}, "5"), ("Süreklilik puanı", {"STAY_BONUS": 15.0}, "15"),
     ("Sıçrama sınırı", {"SPIKE_SHARE": 0.35}, "%35"), ("Sıçrama sınırı", {"SPIKE_SHARE": 0.45}, "%45"),
+    ("Yıllık yenileme ayı", {"REBALANCE_MONTH": 3}, "Mart"), ("Yıllık yenileme ayı", {"REBALANCE_MONTH": 6}, "Haziran"),
+    ("Yıllık yenileme ayı", {"REBALANCE_MONTH": 9}, "Eylül"),
     ("Risk sınırı", {"profiles": {"guvenli": {"vol": (0.0, 0.05), "mdd": -0.04}, "dengeli": {"vol": (0.04, 0.175), "mdd": -0.175},
                                   "atak": {"vol": (0.08, 0.30), "mdd": -0.30}}}, "dar"),
     ("Risk sınırı", {"profiles": {"guvenli": {"vol": (0.0, 0.07), "mdd": -0.06}, "dengeli": {"vol": (0.04, 0.225), "mdd": -0.225},

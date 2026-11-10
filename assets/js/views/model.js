@@ -21,8 +21,8 @@ const ORDER = ["guvenli", "dengeli", "atak"];
 const TONE = { guvenli: "safe", dengeli: "mid", atak: "risk" };
 const BLURB = {
   guvenli: "Para piyasası ve kısa vadeli borçlanma ağırlıklı; sepetin en az %60'ı köklü kurucuların (devlet / büyük özel banka) fonlarında. Amaç PPF'ye yakın getiriyi en düşük dalgalanma ve yönetici riskiyle almak.",
-  dengeli: "Sepetin %40'ı Güvenli sepetin fonları (çapa), kalanı orta oynaklıklı, son 3 yılda vergi sonrası enflasyonu yenmiş fonlar.",
-  atak: "Hisse, altın, teknoloji gibi oynak fonlar; sıçramaya dayalı ve aşırı yükselmiş fonlar alınmaz. Kısa vadede değer kaybı yaşanabilir.",
+  dengeli: "Sabit dilimler: %60 para piyasası (Güvenli sepetinin fonları), %20 altın, %20 yabancı hisse. Yılda bir (Aralık sonu) yeniden dengelenir; arada fon yalnızca uygunluğunu kaybederse değişir, ağırlıklar fiyatla serbestçe değişir. Az satış, az stopaj.",
+  atak: "Hisse, altın, teknoloji gibi oynak fonlar; sıçramaya dayalı ve aşırı yükselmiş fonlar alınmaz. Seçilen fon uygun kaldıkça satılmaz, sepet yılda bir (Aralık sonu) tam yenilenir. Kısa vadede değer kaybı yaşanabilir.",
 };
 const BEAT = {
   ppf_all: "1Y, 2Y ve 3Y'nin hepsinde PPF'yi geçmiş",
@@ -48,7 +48,9 @@ const GLOSSARY = [
   ["Hariç tutulan kurucu", "Yönetici riski nedeniyle (ör. grup hisselerini şişiren, çarpanları aşırı fonlar) hiçbir sepete alınmayan portföy şirketi; elle belirlenir."],
   ["Sıçrama filtresi", "Getirinin büyük kısmı tek bir aydan, son 3 aydaki aşırı yükselişten ya da tek günlük büyük hareketten geliyorsa fon alınmaz."],
   ["Korelasyon", "İki fonun haftalık getirilerinin birlikte hareket etme derecesi. 0,85'in üstündeyse aynı fonu iki kez almak gibi olduğundan biri alınmaz."],
-  ["Çapa (ÇAPA)", "Dengeli sepetin %40'ını oluşturan, Güvenli sepetten gelen düşük oynaklıklı fonlar; sepetin dalgalanmasını sınırlar."],
+  ["Çapa (ÇAPA)", "Güvenli sepetinden gelen para piyasası fonları: Dengeli'nin %60'lık dilimi ve Atak'ta yeterli aday çıkmayan ayda eklenen park fonu."],
+  ["Dolar bazında / enflasyondan arındırılmış", "Vergi ve valör sonrası getirinin dolar/TL'ye ve TÜFE'ye göre karşılığı. TL getirisi yüksek görünse de kur ve enflasyon karşısında ne kadar kazanıldığını gösterir."],
+  ["Fonlar arasındaki yeri", "Aynı dönemde başta büyük (≥100 mn TL, ≥1.000 yatırımcı) halka açık fonları alıp tutmanın vergi sonrası getirisine göre modelin sırası; ör. %80 = fonların %80'inden iyi."],
   ["Süreklilik puanı", "Önceki dönem sepette olan fona yeni kurulumda verilen +10 puan; iyi kalan fonun gereksiz yere değiştirilmesini önler (her satışta stopaj ödenir)."],
   ["Fon seçimi katkısı", "Modelin getirisinin, aynı kategorilerdeki (aynı ağırlıklarla) büyük halka açık fonların ortanca getirisine oranı. Pozitifse model kategorisindeki tipik fondan iyi fon seçmiştir."],
   ["Varlık dağılımı etkisi", "Seçilen kategorilerin ortanca getirisinin PPF'ye oranı. Negatifse o dönemde bu varlık türleri (ör. hisse) PPF'nin gerisinde kalmıştır; fon seçiminden bağımsızdır."],
@@ -72,6 +74,16 @@ async function load() {
 }
 
 const nameOf = (store, b) => store.byCode.get(b.c)?.n || b.n;
+
+// Bağlam: aynı dönemde fonları alıp tutanlar arasındaki yeri, dolar ve enflasyon karşılığı (tüm test penceresi)
+function contextBox(p) {
+  const c = p.backtest.context;
+  return `<div class="notice context-box"><b>Bu getiri yüksek mi, düşük mü?</b> Test boyunca (${dateTR(c.from)} – ${dateTR(c.to)}) vergi ve valör sonrası
+    <b>${pct(c.net, 1)}</b>. Aynı dönemde başta büyük ${num(c.fundN, 0)} halka açık fonu alıp tutmak vergi sonrası ortanca ${pct(c.fundMedian, 0)} getirdi;
+    ilk %10'a girmek için ${pct(c.fundP90, 0)} yetiyordu, en iyi fon ${pct(c.fundMax, 0)}. Model <b>her 100 fondan yaklaşık ${num(c.fundPct, 0)} tanesinden iyi</b>.
+    ${c.usdBased != null ? `Dolar bazında ${pct(c.usdBased, 0)}, enflasyondan arındırılmış ${pct(c.real, 0)}.` : ""}
+    <span class="dim">Bu dönemde faiz yüksekti: para piyasası fonları hisse fonlarının çok önünde kaldı; TL getirisini dolar ve enflasyonla birlikte okuyun.</span></div>`;
+}
 
 // Sağlamlık: aynı test, ayarlar bir adım aşağı / yukarı oynatılarak; ve ayarı her ay geçmişe bakarak seçen ileriye doğru test
 function robustBox(p) {
@@ -104,6 +116,7 @@ function overviewCards(m) {
       <span class="pc-main">${st ? pct(st.total, 1) : "—"}</span>
       <span class="pc-sub">geçmiş test${gross ? `, vergi ve valör sonrası (öncesi ${pct(gross.total, 0)})` : ""} · en büyük düşüş ${st ? pct(st.mdd, 1) : "—"}</span>
       ${p.robust ? `<span class="pc-sub">ayarlara göre aralık ${pct(p.robust.min, 0)} – ${pct(p.robust.max, 0)}</span>` : ""}
+      ${p.backtest.context?.usdBased != null ? `<span class="pc-sub">dolar bazında ${pct(p.backtest.context.usdBased, 0)} · enflasyondan arındırılmış ${pct(p.backtest.context.real, 0)}</span>` : ""}
       <span class="pc-sub">${p.basket.length} fon · dönem başından ${pct(p.sinceEntry, 2)}</span>
     </button>`;
   }).join("");
@@ -197,7 +210,10 @@ export async function render(app, _route, store) {
     app.querySelector("#mdlBody").innerHTML = `
     <section class="card">
       <div class="card-head"><h2>${esc(p.label)} sepet</h2>
-        <span class="sub">${dateTR(p.formed)} kuruldu · ${dateTR(p.entry)} alış · sonraki yenileme ${dateTR(m.nextRebalance)}</span></div>
+        <span class="sub">${dateTR(p.formed)} kuruldu · ${dateTR(p.entry)} alış · ${p.policy?.type === "sleeves"
+          ? `yılda bir dengeleme, sonraki ${dateTR(p.policy.nextFull)} (arada yalnızca uygunluğunu kaybeden fon değişir)`
+          : p.policy?.type === "hold" ? `her ay kontrol (${dateTR(m.nextRebalance)}), tam yenileme ${dateTR(p.policy.nextFull)}`
+          : `sonraki yenileme ${dateTR(m.nextRebalance)}`}</span></div>
       <p class="dim">${esc(BLURB[key])}</p>
       <div class="kpi-row">
         <div><span>Dönem başından bugüne</span><b class="${(p.sinceEntry ?? 0) >= 0 ? "up" : "down"}">${pct(p.sinceEntry, 2)}</b></div>
@@ -233,6 +249,7 @@ export async function render(app, _route, store) {
       <div class="chart" id="mdlChart"></div>
       <p class="chart-note dim" id="mdlRange"></p>
       <div class="kpi-row attr-row" id="mdlAttr"></div>
+      ${bt.context?.fundPct != null ? contextBox(p) : ""}
       ${p.robust ? robustBox(p) : ""}
       <div class="table-wrap"><table id="mdlStats"></table></div>
       <div class="notice">Her dönem başında sepet <b>yalnızca o gün bilinen verilerle</b> (o günkü not, bayraklar, fiyatlar) aynı kurallarla yeniden kuruldu,
@@ -265,6 +282,14 @@ export async function render(app, _route, store) {
     <section class="card">
       <div class="card-head"><h2>${esc(p.label)} profil kuralları</h2></div>
       <ul class="rule-list">
+        ${p.policy?.type === "sleeves" ? `
+        <li><b>Dilimler:</b> ${p.policy.sleeves.map((s) => `${esc(s.label)} %${s.w}`).join(" · ")}.</li>
+        <li><b>Dilim fonu:</b> altında köklü kurucuların ortak aday havuzundaki en düşük ücretli fonu (eşitse büyük olan), yabancı hissede en büyüğü;
+          para piyasası dilimi o günkü Güvenli sepetinin fonları.</li>
+        <li><b>Dengeleme:</b> yılda bir, Aralık sonu kurulum (Ocak başı alış). Arada ağırlıklar fiyatla serbestçe değişir; yalnızca ortak aday havuzundan
+          çıkan (notu C/D'ye düşen, bayrak alan, küçülen) fon aynı dilimin yeni fonuyla değiştirilir.
+          <span class="dim">Neden: gerçekçi testte aylık fon değişimi stopaj ve valörle vergi öncesi kazancı aştı; sabit dilimler 12 farklı dengeleme ayının
+          hepsinde daha iyi sonuç verdi.</span></li>` : `
         <li><b>Oynaklık (1Y):</b> %${num(ru.vol[0] * 100, 0)} – %${num(ru.vol[1] * 100, 0)} · <b>Azami düşüş (2Y):</b> en fazla ${pct(ru.mdd * 100, 0)}
           · <b>1Y getiri tavanı:</b> %${num(ru.max1y * 100, 0)}</li>
         <li><b>Kıyas şartı (vergi sonrası):</b> ${esc(BEAT[ru.beat] || ru.beat)}${ru.win ? `; 12 aylık dönemlerin en az %${num(ru.win * 100, 0)}'ında PPF'yi geçmiş` : ""}.</li>
@@ -272,6 +297,9 @@ export async function render(app, _route, store) {
         <li><b>Kategori sınırı:</b> aynı kategoriden en fazla ${ru.perCat} fon.</li>
         ${ru.trend ? `<li><b>Trend kapısı:</b> fiyatı 200 günlük ortalamasının altında olan ya da son 6 ayda PPF'nin gerisinde kalan fon alınmaz
           (zaman serisi momentumu; Moskowitz, Ooi ve Pedersen 2012). Vergi sonrası testte Dengeli ve Atak'ı dönemin iki yarısında da iyileştirdi.</li>` : ""}
+        ${p.policy?.type === "hold" ? `<li><b>Tut kuralı:</b> sepet her ay yeniden seçilir ama sepetteki riskli fon ortak aday havuzunda kaldıkça satılmaz;
+          yalnızca havuzdan çıkan fonun yerine yeni sepetin fonu girer. Az aday çıkan ayda eklenen PPF park fonu tutulmaz. Sepet yılda bir (Aralık sonu) tam yenilenir.
+          <span class="dim">Neden: her satışta stopaj ödenir ve fonlar arası zarar mahsubu yoktur. Sonuç yenileme ayına bağlıdır; aralık "Bu sonuç ne kadar sağlam?" kutusunda.</span></li>` : ""}`}
       </ul>
     </section>`;
 
@@ -287,15 +315,19 @@ export async function render(app, _route, store) {
         const W = Object.fromEntries(keys.map((k) => [k, windowed(bt.series[k], i0)]));
         lineChart(chartEl, keys.map((k) => ({ name: seriesName(k, p), d, v: W[k], color: COLORS[k], dashed: DASHED.has(k) })),
           { base: 100, height: 300, format: (v) => num(v, 0) });
-        app.querySelector("#mdlRange").textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · aylık yeniden kurulum · açıklamadaki adlara basarak çizgileri aç / kapat`;
+        app.querySelector("#mdlRange").textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · aylık noktalar · açıklamadaki adlara basarak çizgileri aç / kapat`;
         // Getiri ayrımı (stopaj öncesi): fon seçimi = model / aynı kategorilerin ortancası, varlık dağılımı = ortanca / PPF
         const tM = total(W.model || []), tP = W.peer ? total(W.peer) : null, tF = W.ppf ? total(W.ppf) : null, tN = W.modelNet ? total(W.modelNet) : null;
         const rel = (a, b) => (a == null || b == null ? null : ((1 + a) / (1 + b) - 1) * 100);
         const box = (label, v, note) => `<div><span>${label}</span><b class="${v == null ? "" : v >= 0 ? "up" : "down"}">${v == null ? "—" : pct(v, 1)}</b><small class="dim">${note}</small></div>`;
-        app.querySelector("#mdlAttr").innerHTML = tP == null ? "" : [
-          box("Fon seçimi katkısı", rel(tM, tP), "model, aynı kategorilerdeki fonların ortancasına göre"),
-          box("Varlık dağılımı etkisi", rel(tP, tF), "seçilen kategorilerin ortancası, PPF'ye göre"),
+        const tU = W.usd ? total(W.usd) : null, tT = W.tufe ? total(W.tufe) : null;
+        app.querySelector("#mdlAttr").innerHTML = [
+          ...(tP == null ? [] : [
+            box("Fon seçimi katkısı", rel(tM, tP), "model, aynı kategorilerdeki fonların ortancasına göre"),
+            box("Varlık dağılımı etkisi", rel(tP, tF), "seçilen kategorilerin ortancası, PPF'ye göre")]),
           box("Vergi ve valör etkisi", rel(tN, tM), "stopaj ve valör sonrası, öncesine göre"),
+          box("Dolar bazında", rel(tN, tU), "vergi ve valör sonrası getiri, dolar/TL'ye göre"),
+          box("Enflasyondan arındırılmış", rel(tN, tT), "vergi ve valör sonrası getiri, TÜFE'ye göre"),
         ].join("");
         const ppfW = W.ppf || null, ppfNetW = W.ppfNet || ppfW;
         app.querySelector("#mdlStats").innerHTML = `

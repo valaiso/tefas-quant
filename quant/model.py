@@ -211,7 +211,11 @@ PROFILES = {
         "weights": {"ret": 25, "win": 25, "sharpe": 15, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
     "dengeli": {
-        "label": "Dengeli", "vol": (0.04, 0.20), "mdd": -0.20, "beat": "tufe_all", "win": 0.3,
+        "label": "Dengeli",
+        # Sabit dilimler, yılda bir dengeleme (bkz. REBALANCE_MONTH). Altında en düşük ücretli, yabancı hissede en büyük
+        # köklü fon (testte puana göre seçimden iyi). Aşağıdaki seçim kuralları yalnızca "sleeves" kaldırılırsa kullanılır.
+        "sleeves": {"ppf": 0.6, "altın": 0.2, "yabancı": 0.2}, "sleeve_pick": {"altın": "fee", "yabancı": "size"},
+        "vol": (0.04, 0.20), "mdd": -0.20, "beat": "tufe_all", "win": 0.3,
         "trend": True,  # 200g ort. altı ya da 6 ayda PPF gerisindeki fon alınmaz (testte iki yarıda da daha iyi)
         "max_1y": 1.5, "per_cat": 2, "min_score": 40, "safe_share": 0.4, "nonbank_max": 0.15, "bank_min": 0.5,
         "weights": {"ret": 30, "win": 15, "sharpe": 20, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
@@ -223,6 +227,7 @@ PROFILES = {
         # Ayar taraması (vergi ve valör sonrası, Kas 2023 – Eki 2026): Atak'ta 0,75-0,85 aynı düzlükte (%135-143),
         # 0,90'da %120'ye, 0,95'te %111'e düşüyor; düzlüğün ortası seçildi (aynı zamanda daha fazla çeşitlendirme).
         "max_corr": 0.80,
+        "hold": True,  # sepetteki fon uygun kaldıkça satılmaz; REBALANCE_MONTH'ta tam yenileme
         "weights": {"ret": 35, "win": 10, "sharpe": 20, "mdd": 10, "quant": 10, "inv": 5, "fee": 10},
     },
 }
@@ -587,6 +592,135 @@ def pick(m: pd.DataFrame, wk: pd.DataFrame | None, profile: dict, prev: list[str
     }
 
 
+# ---------------------------------------------------------------- yıllık yenileme, dilimler, "tut" kuralı
+# Gerçekçi testte (stopaj her satışta, valör; Kas 2023 – Eki 2026) aylık fon değişimi Dengeli ve Atak'ta vergi öncesi
+# kazancı aşan stopaj ve valör kaybı yarattı (Dengeli 142, Atak 122 satış). Bu yüzden:
+#  * Dengeli sabit dilimlerle kurulur (PPF / altın / yabancı hisse) ve yılda bir yeniden dengelenir; arada yalnızca
+#    uygunluğunu kaybeden fon değişir. Testte 12 farklı dengeleme ayının hepsinde aylık seçimden iyi (ortanca %192 / %175).
+#  * Atak her ay seçilir ama seçilmiş riskli fon ortak aday havuzunda kaldıkça satılmaz; yılda bir tam yenilenir.
+#    Sonuç yenileme ayına çok bağlı (12 ay: %97 – %184, ortanca %146; aylık seçim %133); Aralık bu aralığın üst
+#    tarafında, sitede ay ay aralık gösterilir (robust.py).
+REBALANCE_MONTH = 12   # Aralık sonu kurulum (Ocak başı alış): Dengeli dilimleri ve Atak'ın tam yenilemesi
+SLEEVE_LABELS = {"ppf": "Para piyasası (Güvenli sepetinin fonları)", "altın": "Altın", "yabancı": "Yabancı hisse"}
+
+
+def sleeve_of(code, funds: pd.DataFrame) -> str | None:
+    name = str(funds["name"].get(code, "")).upper() if "name" in funds else ""
+    cat = funds["category"].get(code)
+    if cat == "Kıymetli Madenler" and "ALTIN" in name and "GÜMÜŞ" not in name:
+        return "altın"
+    if cat == "Hisse Senedi" and "YABANCI" in name:
+        return "yabancı"
+    return None
+
+
+def _row(m: pd.DataFrame, c, **extra) -> dict:
+    d = m.loc[c].to_dict()
+    d.update(extra)
+    return d
+
+
+def _pick_sleeve(m: pd.DataFrame, funds: pd.DataFrame, sleeve: str, how: str):
+    """Dilimin fonu: köklü kurucunun ortak havuzdaki fonları arasından en düşük ücretli (eşitse büyük) ya da en büyük."""
+    idx = [c for c in m.index if sleeve_of(c, funds) == sleeve and bool(m.at[c, "bank"])]
+    if not idx:
+        return None
+    c = m.loc[idx]
+    if how == "fee":
+        return c.sort_values(["fee", "aum"], ascending=[True, False]).index[0]
+    return c["aum"].idxmax()
+
+
+def _drift(prev_funds: list[dict], px: pd.DataFrame, i_from: int, i_to: int) -> dict:
+    """Önceki dönemin ağırlıklarının bugüne kadarki fiyat hareketiyle aldığı hâl (yalnızca bilinen fiyatlar)."""
+    v = {}
+    for f in prev_funds:
+        c = f["code"]
+        p0 = px[c].iloc[i_from] if c in px else np.nan
+        p1 = px[c].iloc[i_to] if c in px else np.nan
+        v[c] = f["w"] * (float(p1 / p0) if pd.notna(p0) and pd.notna(p1) and p0 > 0 else 1.0)
+    s = sum(v.values()) or 1.0
+    return {c: x / s for c, x in v.items()}
+
+
+def _sleeves(m, prof, safe, prev, i, dates, px, funds) -> dict:
+    """Dengeli: sabit dilimler, yılda bir (REBALANCE_MONTH) yeniden dengeleme; arada ağırlıklar serbest kalır."""
+    if m.empty:
+        return {"funds": [], "pool": 0}
+    mix, how = prof["sleeves"], prof.get("sleeve_pick", {})
+    safe_funds = (safe or {}).get("funds", [])
+    out = {}
+
+    def add(c, w, row):
+        if c in out:
+            out[c][0] += w
+        else:
+            out[c] = [w, row]
+
+    def add_ppf(wt):
+        for f in safe_funds:
+            add(f["code"], wt * f["w"], {**{k: v for k, v in f.items() if k not in ("code", "w")}, "sleeve": "ppf", "cash": True})
+
+    rebalance = not prev or not prev["funds"] or dates[i].month == REBALANCE_MONTH
+    if rebalance:
+        add_ppf(mix["ppf"])
+        for s in ("altın", "yabancı"):
+            c = _pick_sleeve(m, funds, s, how.get(s, "size"))
+            if c:
+                add(c, mix[s], _row(m, c, score=m.at[c, "quant"], sleeve=s, cash=False))
+            else:
+                add_ppf(mix[s])
+    else:
+        rows = {f["code"]: f for f in prev["funds"]}
+        for c, wt in _drift(prev["funds"], px, prev["i"] + 1, i).items():
+            if c in m.index:  # hâlâ ortak aday havuzunda: tutulur
+                add(c, wt, {**_row(m, c), "score": rows[c].get("score"), "sleeve": rows[c].get("sleeve"), "cash": rows[c].get("cash", False)})
+                continue
+            s = rows[c].get("sleeve")
+            alt = _pick_sleeve(m, funds, s, how.get(s, "size")) if s in ("altın", "yabancı") else None
+            if alt:
+                add(alt, wt, _row(m, alt, score=m.at[alt, "quant"], sleeve=s, cash=False))
+            else:
+                add_ppf(wt)
+    pool = sum(1 for c in m.index if sleeve_of(c, funds) and bool(m.at[c, "bank"]))
+    fl = [{**row, "code": c, "w": w} for c, (w, row) in out.items()]
+    return {"funds": sorted(fl, key=lambda f: -f["w"]), "pool": pool}
+
+
+def _hold(res: dict, prev, m: pd.DataFrame, i: int, dates) -> dict:
+    """Atak: seçilmiş riskli fon ortak aday havuzunda kaldıkça satılmaz; çıkanın yerine yeni sepetin fonu girer.
+    Az aday çıkan ayda eklenen PPF park fonu (cash) tutulmaz, her ay yeniden değerlendirilir (profil agresif kalsın).
+    REBALANCE_MONTH'ta sepet tam yenilenir."""
+    if not prev or not prev["funds"] or not res["funds"] or dates[i].month == REBALANCE_MONTH:
+        return res
+    new = {f["code"]: f for f in res["funds"]}
+    rows = {f["code"]: f for f in prev["funds"]}
+    keep = {f["code"]: f["w"] for f in prev["funds"] if not f.get("cash") and f["code"] in m.index}
+    free = 1 - sum(keep.values())
+    adds = [c for c in sorted(new, key=lambda c: (bool(new[c].get("cash")), -new[c]["w"])) if c not in keep]
+    if free > 1e-9 and adds:
+        aw = {c: new[c]["w"] for c in adds[:max(1, len(prev["funds"]) - len(keep))]}
+        s = sum(aw.values())
+        keep.update({c: free * w / s for c, w in aw.items()})
+    elif free > 1e-9:
+        s = sum(keep.values())
+        keep = {c: w / s for c, w in keep.items()} if s else {c: f["w"] for c, f in new.items()}
+    fl = []
+    for c, w in keep.items():
+        base = new[c] if c in new else {**_row(m, c), "score": rows[c].get("score"), "cash": rows[c].get("cash", False)}
+        fl.append({**{k: v for k, v in base.items() if k not in ("code", "w")}, "code": c, "w": w})
+    return {**res, "funds": sorted(fl, key=lambda f: -f["w"])}
+
+
+def _int_weights(ws: list[float]) -> list[int]:
+    """Ağırlıkları toplamı tam 100 olan tam sayılara çevirir (en büyük kalan yöntemi)."""
+    raw = [w * 100 for w in ws]
+    base = [int(np.floor(x)) for x in raw]
+    for k in sorted(range(len(raw)), key=lambda k: raw[k] - base[k], reverse=True)[: max(0, 100 - sum(base))]:
+        base[k] += 1
+    return base
+
+
 def formation_days(dates: pd.DatetimeIndex) -> list[int]:
     """Yeniden kurulum günleri: her PERIOD_MONTHS ayda bir, ayın son işlem günü."""
     return [i for i in scoring.month_ends(dates) if dates[i].month % PERIOD_MONTHS == 0]
@@ -611,7 +745,16 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
     is_public = ~(funds["qualified"].fillna(0).astype(bool) | funds["private"].fillna(False))
     is_public = is_public.reindex(px.columns).fillna(False)
     cat_all = funds["category"].reindex(px.columns)
-    med_cache = {}
+    med_cache, dist_cache = {}, {}
+    stopaj_all = funds["stopaj"].reindex(px.columns).fillna(PPF_STOPAJ * 100).clip(0, 100) / 100
+
+    def fund_dist(a, e):
+        """Aynı dönemde (a alış, e son) büyük halka açık fonları alıp tutmanın vergi sonrası toplam getirisi (%)."""
+        if (a, e) not in dist_cache:
+            r = px.loc[e] / px.loc[a] - 1
+            ok = r.notna() & (r.abs() < 20) & is_public & (size_p.loc[a] >= MIN_AUM) & (inv_p.loc[a] >= MIN_INVESTORS)
+            dist_cache[(a, e)] = (r * (1 - stopaj_all))[ok] * 100
+        return dist_cache[(a, e)]
 
     def cat_medians(i, a, e):
         if (a, e) not in med_cache:
@@ -628,18 +771,26 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
         m, wk = universe(price, panel, funds, ppf, tufe, i, scores_at.get(i))
         safe_pick = None
         for key, prof in PROFILES.items():
-            prev = [f["code"] for f in history[key][-1]["funds"]] if history[key] else None
-            res = pick(m, wk, prof, prev, safe=safe_pick if key != "guvenli" else None)
+            prev_entry = history[key][-1] if history[key] else None
+            prev = [f["code"] for f in prev_entry["funds"]] if prev_entry else None
+            if prof.get("sleeves"):
+                res = _sleeves(m, prof, safe_pick, prev_entry, i, dates, px, funds)
+            else:
+                res = pick(m, wk, prof, prev, safe=safe_pick if key != "guvenli" else None)
+                if prof.get("hold"):
+                    res = _hold(res, prev_entry, m, i, dates)
             if key == "guvenli":
                 safe_pick = res
             history[key].append({"i": i, "funds": res["funds"], "pool": res["pool"]})
             last[key] = (res, m)
 
-    def fund_out(f, now_flags):
+    def fund_out(f, now_flags, w_int):
         c = f["code"]
+        sc = f.get("score")
         return {
             "c": c, "n": funds.at[c, "name"] if c in funds.index else c, "k": f.get("category"),
-            "w": round(f["w"] * 100), "score": round(float(f["score"]), 1), "bank": bool(f.get("bank")),
+            "w": w_int, "score": None if sc is None or pd.isna(sc) else round(float(sc), 1), "bank": bool(f.get("bank")),
+            "sleeve": f.get("sleeve"),
             "cash": bool(f.get("cash")), "fd": f.get("founder"), "g": f.get("grade"),
             "gNow": scored.at[c, "grade"] if c in scored.index else None,
             "r": {k: _r(f.get(f"cagr_{k}")) for k in RET_WINDOWS},
@@ -674,7 +825,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
         cur = hist[-1]
         i0 = cur["i"]
         entry = dates[i0 + 1]
-        basket = [fund_out(f, flags) for f in cur["funds"]]
+        basket = [fund_out(f, flags, w) for f, w in zip(cur["funds"], _int_weights([f["w"] for f in cur["funds"]]))]
         port = {}
         for k in RET_WINDOWS:
             for field in ("r", "net"):
@@ -705,7 +856,7 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
             a = dates[h["i"] + 1]
             e = dates[hist[k + 1]["i"] + 1] if k + 1 < len(hist) else dates[-1]
             items.append({"date": dates[h["i"]].strftime("%Y-%m-%d"), "pool": h["pool"],
-                          "items": [[f["code"], round(f["w"] * 100)] for f in h["funds"]]})
+                          "items": [[f["code"], w] for f, w in zip(h["funds"], _int_weights([f["w"] for f in h["funds"]]))]})
             if e <= a:
                 continue
             if h["funds"]:
@@ -769,13 +920,38 @@ def run(panel: dict, funds: pd.DataFrame, scored: pd.DataFrame, bench: pd.DataFr
                 stats["ppfNet"] = _stats(ppf_net, pn_m, None)
                 costs = {"taxPaid": round(net["taxPaid"], 2), "switches": net["switches"], "locked": net["locked"],
                          "avgLag": round(net["avgLag"], 2)}
+            # Bağlam: dolar ve enflasyon bazında sonuç; aynı dönemde fonları alıp tutanlar arasındaki yeri
+            context = None
+            if "modelNet" in series:
+                net_tot = series["modelNet"][-1] / 100 - 1
+                dist = fund_dist(points[0], points[-1])
+                context = {"from": points[0].strftime("%Y-%m-%d"), "to": points[-1].strftime("%Y-%m-%d"), "net": round(net_tot * 100, 2)}
+                for b in ("usd", "tufe"):
+                    if series.get(b) and series[b][0] and series[b][-1]:
+                        context["usdBased" if b == "usd" else "real"] = round(((1 + net_tot) / (series[b][-1] / series[b][0]) - 1) * 100, 2)
+                if len(dist) >= 20:
+                    context.update({"fundPct": round(float((dist < net_tot * 100).mean() * 100), 1), "fundN": int(len(dist)),
+                                    "fundMedian": round(float(dist.median()), 1), "fundP90": round(float(dist.quantile(0.9)), 1),
+                                    "fundMax": round(float(dist.max()), 1)})
             backtest = {"available": True, "dates": [d.strftime("%Y-%m-%d") for d in points],
-                        "series": series, "stats": stats, "costs": costs,
+                        "series": series, "stats": stats, "costs": costs, "context": context,
                         "daily": {"dates": [d.strftime("%Y-%m-%d") for d in daily_d], "model": [round(float(x), 3) for x in daily_v]}}
 
         bm = m.attrs.get("bench", {}) if not m.empty else {}
+        if prof.get("sleeves"):
+            policy = {"type": "sleeves", "month": REBALANCE_MONTH,
+                      "sleeves": [{"key": k, "label": SLEEVE_LABELS.get(k, k), "w": round(v * 100)} for k, v in prof["sleeves"].items()],
+                      "pick": prof.get("sleeve_pick", {})}
+        elif prof.get("hold"):
+            policy = {"type": "hold", "month": REBALANCE_MONTH}
+        else:
+            policy = {"type": "monthly"}
+        if policy["type"] != "monthly":
+            lf = dates[forms[-1]]
+            y = lf.year if lf.month < REBALANCE_MONTH else lf.year + 1
+            policy["nextFull"] = (pd.Timestamp(year=y, month=REBALANCE_MONTH, day=1) + pd.offsets.BMonthEnd(0)).strftime("%Y-%m-%d")
         profiles_out[key] = {
-            "label": prof["label"],
+            "label": prof["label"], "policy": policy,
             "formed": dates[i0].strftime("%Y-%m-%d"),
             "entry": entry.strftime("%Y-%m-%d"),
             "basket": basket, "portfolio": port, "sinceEntry": since, "pool": cur["pool"],

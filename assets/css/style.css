@@ -866,3 +866,18 @@ table.bt-grades td { white-space: nowrap; }
 
 /* Model: getiri bağlamı kutusu */
 .context-box { margin-top: 10px; }
+
+/* Model Raporu: vergi sonrası özet satırı */
+.mr-net-note { margin: 8px 0 4px; font-size: .82rem; line-height: 1.45; color: var(--muted, #475569); }
+
+/* BES sıralama tablosu: 1500 px altında son sütunlar (volatilite, katılımcı, büyüklük) kesilmesin */
+@media (max-width: 1500px) and (min-width: 761px) {
+  table.ranking.bes-table .fund-cell { max-width: 200px; }
+  table.ranking.bes-table .fund-cell .name { max-width: 72px; }
+  table.ranking.bes-table td.left.dim:not(.fund-cell) { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.ranking.bes-table th, table.ranking.bes-table td { padding-left: 4px; padding-right: 4px; font-size: .84rem; }
+}
+@media (max-width: 1300px) and (min-width: 761px) {
+  /* dar dizüstü ekranlarda şirket sütunu gizlenir (şirket filtresi ve fon adı yeterli) */
+  table.ranking.bes-table th:nth-child(3), table.ranking.bes-table td:nth-child(3) { display: none; }
+}

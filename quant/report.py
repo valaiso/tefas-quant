@@ -65,6 +65,11 @@ def build(mdl: dict, bes_model: dict | None, bench: pd.DataFrame) -> dict:
         if bt.get("available"):
             e = _entry(key, p["label"], "fon", bt["dates"], bt["series"]["model"], bench)
             if e:
+                st, ctx = bt.get("stats") or {}, bt.get("context") or {}
+                if "modelNet" in st:  # vergi ve valör sonrası (Model Portföyler sekmesiyle aynı rakam)
+                    e["afterTax"] = {"from": bt["dates"][0], "to": bt["dates"][-1], "net": st["modelNet"].get("total"),
+                                     "gross": st["model"].get("total"), "ppfNet": (st.get("ppfNet") or {}).get("total"),
+                                     "usd": ctx.get("usdBased"), "real": ctx.get("real")}
                 models.append(e)
             if bt.get("daily"):
                 daily.append((key, bt["daily"]))

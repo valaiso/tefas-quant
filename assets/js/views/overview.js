@@ -32,7 +32,7 @@ export function render(app, _route, store) {
       </div>
     </div>
     <div class="hero-figures">
-      <div><span>Derecelendirilen fon</span><strong>${num(funds.length, 0)}</strong></div>
+      <div><span>${includeQualified() ? "Derecelendirilen fon (nitelikli dahil)" : "Halka açık fon"}</span><strong>${num(funds.length, 0)}</strong></div>
       <div><span>A+ · Güçlü Al</span><strong>${num(counts["GÜÇLÜ AL"], 0)}</strong></div>
       <div><span>Risksiz faiz (1Y, PPF medyan)</span><strong>%${num(meta.riskFree, 1)}</strong></div>
       <div><span>Kategori</span><strong>${num(new Set(funds.map((f) => f.k)).size, 0)}</strong></div>

@@ -139,7 +139,7 @@ function renderRanking(body, funds) {
   </section>
   <section class="card">
     <div class="card-head"><h2 id="bcount">—</h2><span class="sub">Kod TEFAS sayfasını açar · BEFAS: her şirketten alınabilir · ŞİRKET İÇİ: yalnızca kendi şirketinin sözleşmesiyle · DK / OKS / GRUP: serbestçe seçilemez</span></div>
-    <div class="table-wrap"><table class="ranking">
+    <div class="table-wrap"><table class="ranking bes-table">
       <thead><tr>${COLUMNS.map((c) => `<th class="sortable ${c.left ? "left" : ""}" data-key="${c.key}">${c.label}<span class="sort-ind"></span></th>`).join("")}</tr></thead>
       <tbody id="bbody"></tbody>
     </table></div>

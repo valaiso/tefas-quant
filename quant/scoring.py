@@ -39,7 +39,48 @@ def load_panel(conn: sqlite3.Connection, table: str = "prices") -> dict[str, pd.
         for col in ("price", "shares", "investors", "size")
     }
     panel["splits"] = adjust_splits(panel)
+    panel["distributions"] = adjust_distributions(panel, conn) if table == "prices" else []
     return panel
+
+
+# Kâr payı dağıtımı: TEFAS fiyatı dağıtım günü kâr payı kadar düşer, pay adedi değişmez. Düzeltilmezse dağıtım kayıp
+# sayılır (ör. her Temmuz %3-9 düşen kâr payı ödeyen hisse fonları; One Portföy FBC sık dağıtımda yılda -%20 görünüyordu).
+# TEFAS'ta dağıtım verisi olmadığı için olay fiyattan tahmin edilir: adında dağıtım ifadesi geçen fonda, pay adedi
+# değişmeden fiyat kategorisinden belirgin daha fazla düşmüşse fark kâr payı sayılır ve önceki fiyatlar ölçeklenir
+# (kâr payı fona yeniden yatırılmış gibi; toplam getiri). Büyük düşüşler (çöküş olabilir) düzeltilmez.
+DISTRIBUTION_WORDS = ("KAR PAYI", "KÂR PAYI", "TEMETTÜ ÖDEYEN", "DAĞITAN")
+DIST_MIN_DROP, DIST_MIN_EXCESS, DIST_MAX_DROP, DIST_SHARE_TOL = -0.015, -0.02, -0.20, 0.01
+DIST_MAX_PER_YEAR = 4   # yılda bundan sık görünen düşüşler kâr payı sayılmaz (gerçek kayıp olabilir)
+
+
+def adjust_distributions(panel: dict[str, pd.DataFrame], conn: sqlite3.Connection) -> list[dict]:
+    price, shares = panel["price"], panel["shares"]
+    funds = load_funds(conn)
+    names = funds["name"].fillna("").str.upper()
+    codes = [c for c in price.columns if any(w in names.get(c, "") for w in DISTRIBUTION_WORDS)]
+    if not codes:
+        return []
+    ret = price.pct_change(fill_method=None)
+    cat = funds["category"].reindex(price.columns)
+    med = ret.T.groupby(cat).median().T  # kategorinin günlük ortanca getirisi
+    events = []
+    for c in codes:
+        r = ret[c]
+        m = med[cat[c]].reindex(r.index).fillna(0.0) if cat.get(c) in med else pd.Series(0.0, index=r.index)
+        shr = shares[c] / shares[c].shift(1)
+        hit = (r <= DIST_MIN_DROP) & (r > DIST_MAX_DROP) & (r - m <= DIST_MIN_EXCESS) & ((shr - 1).abs() < DIST_SHARE_TOL)
+        days = list(r.index[hit.fillna(False)])
+        # Kâr payı yılda en fazla birkaç kez dağıtılır. Bir yıl içinde daha sık "dağıtım" görünüyorsa düşüşler büyük olasılıkla
+        # gerçek değer kaybıdır (ör. FBC Eylül-Ekim 2026'da birkaç günde bir -%2-3): bu fon hiç düzeltilmez.
+        if any(sum(1 for d2 in days if d <= d2 < d + pd.Timedelta(days=365)) > DIST_MAX_PER_YEAR for d in days):
+            continue
+        for day in days:
+            i = price.index.get_loc(day)
+            factor = float((1 + r[day]) / (1 + m[day]))  # dağıtım payı: fonun kategoriye göre fazladan düşüşü
+            before = price.index[:i]
+            price.loc[before, c] = price.loc[before, c] * factor
+            events.append({"code": c, "date": day.strftime("%Y-%m-%d"), "pct": round((1 - factor) * 100, 2)})
+    return events
 
 
 def adjust_splits(panel: dict[str, pd.DataFrame]) -> list[dict]:
@@ -588,6 +629,7 @@ def run(conn: sqlite3.Connection) -> dict:
     conn.commit()
     print(f"[skor] {as_of}: {len(scored)} fon skorlandı, {len(excluded)} dışlandı,"
           f" {metrics.attrs['private_skipped']} özel fon alınmadı, {len(panel['splits'])} pay bölünmesi düzeltildi,"
+          f" {len(panel.get('distributions', []))} kâr payı dağıtımı düzeltildi,"
           f" rf=%{rf*100:.1f}", flush=True)
     return {
         "as_of": as_of,

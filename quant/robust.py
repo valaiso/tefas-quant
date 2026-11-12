@@ -105,13 +105,16 @@ def attach(mdl: dict, panel, funds, scored, bench, baskets) -> dict:
     runs = run_configs(panel, funds, scored, bench, baskets, [("Bugünkü ayar", {}, "bugün"), *NEIGHBORS])
     for key, p in mdl["profiles"].items():
         rows = [(r["group"], r["label"], r["profiles"][key]["net"], r["profiles"][key]["gross"]) for r in runs if key in r["profiles"]]
-        nets = [x[2] for x in rows if x[2] is not None]
-        if not nets:
+        if not rows or rows[0][2] is None:
             continue
+        base = rows[0][2]
+        # Profili hiç etkilemeyen ayar (ör. Dengeli'nin sabit dilimlerinde korelasyon sınırı) aralığa ve sayıma girmez
+        effect = [bool(k == 0 or (n is not None and abs(n - base) > 0.005)) for k, (_, _, n, _) in enumerate(rows)]
+        nets = [x[2] for x, e in zip(rows, effect) if e and x[2] is not None]
         p["robust"] = {
             "n": len(nets), "min": round(min(nets), 1), "median": round(float(np.median(nets)), 1), "max": round(max(nets), 1),
-            "base": rows[0][2],
-            "rows": [{"group": g, "label": lab, "net": n, "gross": gr} for g, lab, n, gr in rows],
+            "base": base, "noEffect": sum(1 for e in effect if not e),
+            "rows": [{"group": g, "label": lab, "net": n, "gross": gr, "effect": e} for (g, lab, n, gr), e in zip(rows, effect)],
             "walkForward": walk_forward(runs, key),
         }
     return mdl

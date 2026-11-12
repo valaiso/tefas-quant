@@ -111,6 +111,10 @@ export async function render(app, route, store, opts = {}) {
   ${f.kap && f.kap.n > 0 && !f.cap?.concentration ? `<div class="notice">▦ <b>Portföy (KAP ${esc(f.kap.per || "")} raporu, ${esc((f.kap.date || "").slice(0, 10))}):</b>
     ${num(f.kap.n, 0)} hisse, hisselerin portföydeki payı %${num(f.kap.eq, 1)} · en büyük hisse ${esc(f.kap.name || "—")} %${num(f.kap.max, 1)} ·
     ilk 3 hisse %${num(f.kap.top3, 1)}, ilk 5 hisse %${num(f.kap.top5, 1)}.</div>` : ""}
+  ${f.kp ? `<div class="notice">💰 <b>Kâr payı dağıtan fon:</b> son 5 yılda ${num(f.kp.n, 0)} dağıtım tespit edildi
+    (sonuncusu ${dateTR(f.kp.last)}, yaklaşık %${num(f.kp.lastPct, 1)}${f.kp.y1 ? `; son 1 yılda toplam ~%${num(f.kp.y1, 1)}` : ""}).
+    Getiriler, grafik ve skor dağıtılan kâr payı fona yeniden yatırılmış varsayımıyla (toplam getiri) hesaplanır.
+    <span class="dim">TEFAS dağıtım verisi vermediği için dağıtım günleri fiyattan tahmin edilir: pay adedi değişmeden fiyat kategorisinden belirgin fazla düştüğü gün.</span></div>` : ""}
   ${f.cap?.young ? `<div class="notice warn">⚠ <b>Önerilmez · kısa geçmiş:</b> fonun ${num(f.hd, 0)} işlem günlük geçmişi var (1 yıldan az).
     Kısa geçmişteki yüksek getiri tek bir sıçramadan gelebilir; bu yüzden notu en fazla İZLE (B) olur.</div>` : ""}
 
@@ -153,9 +157,10 @@ export async function render(app, route, store, opts = {}) {
       <div class="card-head"><h2>Risk</h2><span class="sub">Son 1 yıl</span></div>
       <table class="kv">
         <tr><td>Volatilite (yıllık)</td><td>%${num(f.m.vol, 1)}</td></tr>
-        <tr><td>Maksimum düşüş</td><td class="down">−%${num(f.m.mdd, 1)}</td></tr>
-        <tr><td>Sharpe</td><td>${num(f.m.sharpe)}</td></tr>
-        <tr><td>Sortino</td><td>${num(f.m.sortino)}</td></tr>
+        <tr><td>Maksimum düşüş</td><td class="${Math.abs(f.m.mdd || 0) >= 0.05 ? "down" : ""}">${Math.abs(f.m.mdd || 0) >= 0.05 ? `−%${num(f.m.mdd, 1)}` : "%0,0"}</td></tr>
+        ${(f.m.vol ?? 99) < 2 ? `<tr><td>Sharpe / Sortino</td><td class="dim" title="Oynaklık %2'nin altında: fark ve dalgalanma çok küçük olduğu için oranlar uç değerler üretir, yorumlanmaz">düşük oynaklık, anlamlı değil</td></tr>`
+          : `<tr><td>Sharpe</td><td>${num(f.m.sharpe)}</td></tr>
+        <tr><td>Sortino</td><td>${num(f.m.sortino)}</td></tr>`}
         <tr><td>Calmar</td><td>${num(f.m.calmar)}</td></tr>
         <tr><td title="Günlük getirilerin otokorelasyonu; yüksekse fiyat olağan dışı pürüzsüz">Pürüzsüzlük (otokorelasyon)</td><td>${num(f.m.ac1)}</td></tr>
         <tr><td>Beta (kategoriye göre, ${store.meta.config.historyYears}Y)</td><td>${num(f.m.beta)}</td></tr>

@@ -89,11 +89,12 @@ function contextBox(p) {
 function robustBox(p) {
   const r = p.robust, wf = r.walkForward;
   const rows = r.rows.map((x, i) => `<tr class="${i === 0 ? "is-self" : ""}"><td class="left">${esc(x.group)}</td><td class="left">${esc(x.label)}</td>
-    <td>${pct(x.net, 1)}</td><td class="dim">${pct(x.gross, 1)}</td></tr>`).join("");
+    ${x.effect === false ? `<td class="dim" colspan="2">bu profili etkilemiyor</td>` : `<td>${pct(x.net, 1)}</td><td class="dim">${pct(x.gross, 1)}</td>`}</tr>`).join("");
   return `<div class="notice robust-box">
     <b>Bu sonuç ne kadar sağlam?</b> Model elle seçilmiş sayılarla (korelasyon sınırı, en düşük puan, risk sınırları…) çalışır ve bu sayılar aynı
     geçmiş veriye bakılarak seçildi. Her ayar bir adım aşağı ve yukarı oynatılarak test tekrarlandı: vergi ve valör sonrası 3 yıllık sonuç
-    <b>${r.n} ayarla ${pct(r.min, 0)} – ${pct(r.max, 0)}</b> arasında (ortanca ${pct(r.median, 0)}; bugünkü ayar ${pct(r.base, 0)}).
+    <b>${r.n} ayarla ${pct(r.min, 0)} – ${pct(r.max, 0)}</b> arasında (ortanca ${pct(r.median, 0)}; bugünkü ayar ${pct(r.base, 0)})${r.noEffect ? `;
+    bu profili etkilemeyen ${r.noEffect} ayar sayılmadı` : ""}.
     ${wf ? `<br><b>İleriye doğru test</b> (${dateTR(wf.from)} – ${dateTR(wf.to)}, ${wf.months} ay): her ay yalnızca o güne kadarki son 12 ayda en iyi sonucu veren
       ayar seçildi ve bir sonraki ay onunla geçirildi: ${pct(wf.total, 1)}; aynı dönemde bugünkü ayar ${pct(wf.base, 1)}. İkisi yakınsa ayarlar geçmişe
       aşırı uydurulmamış demektir.` : ""}
@@ -130,12 +131,14 @@ export async function render(app, _route, store) {
 
   app.innerHTML = `
   <section class="method-intro card">
-    <h2>Model Portföyler <span class="model-tag">aylık dönem</span></h2>
-    <p>Üç risk profilinde, son <b>1-2-3 yılda vergi sonrası istikrarlı</b> getiri vermiş, TEFAS Quant notu ve risk bayrakları temiz,
-      getirisi tek bir sıçramaya dayanmayan ${R.minFunds}–${R.maxFunds} fonluk (Güvenli 2 fon) ağırlıklı sepetler.
-      Köklü kurucuların (devlet bankaları ve büyük özel bankaların portföy şirketleri) fonlarına öncelik verilir.</p>
-    <p><b>Model portföyler ayda bir güncellenir:</b> fon seçimi ve oranlar her ayın son işlem gününde yeniden kurulur, ay boyunca sepet aynı kalır;
-      iyi kalan fonlar yeni ayda da sepette kalabilir, yalnızca ağırlıkları değişebilir · sonraki güncelleme <b>${dateTR(m.nextRebalance)}</b>.</p>
+    <h2>Model Portföyler <span class="model-tag">üç profil</span></h2>
+    <p>Üç risk profili: <b>Güvenli</b> para piyasası fonlarından 2 fon; <b>Dengeli</b> sabit dilimler (%60 para piyasası, %20 altın, %20 yabancı hisse);
+      <b>Atak</b> oynak fonlardan en az 3 fon. Fonlar TEFAS Quant notu ve risk bayrakları temiz, getirisi tek bir sıçramaya dayanmayan fonlar arasından seçilir;
+      köklü kurucuların (devlet bankaları ve büyük özel bankaların portföy şirketleri) fonlarına öncelik verilir.</p>
+    <p><b>Güncelleme:</b> Güvenli her ayın son işlem gününde yeniden kurulur. Dengeli yılda bir (Aralık sonu) dengelenir; arada yalnızca uygunluğunu kaybeden fon değişir.
+      Atak her ay kontrol edilir; seçilen fon uygun kaldıkça tutulur, sepet yılda bir (Aralık sonu) tam yenilenir.
+      Sonraki aylık kontrol <b>${dateTR(m.nextRebalance)}</b>${m.profiles.dengeli?.policy?.nextFull ? `, sonraki yıllık yenileme <b>${dateTR(m.profiles.dengeli.policy.nextFull)}</b>` : ""}.
+      <span class="dim">Geçmiş test sonuçları vergi (stopaj) ve valör sonrasıdır; vergi öncesi değer yanında yazar.</span></p>
     <p class="dim">Son kurulum: ${dateTR(m.profiles[state.profile].formed)} · Veri: ${dateTR(m.asOf)}</p>
   </section>
 
@@ -158,8 +161,9 @@ export async function render(app, _route, store) {
         sık değişim bu avantajı kaybettirir.</span></li>
       <li><b>Çeşitlendirme:</b> aynı portföy şirketinden tek fon; kategori başına sınır; seçilmiş bir fonla haftalık getiri korelasyonu &gt; ${num(R.maxCorr, 2)}
         olan fon alınmaz (Atak'ta ${num(m.profiles.atak?.rules?.maxCorr ?? R.maxCorr, 2)}; Güvenli hariç: düşük oynaklıklı fonlar faizle birlikte hareket eder).</li>
-      <li><b>Yönetici riski:</b> Güvenli sepetin en az %60'ı, Dengeli ve Atak'ın kendi fonlarının en az %50'si köklü kurucularda; diğer kurucuların tek fonu
-        Atak'ta en fazla %20, Dengeli'de %15. Güvenli 2 fonla kurulur: köklü pay (%60) tek köklü fonda, kalan %40 tek diğer fonda.
+      <li><b>Yönetici riski:</b> Güvenli 2 fonla kurulur: %60 tek köklü fonda, kalan %40 tek diğer fonda. Atak'ın fonlarının en az %50'si köklü kurucularda,
+        diğer kurucunun tek fonu en fazla %20. Dengeli'nin altın ve yabancı hisse dilimleri yalnızca köklü kurucuların fonlarından seçilir;
+        para piyasası dilimi Güvenli sepetinin fonlarıdır.
         <span class="dim">Para piyasası fonları birbirine çok benzer getirir; 5 fona yaymak getiriyi sulandırır, riski azaltmaz.</span> <span class="dim">Neden: Ekim 2026'da Pardus Portföy'ün para piyasası fonu dahil fonları
         tek seferde ~%99 değer kaybetti; kuruluş günü fon temiz görünüyordu.</span></li>
       ${R.excludedFounders?.length ? `<li><b>Hariç tutulan kurucular:</b> ${R.excludedFounders.map((x) => `<b>${esc(x.name)}</b> (${x.funds} fon): ${esc(x.why)}`).join("; ")}.
@@ -329,11 +333,11 @@ export async function render(app, _route, store) {
           box("Dolar bazında", rel(tN, tU), "vergi ve valör sonrası getiri, dolar/TL'ye göre"),
           box("Enflasyondan arındırılmış", rel(tN, tT), "vergi ve valör sonrası getiri, TÜFE'ye göre"),
         ].join("");
-        const ppfW = W.ppf || null, ppfNetW = W.ppfNet || ppfW;
+        const ppfW = W.ppf || null;
         app.querySelector("#mdlStats").innerHTML = `
           <thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th>
             <th>En kötü / en iyi ay</th><th>Pozitif ay</th><th>PPF'yi geçen ay</th></tr></thead>
-          <tbody>${keys.map((k, i) => statRow(seriesName(k, p), windowStats(d, W[k], k === "ppf" || k === "ppfNet" ? null : k === "modelNet" ? ppfNetW : ppfW), i === 0 ? "is-self" : "")).join("")}</tbody>`;
+          <tbody>${keys.map((k, i) => statRow(seriesName(k, p), windowStats(d, W[k], k === "ppf" || k === "ppfNet" || k === "modelNet" ? null : ppfW), i === 0 ? "is-self" : "")).join("")}</tbody>`;
       };
       app.querySelector("#mdlPeriod").addEventListener("click", (e) => {
         const b = e.target.closest("button");

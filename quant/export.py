@@ -181,6 +181,14 @@ def build(result: dict, out_dir: Path = ROOT / "dist") -> dict:
     data_dir = out_dir / "data"
 
     funds = [_fund_record(code, f) for code, f in scored.iterrows()]
+    dist = {}
+    for ev in result["panel"].get("distributions", []):
+        dist.setdefault(ev["code"], []).append(ev)
+    for rec in funds:  # kâr payı dağıtımı (fiyattan tahmin; getiriler yeniden yatırım varsayımıyla)
+        evs = dist.get(rec["c"])
+        if evs:
+            rec["kp"] = {"n": len(evs), "last": evs[-1]["date"], "lastPct": evs[-1]["pct"],
+                         "y1": round(sum(e["pct"] for e in evs if e["date"] >= (price.index[-1] - pd.Timedelta(days=365)).strftime("%Y-%m-%d")), 2)}
     _write(data_dir / "funds.json", funds)
 
     # Fon başına haftalık kapanış serisi (detay ve karşılaştırma grafiği)

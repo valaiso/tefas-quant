@@ -95,7 +95,7 @@ function chart(dates, lines, H = 168, W = 764, xLabel = null) {
   for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) ticks.push(v);
   const xStep = Math.max(1, Math.round((n - 1) / 6));
   const xt = dates.map((d, i) => [d, i]).filter(([d], i) => i === 0 || i === n - 1
-    || (xLabel ? i % xStep === 0 : (d.slice(5, 7) === "01" || d.slice(5, 7) === "07")) && x(i) - x(0) > 36 && x(n - 1) - x(i) > 36);
+    || (xLabel ? i % xStep === 0 : (d.slice(5, 7) === "01" || d.slice(5, 7) === "07")) && x(i) - x(0) > 60 && x(n - 1) - x(i) > 60);  // kenar etiketi tam genişlik + iç etiketin yarısı
   // Seri sonu etiketleri çakışmasın: değere göre sırala, en az 10 px aralık
   const ends = lines.map((l) => ({ l, v: l.v[n - 1] })).filter((e) => e.v != null).sort((a, b) => b.v - a.v);
   let lastY = -Infinity;
@@ -185,12 +185,12 @@ function summaryPage(models, asOf, total) {
 
   return `<article class="rp-page">
     ${cover("AYLIK RAPOR", "Model Performans Raporu",
-      `Güvenli · Dengeli · Atak fon modelleri ve BES Koruyucu · Dengeli · Büyüme · ${monthLong(lastMonth)} sonu itibarıyla son 12 ay`)}
+      `Güvenli · Dengeli · Atak fon modelleri ve BES Koruyucu · Dengeli · Büyüme · ${monthLong(lastMonth)} sonu itibarıyla son 12 ay · getiriler vergi öncesi`)}
     <div class="rp-kpis mr-kpis6">${rows.map((r) => `<div class="${tone(r.m1)}"><span>${esc(r.name)} · ${MONTHS_LONG[+lastMonth.slice(5, 7) - 1]}</span>
       <b>${pctS(r.m1)}</b><em>Son 12 ayda ${pctS(r.m12)}</em></div>`).join("")}</div>
 
     <section class="rp-block">
-      <h3><span class="rp-dot brand"></span>Dönemsel getiriler (tamamlanmış aylar)</h3>
+      <h3><span class="rp-dot brand"></span>Dönemsel getiriler (tamamlanmış aylar, vergi öncesi)</h3>
       <table class="rp-table mr-sum">
         <thead><tr><th>Model / kıyas</th><th class="r">${MONTHS_LONG[+lastMonth.slice(5, 7) - 1]}</th><th class="r">3 ay</th><th class="r">6 ay</th><th class="r">12 ay</th>
           <th class="r">${yr} yılbaşından</th></tr></thead>
@@ -229,7 +229,7 @@ function summaryPage(models, asOf, total) {
       </table>
     </section>
 
-    ${footer("Model getirileri fon fiyatlarından (yönetim ücreti düşülmüş), vergi öncesi hesaplanır; fon modelleri aylık, BES modelleri 2 ayda bir yenilenir. S&P 500 temettüsüz fiyat endeksidir, dolar/TL ile TL'ye çevrilir.", asOf, 1, total)}
+    ${footer("Model getirileri fon fiyatlarından (yönetim ücreti düşülmüş), vergi öncesi hesaplanır; Güvenli her ay, Dengeli yılda bir, Atak her ay kontrol ve yılda bir tam yenileme; BES modelleri 2 ayda bir yenilenir. Vergi ve valör sonrası sonuçlar model sayfalarında ve Model Portföyler sekmesindedir. S&P 500 temettüsüz fiyat endeksidir, dolar/TL ile TL'ye çevrilir.", asOf, 1, total)}
   </article>`;
 }
 
@@ -246,8 +246,8 @@ function modelPage(m, asOf, pageNo, total) {
   const isBes = m.kind === "bes";
   const desc = {
     guvenli: "Para piyasası ve kısa vadeli borçlanma ağırlıklı; hedef PPF'ye yakın, düşük oynaklık.",
-    dengeli: "Karma ve değişken fonlarla PPF üstü getiri hedefi; orta oynaklık, trend kapısı açık.",
-    atak: "Hisse ve tematik fon ağırlıklı; yüksek oynaklık, uzun vadede TÜFE ve PPF üstü hedef.",
+    dengeli: "Sabit dilimler: %60 para piyasası, %20 altın, %20 yabancı hisse; yılda bir dengelenir, orta oynaklık.",
+    atak: "Hisse, altın ve tematik fonlar; seçilen fon uygun kaldıkça tutulur, yılda bir tam yenilenir; yüksek oynaklık.",
     bes: "BEFAS'a açık tüm şirketlerden en çok 6 fon; uzun vade (3–10 yıl), vergi avantajı yüksek varlıklara öncelik.",
     bes_koruyucu: "Düşük oynaklıklı borçlanma, katılım, standart ve karma BES fonları; sermayeyi korumak için.",
     bes_dengeli: "Çok varlıklı, altın, hisse ve teknoloji BES fonlarının dengeli karışımı; faiz fonları alınmaz.",
@@ -284,6 +284,9 @@ function modelPage(m, asOf, pageNo, total) {
       ${longRet(24)}
       ${longRet(36)}
     </div>
+    ${m.afterTax ? `<p class="mr-net-note">Vergi öncesi rakamlardır. Gerçek bir yatırımcı gibi (her satışta stopaj, valör) hesaplanınca test boyunca
+      (${dateTR(m.afterTax.from)} – ${dateTR(m.afterTax.to)}) <b>${pctS(m.afterTax.net)}</b> (vergi öncesi ${pctS(m.afterTax.gross)});
+      aynı dönemde PPF'yi alıp tutmak vergi sonrası ${pctS(m.afterTax.ppfNet)}${m.afterTax.usd != null ? `; dolar bazında ${pctS(m.afterTax.usd)}, enflasyondan arındırılmış ${pctS(m.afterTax.real)}` : ""}.</p>` : ""}
 
     <div class="rp-two mr-two">
       <section class="rp-block">
@@ -320,7 +323,7 @@ function modelPage(m, asOf, pageNo, total) {
 
     ${footer(isBes
       ? `${esc(m.label)}: 2 ayda bir yeniden kurulan BEFAS sepeti, ara aylarda aynı sepet tutulur; fon değişikliği vergisizdir, devlet katkısı dahil değildir.`
-      : `${esc(m.label)} model: her ay yeniden kurulan sepet (T+1 alış), vergi öncesi. Normal hesapta fon değişikliğinde kazançtan stopaj kesilir.`, asOf, pageNo, total)}
+      : `${esc(m.label)} model: ${{ guvenli: "her ay yeniden kurulan sepet", dengeli: "yılda bir (Aralık sonu) dengelenen sabit dilimler", atak: "her ay kontrol edilen, yılda bir tam yenilenen sepet" }[m.key] || "her ay yeniden kurulan sepet"} (T+1 alış), vergi öncesi. Normal hesapta fon satışında kazançtan stopaj kesilir.`, asOf, pageNo, total)}
   </article>`;
 }
 

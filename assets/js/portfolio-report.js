@@ -127,7 +127,13 @@ export function buildMonthlyReport({ month, history = {}, flows = [], dividends 
     for (const [name, period] of Object.entries(periods)) row[name] = period ? benchmarkReturn(key, period.startDate, period.endDate) : null;
     return row;
   }).filter((row) => az.bench?.[row.key]);
-  const inflation = comparison.find((row) => row.key === "TUFE") || {};
+  const tufeRow = comparison.find((row) => row.key === "TUFE");
+  if (tufeRow) {
+    for (const name of Object.keys(periods)) {
+      if (tufeRow[name] != null && Math.abs(tufeRow[name]) < 1e-9) { tufeRow[name] = null; tufeRow.pending = true; }
+    }
+  }
+  const inflation = tufeRow || {};
   const portfolioRow = { key: "PORTFOY", label: "Portföyüm", month: periods.month?.twr ?? null, ytd: periods.ytd?.twr ?? null, inception: periods.inception?.twr ?? null };
   const comparisonRows = [portfolioRow, ...comparison].map((row) => ({
     ...row,
@@ -179,11 +185,14 @@ export function buildMonthlyReport({ month, history = {}, flows = [], dividends 
     largestCode: largest?.code || null, largestWeight: largest?.weight ?? null,
     top3Weight: weights.slice(0, 3).reduce((s, v) => s + v, 0), positionCount: positions.length,
   };
-  const stopajTotal = positions.filter((row) => row.group === "Fon" && !FROZEN_FUND_CODES.has(row.code) && row.totalPLTRY > 0)
-    .reduce((s, row) => s + row.totalPLTRY * fundStopajRate(az.meta.get(row.code)), 0);
+  // Tahmini stopaj: Analiz Panel ile aynı yöntem; alıştan bu yana kâr (purchasePLTRY) üzerinden. Pozisyon tablosundaki
+  // "Toplam K/Z" takip başlangıcından ölçülür, stopaj ise alış maliyetinden kesilir.
+  const fundProfit = (row) => (Number.isFinite(row.purchasePLTRY) ? row.purchasePLTRY : row.totalPLTRY);
+  const stopajTotal = positions.filter((row) => row.group === "Fon" && !FROZEN_FUND_CODES.has(row.code) && fundProfit(row) > 0)
+    .reduce((s, row) => s + fundProfit(row) * fundStopajRate(az.meta.get(row.code)), 0);
 
   return {
-    month, label: monthLabel(month), complete, fromDate, toDate, firstDate,
+    month, label: monthLabel(month), complete, fromDate, toDate, firstDate, inflationPending: Boolean(tufeRow?.pending),
     periods, comparisonRows, inflation, chart: { dates: chartDates, series: chartSeries },
     positions, cash, endTotal, allocation, winners, losers, risk, stopajTotal,
     frozenCodes: positions.filter((row) => row.frozen).map((row) => row.code),

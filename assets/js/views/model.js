@@ -12,7 +12,11 @@ const LABELS = {
 };
 // Grafikte ve tabloda sıra; vergi öncesi PPF, altın ve dolar başta gizli (açıklamadan açılır)
 const SERIES_ORDER = ["modelNet", "model", "ppfNet", "ppf", "peer", "equity", "gold", "tufe", "usd"];
-const HIDDEN_AT_START = ["ppf", "gold", "usd"];
+// Profiller karşılaştırılabilsin diye başta yalnızca üç profilin vergi sonrası çizgisi, vergi sonrası PPF ve TÜFE açık;
+// diğerleri açıklamadan açılır.
+const HIDDEN_AT_START = ["model", "ppf", "peer", "equity", "gold", "usd"];
+const PROFILE_COLORS = { guvenli: "#0b7a45", dengeli: "#1f5fbf", atak: "#db2777" };
+const OTHER_PREFIX = "other:";
 const DASHED = new Set(["model", "ppf"]);
 const seriesName = (k, p) => k === "modelNet" ? `${p.label} model (vergi ve valör sonrası)` : k === "model" ? `${p.label} model (vergi öncesi)` : LABELS[k] || k;
 const SLICE = ["#0f766e", "#2563eb", "#ca8a04", "#7c3aed", "#db2777", "#0891b2", "#65a30d", "#ea580c", "#475569", "#9333ea"];
@@ -186,6 +190,11 @@ export async function render(app, _route, store) {
     const p = m.profiles[key];
     const basket = p.basket;
     const bt = p.backtest;
+    // Geçmiş testin uzunluğu (ay); daha uzun dönem düğmeleri pasif, seçili dönem buna sığmıyorsa en uzun uygun döneme iner
+    const testMonths = bt.available ? (Date.parse(bt.dates[bt.dates.length - 1]) - Date.parse(bt.dates[0])) / (30.44 * 86400000) : 0;
+    if (bt.available && PERIODS.find(([k]) => k === state.period)[2] > testMonths + 1) {
+      state.period = [...PERIODS].reverse().find(([, , mo]) => mo <= testMonths + 1)?.[0] || PERIODS[0][0];
+    }
     const months = p.history.map((h) => h.date);
     if (!state.month[key] || !months.includes(state.month[key])) state.month[key] = months[months.length - 1];
 
@@ -248,7 +257,10 @@ export async function render(app, _route, store) {
 
     ${bt.available ? `<section class="card">
       <div class="card-head"><h2>${esc(p.label)} model geçmişte nasıl sonuç verdi?</h2>
-        <div class="seg" id="mdlPeriod">${PERIODS.map(([k, l]) => `<button data-p="${k}" aria-pressed="${k === state.period}">${l}</button>`).join("")}</div>
+        <div class="seg" id="mdlPeriod">${PERIODS.map(([k, l, mo]) => {
+          const off = mo > testMonths + 1;
+          return `<button data-p="${k}" aria-pressed="${k === state.period}" ${off ? `disabled title="Geçmiş test ${num(testMonths / 12, 1)} yıl; bu dönem için veri yok"` : ""}>${l}</button>`;
+        }).join("")}</div>
       </div>
       <div class="chart" id="mdlChart"></div>
       <p class="chart-note dim" id="mdlRange"></p>
@@ -308,16 +320,26 @@ export async function render(app, _route, store) {
     </section>`;
 
     if (bt.available) {
-      const keys = SERIES_ORDER.filter((k) => bt.series[k]).concat(Object.keys(bt.series).filter((k) => !SERIES_ORDER.includes(k)));
+      // Diğer iki profilin vergi ve valör sonrası çizgisi (aynı test tarihleri); karşılaştırma için
+      const others = ORDER.filter((k) => k !== key && m.profiles[k]?.backtest?.available && m.profiles[k].backtest.series.modelNet);
+      const otherSeries = Object.fromEntries(others.map((k) => {
+        const ob = m.profiles[k].backtest, at = new Map(ob.dates.map((x, i) => [x, ob.series.modelNet[i]]));
+        return [`${OTHER_PREFIX}${k}`, bt.dates.map((x) => at.get(x) ?? null)];
+      }));
+      const nameOf2 = (k) => (k.startsWith(OTHER_PREFIX) ? `${m.profiles[k.slice(OTHER_PREFIX.length)].label} model (vergi ve valör sonrası)` : seriesName(k, p));
+      const colorOf = (k) => (k.startsWith(OTHER_PREFIX) ? PROFILE_COLORS[k.slice(OTHER_PREFIX.length)] : k === "modelNet" ? PROFILE_COLORS[key] || COLORS[k] : COLORS[k]);
+      const base = SERIES_ORDER.filter((k) => bt.series[k]).concat(Object.keys(bt.series).filter((k) => !SERIES_ORDER.includes(k)));
+      const keys = [base[0], ...Object.keys(otherSeries), ...base.slice(1)];
+      const seriesOf = (k) => otherSeries[k] || bt.series[k];
       const periodMonths = () => PERIODS.find(([k]) => k === state.period)[2];
       const chartEl = app.querySelector("#mdlChart");
-      chartEl._hidden = new Set(HIDDEN_AT_START.filter((k) => bt.series[k]).map((k) => seriesName(k, p)));
+      chartEl._hidden = new Set(HIDDEN_AT_START.filter((k) => bt.series[k]).map((k) => nameOf2(k)));
       const total = (v) => (v.length > 1 && v[0] && v[v.length - 1] != null ? v[v.length - 1] / v[0] - 1 : null);
       const draw = () => {
         const i0 = startIndex(bt.dates, periodMonths());
         const d = bt.dates.slice(i0);
-        const W = Object.fromEntries(keys.map((k) => [k, windowed(bt.series[k], i0)]));
-        lineChart(chartEl, keys.map((k) => ({ name: seriesName(k, p), d, v: W[k], color: COLORS[k], dashed: DASHED.has(k) })),
+        const W = Object.fromEntries(keys.map((k) => [k, windowed(seriesOf(k), i0)]));
+        lineChart(chartEl, keys.map((k) => ({ name: nameOf2(k), d, v: W[k], color: colorOf(k), dashed: DASHED.has(k) })),
           { base: 100, height: 300, format: (v) => num(v, 0) });
         app.querySelector("#mdlRange").textContent = `${dateTR(d[0])} – ${dateTR(d[d.length - 1])} · dönem başı = 100 · aylık noktalar · açıklamadaki adlara basarak çizgileri aç / kapat`;
         // Getiri ayrımı (stopaj öncesi): fon seçimi = model / aynı kategorilerin ortancası, varlık dağılımı = ortanca / PPF
@@ -337,7 +359,7 @@ export async function render(app, _route, store) {
         app.querySelector("#mdlStats").innerHTML = `
           <thead><tr><th class="left">Sepet / varlık</th><th>Toplam</th><th>Yıllık</th><th>Maks. düşüş</th><th>Oynaklık</th>
             <th>En kötü / en iyi ay</th><th>Pozitif ay</th><th>PPF'yi geçen ay</th></tr></thead>
-          <tbody>${keys.map((k, i) => statRow(seriesName(k, p), windowStats(d, W[k], k === "ppf" || k === "ppfNet" || k === "modelNet" ? null : ppfW), i === 0 ? "is-self" : "")).join("")}</tbody>`;
+          <tbody>${keys.map((k, i) => statRow(nameOf2(k), windowStats(d, W[k], k === "ppf" || k === "ppfNet" || k === "modelNet" || k.startsWith(OTHER_PREFIX) ? null : ppfW), i === 0 ? "is-self" : "")).join("")}</tbody>`;
       };
       app.querySelector("#mdlPeriod").addEventListener("click", (e) => {
         const b = e.target.closest("button");

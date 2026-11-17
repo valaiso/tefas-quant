@@ -414,6 +414,7 @@ function reportPages(rep, ds, store, pos, snap) {
 
   const page1 = `<article class="rp-page">
     ${cover(`${rep.label} Portföy Raporu`, period)}
+    ${rep.snapWarn ? `<p class="pa-warn">⚠ ${esc(rep.snapWarn)}</p>` : ""}
     <div class="rp-kpis">
       ${pa.kpi("Ay sonu değeri", tl(m?.endValue ?? rep.endTotal), change != null ? `${tlS(change)} değişim` : "ay başı kaydı bekleniyor")}
       ${pa.kpi("Aylık getiri", pctP(m?.twr), "para hareketlerinden arındırılmış", R.tone(m?.twr))}
@@ -461,6 +462,7 @@ function reportPages(rep, ds, store, pos, snap) {
   const risk = rep.risk;
   const page2 = `<article class="rp-page">
     ${cover("Pozisyonlar, Dağılım ve Risk", period)}
+    ${rep.snapWarn ? `<p class="pa-warn">⚠ ${esc(rep.snapWarn)}</p>` : ""}
     <div class="rp-kpis">
       ${pa.kpi("En büyük pozisyon", esc(risk.largestCode || "—"), risk.largestWeight != null ? `portföydeki payı %${num(risk.largestWeight, 1)}` : "")}
       ${pa.kpi("İlk 3 varlık", `%${num(risk.top3Weight, 1)}`, `${risk.positionCount} varlık içinde`)}
@@ -573,6 +575,14 @@ async function renderReport(app, store, route) {
   const ds = await dailySet(st8, cc.cut);
   const rep = PR.buildMonthlyReport({ month, history, flows, dividends, snapshots, az: pos.az });
   rep.cutNote = cutNote(cc);
+  // Pozisyon fotoğrafı kendi tarihindeki kayıtlı değerden belirgin farklıysa (Midas'ın eski taramasıyla kaydedilmiş,
+  // değer kaydı sonradan düzeltilmiş) pozisyon ağırlıkları ve stopaj güncel değildir: uyarılır.
+  const sm = (ps.state.monthlySnapshots || {})[month];
+  const hv = sm?.date ? (ps.state.valueHistory || {})[sm.date] : null;
+  if (sm?.total > 0 && hv > 0 && Math.abs(sm.total / hv - 1) > 0.02) {
+    rep.snapWarn = `Pozisyon fotoğrafı ${dateTR(sm.date)} tarihli ve toplamı (${tl(sm.total)}) o günün kayıtlı değerinden (${tl(hv)}) %${num(Math.abs(sm.total / hv - 1) * 100, 1)} farklı:
+      fotoğraf Midas'ın eski taramasıyla kaydedilmiş. Pozisyon ağırlıkları ve tahmini stopaj güncel değil; Analiz'de Midas'tan yeniden okuyup Panel'i açınca düzelir.`;
+  }
 
   app.innerHTML = `
   <div class="rp-toolbar no-print">
